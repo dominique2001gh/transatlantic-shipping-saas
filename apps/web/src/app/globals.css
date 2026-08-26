@@ -1,0 +1,40 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* Platform default brand palette. A tenant's Tenant.primaryColor /
+     secondaryColor will eventually override --color-primary-600 /
+     --color-accent-500 per-tenant (see apps/web/src/lib/theme.ts). */
+  --color-primary-50: #f0f5fa;
+  --color-primary-100: #dbe6f3;
+  --color-primary-200: #b7cce7;
+  --color-primary-300: #8aacd6;
+  --color-primary-400: #5c8cc4;
+  --color-primary-500: #3a6fac;
+  --color-primary-600: #2b5890;
+  --color-primary-700: #234674;
+  --color-primary-800: #1f3a5f;
+  --color-primary-900: #1b2f4d;
+  --color-primary-950: #0f1c30;
+
+  --color-accent-400: #2dd4bf;
+  --color-accent-500: #14b8a6;
+  --color-accent-600: #0d9488;
+
+  --font-sans:
+    'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  @apply bg-white text-slate-900 antialiased;
+}
+
+* {
+  @apply border-slate-200;
+}

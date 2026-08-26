@@ -1,0 +1,36 @@
+{
+  "name": "transatlantic-shipping-saas",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Multi-tenant SaaS platform for international freight forwarding companies",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "packageManager": "pnpm@9.15.0",
+  "scripts": {
+    "postinstall": "pnpm build:shared",
+    "dev": "pnpm --parallel --filter=./apps/* dev",
+    "dev:web": "pnpm --filter=./apps/web dev",
+    "dev:api": "pnpm --filter=./apps/api dev",
+    "build": "pnpm --filter=./packages/* build && pnpm --filter=./apps/* build",
+    "build:shared": "pnpm --filter=./packages/shared build",
+    "build:web": "pnpm --filter=./apps/web build",
+    "build:api": "pnpm --filter=./apps/api build",
+    "lint": "pnpm --filter=./apps/* --filter=./packages/* lint",
+    "typecheck": "pnpm --filter=./apps/* --filter=./packages/* typecheck",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "prisma:generate": "pnpm --filter=./apps/api prisma:generate",
+    "prisma:migrate": "pnpm --filter=./apps/api prisma:migrate",
+    "prisma:seed": "pnpm --filter=./apps/api prisma:seed",
+    "prisma:studio": "pnpm --filter=./apps/api prisma:studio"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.15.0",
+    "eslint": "^9.15.0",
+    "eslint-config-prettier": "^9.1.0",
+    "prettier": "^3.3.3",
+    "typescript": "^5.6.3",
+    "typescript-eslint": "^8.15.0"
+  }
+}

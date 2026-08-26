@@ -1,0 +1,182 @@
+/**
+ * Enums shared between the API and the web app.
+ *
+ * These mirror the Prisma enums 1:1 (see apps/api/prisma/schema.prisma).
+ * Keeping a hand-written copy here lets the Next.js app depend on this
+ * package without depending on `@prisma/client` (which is Node-only).
+ */
+
+/** Platform + tenant-scoped roles. PLATFORM_ADMIN operates across tenants. */
+export enum UserRole {
+  PLATFORM_ADMIN = 'PLATFORM_ADMIN',
+  TENANT_OWNER = 'TENANT_OWNER',
+  TENANT_ADMIN = 'TENANT_ADMIN',
+  WAREHOUSE_STAFF = 'WAREHOUSE_STAFF',
+  CUSTOMER_SERVICE = 'CUSTOMER_SERVICE',
+  ACCOUNTANT = 'ACCOUNTANT',
+  DESTINATION_AGENT = 'DESTINATION_AGENT',
+  CUSTOMER = 'CUSTOMER',
+}
+
+/** Roles that represent tenant staff (as opposed to a CUSTOMER end-user). */
+export const STAFF_ROLES: UserRole[] = [
+  UserRole.TENANT_OWNER,
+  UserRole.TENANT_ADMIN,
+  UserRole.WAREHOUSE_STAFF,
+  UserRole.CUSTOMER_SERVICE,
+  UserRole.ACCOUNTANT,
+  UserRole.DESTINATION_AGENT,
+];
+
+export enum ShipmentMode {
+  AIR = 'AIR',
+  OCEAN_LCL = 'OCEAN_LCL',
+  OCEAN_FCL = 'OCEAN_FCL',
+  RORO = 'RORO',
+}
+
+/** Growable status flow. Values are ordered but not assumed contiguous. */
+export enum ShipmentStatus {
+  DRAFT = 'DRAFT',
+  QUOTE_REQUESTED = 'QUOTE_REQUESTED',
+  AWAITING_ITEMS = 'AWAITING_ITEMS',
+  WAREHOUSE_RECEIVED = 'WAREHOUSE_RECEIVED',
+  PROCESSING = 'PROCESSING',
+  READY_FOR_CONSOLIDATION = 'READY_FOR_CONSOLIDATION',
+  CONSOLIDATED = 'CONSOLIDATED',
+  BOOKED = 'BOOKED',
+  LOADED = 'LOADED',
+  DEPARTED = 'DEPARTED',
+  IN_TRANSIT = 'IN_TRANSIT',
+  ARRIVED_DESTINATION = 'ARRIVED_DESTINATION',
+  CUSTOMS_PROCESSING = 'CUSTOMS_PROCESSING',
+  CUSTOMS_CLEARED = 'CUSTOMS_CLEARED',
+  READY_FOR_PICKUP = 'READY_FOR_PICKUP',
+  OUT_FOR_DELIVERY = 'OUT_FOR_DELIVERY',
+  DELIVERED = 'DELIVERED',
+  COMPLETED = 'COMPLETED',
+  CANCELLED = 'CANCELLED',
+}
+
+export enum ShipmentItemType {
+  BOX = 'BOX',
+  BARREL = 'BARREL',
+  PALLET = 'PALLET',
+  CRATE = 'CRATE',
+  VEHICLE = 'VEHICLE',
+  MACHINERY = 'MACHINERY',
+  HOUSEHOLD_GOODS = 'HOUSEHOLD_GOODS',
+  OTHER = 'OTHER',
+}
+
+export enum DimensionUnit {
+  IN = 'IN',
+  CM = 'CM',
+}
+
+export enum WeightUnit {
+  LB = 'LB',
+  KG = 'KG',
+}
+
+export enum ContainerType {
+  TWENTY_FT = 'TWENTY_FT',
+  FORTY_FT = 'FORTY_FT',
+  FORTY_FT_HIGH_CUBE = 'FORTY_FT_HIGH_CUBE',
+  OTHER = 'OTHER',
+}
+
+export enum ContainerStatus {
+  BOOKED = 'BOOKED',
+  LOADING = 'LOADING',
+  LOADED = 'LOADED',
+  DEPARTED = 'DEPARTED',
+  IN_TRANSIT = 'IN_TRANSIT',
+  ARRIVED = 'ARRIVED',
+  CUSTOMS_HOLD = 'CUSTOMS_HOLD',
+  UNLOADING = 'UNLOADING',
+  CLOSED = 'CLOSED',
+}
+
+export enum ManifestStatus {
+  DRAFT = 'DRAFT',
+  FINALIZED = 'FINALIZED',
+  SUBMITTED = 'SUBMITTED',
+  ARCHIVED = 'ARCHIVED',
+}
+
+export enum VehicleTitleStatus {
+  CLEAN = 'CLEAN',
+  SALVAGE = 'SALVAGE',
+  REBUILT = 'REBUILT',
+  LIEN = 'LIEN',
+  BILL_OF_SALE_ONLY = 'BILL_OF_SALE_ONLY',
+  UNKNOWN = 'UNKNOWN',
+}
+
+export enum QuoteStatus {
+  DRAFT = 'DRAFT',
+  SENT = 'SENT',
+  ACCEPTED = 'ACCEPTED',
+  DECLINED = 'DECLINED',
+  EXPIRED = 'EXPIRED',
+  CONVERTED = 'CONVERTED',
+}
+
+export enum InvoiceStatus {
+  DRAFT = 'DRAFT',
+  SENT = 'SENT',
+  PARTIALLY_PAID = 'PARTIALLY_PAID',
+  PAID = 'PAID',
+  OVERDUE = 'OVERDUE',
+  VOID = 'VOID',
+}
+
+export enum PaymentMethod {
+  CASH = 'CASH',
+  CARD = 'CARD',
+  BANK_TRANSFER = 'BANK_TRANSFER',
+  MOBILE_MONEY = 'MOBILE_MONEY',
+  CHECK = 'CHECK',
+  OTHER = 'OTHER',
+}
+
+export enum PaymentStatus {
+  PENDING = 'PENDING',
+  COMPLETED = 'COMPLETED',
+  FAILED = 'FAILED',
+  REFUNDED = 'REFUNDED',
+}
+
+export enum DocumentType {
+  BILL_OF_LADING = 'BILL_OF_LADING',
+  INVOICE = 'INVOICE',
+  PACKING_LIST = 'PACKING_LIST',
+  CUSTOMS_FORM = 'CUSTOMS_FORM',
+  ID_DOCUMENT = 'ID_DOCUMENT',
+  TITLE_DOCUMENT = 'TITLE_DOCUMENT',
+  PHOTO = 'PHOTO',
+  OTHER = 'OTHER',
+}
+
+export enum NotificationChannel {
+  IN_APP = 'IN_APP',
+  EMAIL = 'EMAIL',
+  SMS = 'SMS',
+  WHATSAPP = 'WHATSAPP',
+}
+
+export enum NotificationStatus {
+  PENDING = 'PENDING',
+  SENT = 'SENT',
+  FAILED = 'FAILED',
+  READ = 'READ',
+}
+
+export enum AddressType {
+  BILLING = 'BILLING',
+  SHIPPING = 'SHIPPING',
+  DESTINATION = 'DESTINATION',
+  ORIGIN = 'ORIGIN',
+  OTHER = 'OTHER',
+}

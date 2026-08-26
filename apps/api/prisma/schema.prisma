@@ -1,0 +1,747 @@
+// Transatlantic Shipping SaaS — core data model
+//
+// MULTI-TENANCY: every tenant-owned operational table carries a `tenantId`
+// column with an index, even where it is technically reachable through a
+// parent relation. This is deliberate defense-in-depth: application code
+// (see src/common/tenant) can filter and validate directly on tenantId
+// without having to walk relation chains, and it is impossible to
+// construct a query that "forgets" to scope a join.
+//
+// PLATFORM_ADMIN users have tenantId = null and are the only role allowed
+// to operate across tenants (tenant management only, not tenant data).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ==========================================================================
+// ENUMS
+// ==========================================================================
+
+enum UserRole {
+  PLATFORM_ADMIN
+  TENANT_OWNER
+  TENANT_ADMIN
+  WAREHOUSE_STAFF
+  CUSTOMER_SERVICE
+  ACCOUNTANT
+  DESTINATION_AGENT
+  CUSTOMER
+}
+
+enum ShipmentMode {
+  AIR
+  OCEAN_LCL
+  OCEAN_FCL
+  RORO
+}
+
+enum ShipmentStatus {
+  DRAFT
+  QUOTE_REQUESTED
+  AWAITING_ITEMS
+  WAREHOUSE_RECEIVED
+  PROCESSING
+  READY_FOR_CONSOLIDATION
+  CONSOLIDATED
+  BOOKED
+  LOADED
+  DEPARTED
+  IN_TRANSIT
+  ARRIVED_DESTINATION
+  CUSTOMS_PROCESSING
+  CUSTOMS_CLEARED
+  READY_FOR_PICKUP
+  OUT_FOR_DELIVERY
+  DELIVERED
+  COMPLETED
+  CANCELLED
+}
+
+enum ShipmentItemType {
+  BOX
+  BARREL
+  PALLET
+  CRATE
+  VEHICLE
+  MACHINERY
+  HOUSEHOLD_GOODS
+  OTHER
+}
+
+enum DimensionUnit {
+  IN
+  CM
+}
+
+enum WeightUnit {
+  LB
+  KG
+}
+
+enum ContainerType {
+  TWENTY_FT
+  FORTY_FT
+  FORTY_FT_HIGH_CUBE
+  OTHER
+}
+
+enum ContainerStatus {
+  BOOKED
+  LOADING
+  LOADED
+  DEPARTED
+  IN_TRANSIT
+  ARRIVED
+  CUSTOMS_HOLD
+  UNLOADING
+  CLOSED
+}
+
+enum ManifestStatus {
+  DRAFT
+  FINALIZED
+  SUBMITTED
+  ARCHIVED
+}
+
+enum VehicleTitleStatus {
+  CLEAN
+  SALVAGE
+  REBUILT
+  LIEN
+  BILL_OF_SALE_ONLY
+  UNKNOWN
+}
+
+enum QuoteStatus {
+  DRAFT
+  SENT
+  ACCEPTED
+  DECLINED
+  EXPIRED
+  CONVERTED
+}
+
+enum InvoiceStatus {
+  DRAFT
+  SENT
+  PARTIALLY_PAID
+  PAID
+  OVERDUE
+  VOID
+}
+
+enum PaymentMethod {
+  CASH
+  CARD
+  BANK_TRANSFER
+  MOBILE_MONEY
+  CHECK
+  OTHER
+}
+
+enum PaymentStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  REFUNDED
+}
+
+enum DocumentType {
+  BILL_OF_LADING
+  INVOICE
+  PACKING_LIST
+  CUSTOMS_FORM
+  ID_DOCUMENT
+  TITLE_DOCUMENT
+  PHOTO
+  OTHER
+}
+
+enum NotificationChannel {
+  IN_APP
+  EMAIL
+  SMS
+  WHATSAPP
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  FAILED
+  READ
+}
+
+enum AddressType {
+  BILLING
+  SHIPPING
+  DESTINATION
+  ORIGIN
+  OTHER
+}
+
+// ==========================================================================
+// PLATFORM / TENANT
+// ==========================================================================
+
+/// A tenant is one customer of the SaaS platform (a freight forwarding
+/// company). Trans Atlantic Logistics Solutions is tenant #1, not a
+/// special case in code.
+model Tenant {
+  id             String   @id @default(cuid())
+  name           String
+  slug           String   @unique
+  legalName      String?
+  email          String
+  phone          String?
+  website        String?
+  logoUrl        String?
+  primaryColor   String?
+  secondaryColor String?
+  country        String
+  timezone       String
+  currency       String
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  settings           TenantSettings?
+  users              User[]
+  customers          Customer[]
+  addresses          Address[]
+  warehouses         Warehouse[]
+  routes             Route[]
+  shipments          Shipment[]
+  shipmentItems      ShipmentItem[]
+  vehicleDetails     VehicleDetails[]
+  containers         Container[]
+  containerShipments ContainerShipment[]
+  manifests          Manifest[]
+  trackingEvents     TrackingEvent[]
+  quotes             Quote[]
+  invoices           Invoice[]
+  invoiceItems       InvoiceItem[]
+  payments           Payment[]
+  documents          Document[]
+  notifications      Notification[]
+
+  @@map("tenants")
+}
+
+/// Per-tenant configuration, including the configurable numbering prefixes
+/// referenced throughout the spec (customer numbers, tracking numbers).
+model TenantSettings {
+  id     String @id @default(cuid())
+  tenantId String @unique
+
+  customerNumberPrefix   String @default("CUST")
+  customerNumberSequence Int    @default(0)
+
+  trackingNumberPrefix   String @default("SHP")
+  trackingNumberSequence Int    @default(0)
+
+  invoiceNumberPrefix   String @default("INV")
+  invoiceNumberSequence Int    @default(0)
+
+  defaultOriginCountry      String?
+  defaultDestinationCountry String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("tenant_settings")
+}
+
+// ==========================================================================
+// USERS / CUSTOMERS
+// ==========================================================================
+
+/// A login-capable account. Staff users always have a tenantId; a CUSTOMER
+/// user has a tenantId and is linked 1:1 to a Customer record;
+/// PLATFORM_ADMIN users have tenantId = null.
+model User {
+  id           String   @id @default(cuid())
+  tenantId     String?
+  email        String   @unique
+  passwordHash String
+  firstName    String
+  lastName     String
+  phone        String?
+  role         UserRole
+  isActive     Boolean  @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  tenant        Tenant?        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customer      Customer?      @relation("CustomerUser")
+  notifications Notification[]
+
+  @@index([tenantId])
+  @@map("users")
+}
+
+/// A customer (shipper) belonging to a tenant. May optionally have a
+/// linked User account for portal access.
+model Customer {
+  id             String   @id @default(cuid())
+  tenantId       String
+  customerNumber String
+  firstName      String
+  lastName       String
+  email          String
+  phone          String?
+  userId         String?  @unique
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  tenant    Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user      User?      @relation("CustomerUser", fields: [userId], references: [id], onDelete: SetNull)
+  addresses Address[]
+  shipments Shipment[]
+  quotes    Quote[]
+  invoices  Invoice[]
+  payments  Payment[]
+  documents Document[]
+  notifications Notification[]
+
+  @@unique([tenantId, customerNumber])
+  @@index([tenantId])
+  @@map("customers")
+}
+
+/// Billing / shipping / destination addresses for a customer.
+model Address {
+  id         String      @id @default(cuid())
+  tenantId   String
+  customerId String
+  type       AddressType @default(SHIPPING)
+  label      String?
+  line1      String
+  line2      String?
+  city       String
+  state      String?
+  postalCode String?
+  country    String
+  phone      String?
+  isDefault  Boolean     @default(false)
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([customerId])
+  @@map("addresses")
+}
+
+// ==========================================================================
+// WAREHOUSE / ROUTES
+// ==========================================================================
+
+/// A tenant may operate multiple warehouses (e.g. an origin warehouse in
+/// Texas and destination warehouses in Accra/Tema). Nothing here assumes
+/// a specific tenant's locations.
+model Warehouse {
+  id                     String   @id @default(cuid())
+  tenantId               String
+  name                   String
+  code                   String
+  addressLine1           String
+  addressLine2           String?
+  city                   String
+  state                  String?
+  country                String
+  postalCode             String?
+  phone                  String?
+  isOriginWarehouse      Boolean  @default(false)
+  isDestinationWarehouse Boolean  @default(false)
+  isActive               Boolean  @default(true)
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  tenant                  Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  originRoutes            Route[]    @relation("RouteOriginWarehouse")
+  destinationRoutes       Route[]    @relation("RouteDestinationWarehouse")
+  originShipments         Shipment[] @relation("ShipmentOriginWarehouse")
+  destinationShipments    Shipment[] @relation("ShipmentDestinationWarehouse")
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@map("warehouses")
+}
+
+/// An optional named lane between two warehouses/countries, used later to
+/// drive quoting and transit-time estimates.
+model Route {
+  id                    String       @id @default(cuid())
+  tenantId              String
+  name                  String
+  originWarehouseId     String?
+  destinationWarehouseId String?
+  originCountry         String
+  destinationCountry    String
+  shipmentMode          ShipmentMode
+  transitDaysEstimate   Int?
+  isActive              Boolean      @default(true)
+  createdAt             DateTime     @default(now())
+  updatedAt             DateTime     @updatedAt
+
+  tenant              Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  originWarehouse     Warehouse? @relation("RouteOriginWarehouse", fields: [originWarehouseId], references: [id], onDelete: SetNull)
+  destinationWarehouse Warehouse? @relation("RouteDestinationWarehouse", fields: [destinationWarehouseId], references: [id], onDelete: SetNull)
+  shipments           Shipment[]
+
+  @@index([tenantId])
+  @@map("routes")
+}
+
+// ==========================================================================
+// SHIPMENTS
+// ==========================================================================
+
+/// A single shipment for a customer. `trackingNumber` is the public,
+/// human-friendly identifier — the database id is never exposed to
+/// customers.
+model Shipment {
+  id                      String         @id @default(cuid())
+  tenantId                String
+  customerId              String
+  trackingNumber          String         @unique
+  shipmentMode            ShipmentMode
+  originCountry           String
+  destinationCountry      String
+  originLocation          String?
+  destinationLocation     String?
+  originWarehouseId       String?
+  destinationWarehouseId  String?
+  routeId                 String?
+  status                  ShipmentStatus @default(DRAFT)
+  description             String?
+  declaredValue           Decimal?       @db.Decimal(12, 2)
+  currency                String?
+  createdAt               DateTime       @default(now())
+  updatedAt               DateTime       @updatedAt
+
+  tenant              Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customer            Customer           @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  originWarehouse     Warehouse?         @relation("ShipmentOriginWarehouse", fields: [originWarehouseId], references: [id], onDelete: SetNull)
+  destinationWarehouse Warehouse?        @relation("ShipmentDestinationWarehouse", fields: [destinationWarehouseId], references: [id], onDelete: SetNull)
+  route               Route?             @relation(fields: [routeId], references: [id], onDelete: SetNull)
+  items               ShipmentItem[]
+  trackingEvents      TrackingEvent[]
+  containerLinks      ContainerShipment[]
+  quotes              Quote[]
+  invoices            Invoice[]
+  documents           Document[]
+
+  @@index([tenantId])
+  @@index([customerId])
+  @@index([status])
+  @@map("shipments")
+}
+
+/// A physical package/item within a shipment (box, barrel, vehicle, ...).
+/// Dimensions are optional but present to support future
+/// dimensional/volumetric weight pricing.
+model ShipmentItem {
+  id            String           @id @default(cuid())
+  tenantId      String
+  shipmentId    String
+  itemType      ShipmentItemType
+  description   String?
+  quantity      Int              @default(1)
+  length        Decimal?         @db.Decimal(10, 2)
+  width         Decimal?         @db.Decimal(10, 2)
+  height        Decimal?         @db.Decimal(10, 2)
+  dimensionUnit DimensionUnit    @default(IN)
+  weight        Decimal?         @db.Decimal(10, 2)
+  weightUnit    WeightUnit       @default(LB)
+  declaredValue Decimal?         @db.Decimal(12, 2)
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  tenant         Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  shipment       Shipment        @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+  vehicleDetails VehicleDetails?
+
+  @@index([tenantId])
+  @@index([shipmentId])
+  @@map("shipment_items")
+}
+
+/// Extra detail attached to a ShipmentItem of type VEHICLE. Modeled as a
+/// 1:1 extension of ShipmentItem rather than a parallel shipping system.
+model VehicleDetails {
+  id             String             @id @default(cuid())
+  tenantId       String
+  shipmentItemId String             @unique
+  vin            String?
+  year           Int?
+  make           String?
+  model          String?
+  color          String?
+  titleStatus    VehicleTitleStatus @default(UNKNOWN)
+  licensePlate   String?
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  tenant       Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  shipmentItem ShipmentItem @relation(fields: [shipmentItemId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@map("vehicle_details")
+}
+
+// ==========================================================================
+// CONTAINERS / MANIFESTS
+// ==========================================================================
+
+/// A shipping container, which may carry shipments belonging to many
+/// different customers (linked via ContainerShipment).
+model Container {
+  id               String          @id @default(cuid())
+  tenantId         String
+  containerNumber  String
+  containerType    ContainerType
+  sealNumber       String?
+  status           ContainerStatus @default(BOOKED)
+  originPort       String?
+  destinationPort  String?
+  departureDate    DateTime?
+  estimatedArrival DateTime?
+  actualArrival    DateTime?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  tenant    Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  shipments ContainerShipment[]
+  manifests Manifest[]
+
+  @@unique([tenantId, containerNumber])
+  @@index([tenantId])
+  @@map("containers")
+}
+
+/// Join table linking shipments (potentially from many customers) into a
+/// container.
+model ContainerShipment {
+  id          String    @id @default(cuid())
+  tenantId    String
+  containerId String
+  shipmentId  String
+  loadedAt    DateTime?
+  createdAt   DateTime  @default(now())
+
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  container Container @relation(fields: [containerId], references: [id], onDelete: Cascade)
+  shipment  Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+
+  @@unique([containerId, shipmentId])
+  @@index([tenantId])
+  @@map("container_shipments")
+}
+
+/// A cargo manifest, typically produced per-container per-route.
+model Manifest {
+  id             String         @id @default(cuid())
+  tenantId       String
+  containerId    String?
+  routeId        String?
+  manifestNumber String
+  status         ManifestStatus @default(DRAFT)
+  finalizedAt    DateTime?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  tenant    Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  container Container? @relation(fields: [containerId], references: [id], onDelete: SetNull)
+
+  @@unique([tenantId, manifestNumber])
+  @@index([tenantId])
+  @@map("manifests")
+}
+
+// ==========================================================================
+// TRACKING
+// ==========================================================================
+
+/// Append-only history of shipment status changes. The Shipment.status
+/// column is a denormalized "current status" for fast reads; this table is
+/// the source of truth for the timeline.
+model TrackingEvent {
+  id              String         @id @default(cuid())
+  tenantId        String
+  shipmentId      String
+  status          ShipmentStatus
+  location        String?
+  notes           String?
+  occurredAt      DateTime       @default(now())
+  createdByUserId String?
+  createdAt       DateTime       @default(now())
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  shipment Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([shipmentId])
+  @@map("tracking_events")
+}
+
+// ==========================================================================
+// COMMERCIAL: QUOTES / INVOICES / PAYMENTS
+// ==========================================================================
+
+model Quote {
+  id                 String       @id @default(cuid())
+  tenantId           String
+  customerId         String
+  shipmentId         String?
+  shipmentMode       ShipmentMode
+  originCountry      String
+  destinationCountry String
+  estimatedCost      Decimal?     @db.Decimal(12, 2)
+  currency           String?
+  status             QuoteStatus  @default(DRAFT)
+  validUntil         DateTime?
+  notes              String?
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+
+  tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customer Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  shipment Shipment? @relation(fields: [shipmentId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@index([customerId])
+  @@map("quotes")
+}
+
+model Invoice {
+  id            String        @id @default(cuid())
+  tenantId      String
+  customerId    String
+  shipmentId    String?
+  invoiceNumber String
+  status        InvoiceStatus @default(DRAFT)
+  subtotal      Decimal       @default(0) @db.Decimal(12, 2)
+  tax           Decimal       @default(0) @db.Decimal(12, 2)
+  total         Decimal       @default(0) @db.Decimal(12, 2)
+  amountPaid    Decimal       @default(0) @db.Decimal(12, 2)
+  currency      String
+  dueDate       DateTime?
+  issuedAt      DateTime?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  tenant   Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customer Customer      @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  shipment Shipment?     @relation(fields: [shipmentId], references: [id], onDelete: SetNull)
+  items    InvoiceItem[]
+  payments Payment[]
+
+  @@unique([tenantId, invoiceNumber])
+  @@index([tenantId])
+  @@index([customerId])
+  @@map("invoices")
+}
+
+model InvoiceItem {
+  id          String   @id @default(cuid())
+  tenantId    String
+  invoiceId   String
+  description String
+  quantity    Int      @default(1)
+  unitPrice   Decimal  @db.Decimal(12, 2)
+  amount      Decimal  @db.Decimal(12, 2)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([invoiceId])
+  @@map("invoice_items")
+}
+
+model Payment {
+  id              String        @id @default(cuid())
+  tenantId        String
+  invoiceId       String
+  customerId      String
+  amount          Decimal       @db.Decimal(12, 2)
+  currency        String
+  method          PaymentMethod
+  status          PaymentStatus @default(PENDING)
+  referenceNumber String?
+  paidAt          DateTime?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  invoice  Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([invoiceId])
+  @@map("payments")
+}
+
+// ==========================================================================
+// DOCUMENTS / NOTIFICATIONS
+// ==========================================================================
+
+model Document {
+  id              String       @id @default(cuid())
+  tenantId        String
+  customerId      String?
+  shipmentId      String?
+  type            DocumentType
+  fileName        String
+  fileUrl         String
+  mimeType        String?
+  fileSizeBytes   Int?
+  uploadedByUserId String?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customer Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  shipment Shipment? @relation(fields: [shipmentId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@index([shipmentId])
+  @@map("documents")
+}
+
+model Notification {
+  id         String              @id @default(cuid())
+  tenantId   String
+  userId     String?
+  customerId String?
+  channel    NotificationChannel @default(IN_APP)
+  status     NotificationStatus  @default(PENDING)
+  title      String
+  body       String
+  sentAt     DateTime?
+  readAt     DateTime?
+  createdAt  DateTime            @default(now())
+  updatedAt  DateTime            @updatedAt
+
+  tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user     User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  customer Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@map("notifications")
+}
