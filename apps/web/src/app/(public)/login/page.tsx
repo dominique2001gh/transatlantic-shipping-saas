@@ -4,8 +4,9 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState, type FormEvent } from 'react';
 import type { LoginResponseDto } from '@transatlantic/shared';
+import { AuthShell } from '@/components/marketing/AuthShell';
+import { TextInput } from '@/components/forms/FormField';
 import { Button } from '@/components/ui/Button';
-import { Card } from '@/components/ui/Card';
 import { apiFetch, ApiError } from '@/lib/api';
 import { homeRouteForRole, storeSession } from '@/lib/auth';
 
@@ -35,57 +36,49 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="mx-auto flex max-w-md flex-col justify-center px-4 py-16 sm:px-6 lg:px-8">
-      <h1 className="text-3xl font-bold text-slate-900">Log in</h1>
+    <AuthShell>
+      <h1 className="font-display text-2xl font-bold text-slate-900">Welcome back</h1>
       <p className="mt-2 text-sm text-slate-600">
         Staff, customers, and platform administrators all sign in here.
       </p>
 
-      <Card className="mt-8">
-        <form className="flex flex-col gap-4" onSubmit={handleSubmit}>
-          <div>
-            <label htmlFor="email" className="block text-sm font-medium text-slate-700">
-              Email
-            </label>
-            <input
-              id="email"
-              type="email"
-              required
-              autoComplete="email"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
-            />
-          </div>
-          <div>
-            <label htmlFor="password" className="block text-sm font-medium text-slate-700">
-              Password
-            </label>
-            <input
-              id="password"
-              type="password"
-              required
-              autoComplete="current-password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
-            />
-          </div>
+      <form className="mt-8 flex flex-col gap-5" onSubmit={handleSubmit} noValidate>
+        <TextInput
+          label="Email"
+          id="email"
+          type="email"
+          required
+          autoComplete="email"
+          value={email}
+          onChange={(event) => setEmail(event.target.value)}
+        />
+        <TextInput
+          label="Password"
+          id="password"
+          type="password"
+          required
+          autoComplete="current-password"
+          value={password}
+          onChange={(event) => setPassword(event.target.value)}
+        />
 
-          {error && <p className="text-sm text-red-600">{error}</p>}
+        {error && (
+          <p role="alert" className="text-sm text-red-600">
+            {error}
+          </p>
+        )}
 
-          <Button type="submit" disabled={loading} className="mt-2">
-            {loading ? 'Logging in…' : 'Log In'}
-          </Button>
-        </form>
-      </Card>
+        <Button type="submit" size="lg" disabled={loading} className="mt-1 justify-center">
+          {loading ? 'Signing in…' : 'Sign In'}
+        </Button>
+      </form>
 
-      <p className="mt-6 text-center text-sm text-slate-500">
+      <p className="mt-8 text-center text-sm text-slate-500">
         New here?{' '}
-        <Link href="/register" className="font-medium text-primary-700 hover:text-primary-800">
+        <Link href="/register" className="font-semibold text-primary-700 hover:text-primary-800">
           Create an account
         </Link>
       </p>
-    </div>
+    </AuthShell>
   );
 }

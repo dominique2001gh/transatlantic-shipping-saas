@@ -1,90 +1,116 @@
-import Link from 'next/link';
-import { Card } from '@/components/ui/Card';
-
-const FEATURES = [
-  {
-    title: 'Multi-modal shipping',
-    description:
-      'Air, ocean LCL, ocean FCL and RoRo — one platform for every way cargo moves, not just barrels.',
-  },
-  {
-    title: 'Real-time tracking',
-    description:
-      'A full status history for every shipment, from warehouse receipt to final delivery.',
-  },
-  {
-    title: 'Built for multiple markets',
-    description:
-      'Serve customers shipping to Ghana, Nigeria, Sierra Leone, Liberia and beyond from one account.',
-  },
-  {
-    title: 'Warehouse & container ops',
-    description:
-      'Manage origin and destination warehouses, consolidate shipments, and build container manifests.',
-  },
-];
+import { IconWarehouse } from '@/components/icons';
+import { CargoTypesGrid } from '@/components/marketing/CargoTypesGrid';
+import { CTASection } from '@/components/marketing/CTASection';
+import { Hero } from '@/components/marketing/Hero';
+import { PhotoPlaceholder } from '@/components/marketing/PhotoPlaceholder';
+import { ProcessTimeline } from '@/components/marketing/ProcessTimeline';
+import { ServiceCard } from '@/components/marketing/ServiceCard';
+import { ValuePropsGrid } from '@/components/marketing/ValuePropsGrid';
+import { LinkButton } from '@/components/ui/Button';
+import { Container } from '@/components/ui/Container';
+import { SectionHeading } from '@/components/ui/SectionHeading';
+import { TrackingForm } from '@/components/forms/TrackingForm';
+import { homeProcessSteps } from '@/lib/process-data';
+import { services } from '@/lib/services-data';
 
 export default function HomePage() {
   return (
     <>
-      <section className="bg-gradient-to-b from-primary-950 via-primary-900 to-primary-800 text-white">
-        <div className="mx-auto max-w-7xl px-4 py-20 sm:px-6 lg:px-8 lg:py-28">
-          <div className="max-w-2xl">
-            <p className="text-sm font-semibold uppercase tracking-widest text-accent-400">
-              Freight forwarding, modernized
-            </p>
-            <h1 className="mt-4 text-4xl font-bold tracking-tight sm:text-5xl">
-              Ship to Ghana and beyond, without the spreadsheets.
-            </h1>
-            <p className="mt-6 text-lg text-primary-100">
-              A single platform for freight forwarders to manage customers, shipments,
-              warehouses, containers, and tracking — from origin to destination.
-            </p>
-            <div className="mt-8 flex flex-wrap gap-4">
-              <Link
-                href="/track"
-                className="rounded-md bg-white px-5 py-3 text-sm font-semibold text-primary-900 hover:bg-primary-50"
-              >
-                Track a Shipment
-              </Link>
-              <Link
-                href="/register"
-                className="rounded-md border border-white/30 px-5 py-3 text-sm font-semibold text-white hover:bg-white/10"
-              >
-                Create an Account
-              </Link>
-            </div>
+      <Hero />
+
+      {/* Services */}
+      <section className="py-20 lg:py-24">
+        <Container>
+          <SectionHeading
+            eyebrow="What we move"
+            title="Freight services built around your cargo"
+            description="Choose the right service for what you're shipping — or combine them as part of one shipment."
+          />
+          <div className="mt-12 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+            {services.map((service) => (
+              <ServiceCard key={service.slug} service={service} />
+            ))}
           </div>
-        </div>
+        </Container>
       </section>
 
-      <section className="mx-auto max-w-7xl px-4 py-16 sm:px-6 lg:px-8">
-        <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
-          {FEATURES.map((feature) => (
-            <Card key={feature.title}>
-              <h3 className="text-base font-semibold text-slate-900">{feature.title}</h3>
-              <p className="mt-2 text-sm text-slate-600">{feature.description}</p>
-            </Card>
-          ))}
-        </div>
+      {/* Why Trans Atlantic */}
+      <section className="border-t border-slate-200 bg-slate-50 py-20 lg:py-24">
+        <Container>
+          <SectionHeading
+            eyebrow="Why ship with us"
+            title="Why Trans Atlantic Logistics Solutions"
+            description="A freight forwarding partner built around visibility, flexibility, and a team that stays involved after your shipment leaves the warehouse."
+          />
+          <div className="mt-12">
+            <ValuePropsGrid />
+          </div>
+        </Container>
       </section>
 
-      <section className="border-t border-slate-200 bg-slate-50">
-        <div className="mx-auto max-w-7xl px-4 py-16 text-center sm:px-6 lg:px-8">
-          <h2 className="text-2xl font-semibold text-slate-900">
-            Already shipping with us?
-          </h2>
-          <p className="mt-2 text-sm text-slate-600">
-            Log in to your customer portal to view your shipments, invoices, and documents.
-          </p>
-          <Link
-            href="/login"
-            className="mt-6 inline-flex rounded-md bg-primary-700 px-5 py-3 text-sm font-semibold text-white hover:bg-primary-800"
-          >
-            Log In
-          </Link>
-        </div>
+      {/* How Shipping Works */}
+      <section className="py-20 lg:py-24">
+        <Container>
+          <div className="flex flex-col gap-6 sm:flex-row sm:items-end sm:justify-between">
+            <SectionHeading
+              eyebrow="The process"
+              title="How shipping works"
+              description="From the moment you request a shipment to the moment it's delivered, here's what to expect."
+            />
+            <LinkButton href="/how-it-works" variant="secondary" className="shrink-0">
+              See the full process
+            </LinkButton>
+          </div>
+          <div className="mt-12">
+            <ProcessTimeline steps={homeProcessSteps} />
+          </div>
+        </Container>
       </section>
+
+      {/* What We Ship */}
+      <section className="border-t border-slate-200 bg-slate-50 py-20 lg:py-24">
+        <Container>
+          <SectionHeading
+            eyebrow="What we ship"
+            title="Built for every kind of cargo"
+            description="From a single barrel to commercial machinery, our warehouse and freight network is built to handle it."
+            align="center"
+          />
+          <div className="mt-12">
+            <CargoTypesGrid />
+          </div>
+        </Container>
+      </section>
+
+      {/* Tracking */}
+      <section className="py-20 lg:py-24">
+        <Container>
+          <div className="grid grid-cols-1 items-center gap-12 lg:grid-cols-2 lg:gap-16">
+            <div>
+              <SectionHeading
+                eyebrow="Stay informed"
+                title="Track your shipment anytime"
+                description="Enter your tracking number to check on your shipment's status, from warehouse receipt to final delivery."
+              />
+              <div className="mt-8 max-w-lg">
+                <TrackingForm />
+              </div>
+            </div>
+            <PhotoPlaceholder icon={IconWarehouse} label="Warehouse operations" tone="slate" />
+          </div>
+        </Container>
+      </section>
+
+      {/* Quote CTA */}
+      <CTASection
+        eyebrow="Get started"
+        title="Ready to ship with Trans Atlantic?"
+        description="Tell us about your shipment and our team will follow up with a quote tailored to what you're moving."
+        primaryHref="/quote"
+        primaryLabel="Request a Quote"
+        secondaryHref="/contact"
+        secondaryLabel="Talk to Our Team"
+      />
     </>
   );
 }
