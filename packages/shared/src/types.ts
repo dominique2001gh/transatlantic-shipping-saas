@@ -1,5 +1,7 @@
 import type {
   AddressType,
+  ContainerStatus,
+  ContainerType,
   DimensionUnit,
   ItemProcessingResult,
   ShipmentItemCondition,
@@ -264,4 +266,63 @@ export interface WarehouseActivityEntry {
   warehouse: { id: string; name: string; code: string } | null;
   shipmentItem: { id: string; itemCode: string; itemType: ShipmentItemType } | null;
   shipment: { id: string; trackingNumber: string };
+}
+
+// ==========================================================================
+// CONTAINERS (Milestone 3D)
+// ==========================================================================
+
+/** One currently-loaded (not removed) item inside a container. */
+export interface ContainerItemSummary {
+  id: string;
+  loadedAt: string;
+  loadedByUser: TrackingEventActor | null;
+  shipmentItem: {
+    id: string;
+    itemCode: string;
+    itemType: ShipmentItemType;
+    description: string | null;
+    weight: string | null;
+    weightUnit: WeightUnit;
+    status: ShipmentItemStatus;
+  };
+  shipment: {
+    id: string;
+    trackingNumber: string;
+    destinationCountry: string;
+    destinationLocation: string | null;
+    customer: { id: string; customerNumber: string; firstName: string; lastName: string };
+  };
+}
+
+/** Live-computed contents summary — never stored, always derived from current ContainerItem rows. */
+export interface ContainerContentsSummary {
+  itemCount: number;
+  customerCount: number;
+  /** Grouped by unit rather than converted — see schema.prisma Container doc comment. */
+  weightByUnit: Record<string, number>;
+}
+
+export interface ContainerDetail {
+  id: string;
+  tenantId: string;
+  containerNumber: string;
+  containerType: ContainerType;
+  status: ContainerStatus;
+  sealNumber: string | null;
+  originPort: string | null;
+  destinationPort: string | null;
+  departureDate: string | null;
+  estimatedArrival: string | null;
+  actualArrival: string | null;
+  loadingFinalizedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  warehouse: { id: string; name: string; code: string } | null;
+  route: { id: string; name: string; originCountry: string; destinationCountry: string } | null;
+  loadingFinalizedByUser: TrackingEventActor | null;
+  items: ContainerItemSummary[];
+  summary: ContainerContentsSummary;
+  /** Present only on a loadItem response when the item's destination doesn't match the container's route. */
+  destinationWarning?: string;
 }

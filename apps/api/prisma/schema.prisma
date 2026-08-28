@@ -388,6 +388,7 @@ model User {
   trackingEventsCreated TrackingEvent[] // audit trail rows this user is the actor for
   containerItemsLoaded  ContainerItem[]  @relation("ContainerItemLoadedBy")
   containerItemsRemoved ContainerItem[]  @relation("ContainerItemRemovedBy")
+  containersFinalized   Container[]
   manifestsFinalized    Manifest[]
 
   @@index([tenantId])
@@ -487,6 +488,8 @@ model Warehouse {
   currentItems    ShipmentItem[]
   trackingEvents  TrackingEvent[]
   itemInspections ItemInspection[]
+  /// Containers currently being loaded at this warehouse (Milestone 3D).
+  containers      Container[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -509,10 +512,13 @@ model Route {
   createdAt              DateTime     @default(now())
   updatedAt              DateTime     @updatedAt
 
-  tenant               Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  originWarehouse      Warehouse? @relation("RouteOriginWarehouse", fields: [originWarehouseId], references: [id], onDelete: SetNull)
-  destinationWarehouse Warehouse? @relation("RouteDestinationWarehouse", fields: [destinationWarehouseId], references: [id], onDelete: SetNull)
+  tenant               Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  originWarehouse      Warehouse?  @relation("RouteOriginWarehouse", fields: [originWarehouseId], references: [id], onDelete: SetNull)
+  destinationWarehouse Warehouse?  @relation("RouteDestinationWarehouse", fields: [destinationWarehouseId], references: [id], onDelete: SetNull)
   shipments            Shipment[]
+  /// Containers declared to be traveling this route (Milestone 3D) — used
+  /// only for a soft destination-compatibility check when loading items.
+  containers           Container[]
 
   @@index([tenantId])
   @@map("routes")
@@ -759,27 +765,45 @@ model VehicleDetails {
 
 /// A shipping container, which may carry items belonging to many
 /// different customers/shipments (linked via ContainerItem).
+///
+/// MILESTONE 3D (Load Container/Consolidation): `warehouseId` is the
+/// physical location a container is being loaded at — every item scanned
+/// into this container must currently be at that same warehouse (see
+/// ContainersService.loadItem). `routeId` is optional and only used for a
+/// soft destination-compatibility check, not a hard constraint — this
+/// schema doesn't have structured port/country data precise enough to
+/// safely hard-block on. `loadingFinalizedAt`/`loadingFinalizedByUserId`
+/// mirror Manifest.finalizedAt/finalizedByUserId: once set, the
+/// container's ContainerItem rows are immutable (no more load/unload).
 model Container {
-  id               String          @id @default(cuid())
-  tenantId         String
-  containerNumber  String
-  containerType    ContainerType
-  sealNumber       String?
-  status           ContainerStatus @default(BOOKED)
-  originPort       String?
-  destinationPort  String?
-  departureDate    DateTime?
-  estimatedArrival DateTime?
-  actualArrival    DateTime?
-  createdAt        DateTime        @default(now())
-  updatedAt        DateTime        @updatedAt
+  id                       String          @id @default(cuid())
+  tenantId                 String
+  containerNumber          String
+  containerType            ContainerType
+  sealNumber               String?
+  status                   ContainerStatus @default(BOOKED)
+  warehouseId              String?
+  routeId                  String?
+  originPort               String?
+  destinationPort          String?
+  departureDate            DateTime?
+  estimatedArrival         DateTime?
+  actualArrival            DateTime?
+  loadingFinalizedAt       DateTime?
+  loadingFinalizedByUserId String?
+  createdAt                DateTime        @default(now())
+  updatedAt                DateTime        @updatedAt
 
-  tenant    Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  items     ContainerItem[]
-  manifests Manifest[]
+  tenant                 Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  warehouse              Warehouse?      @relation(fields: [warehouseId], references: [id], onDelete: SetNull)
+  route                  Route?          @relation(fields: [routeId], references: [id], onDelete: SetNull)
+  loadingFinalizedByUser User?           @relation(fields: [loadingFinalizedByUserId], references: [id], onDelete: SetNull)
+  items                  ContainerItem[]
+  manifests              Manifest[]
 
   @@unique([tenantId, containerNumber])
   @@index([tenantId])
+  @@index([warehouseId])
   @@map("containers")
 }
 

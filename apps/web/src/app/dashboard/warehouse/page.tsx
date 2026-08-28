@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import type { WarehouseActivityEntry, WarehouseItemDetail, WarehouseSummary } from '@transatlantic/shared';
+import { LoadContainerWorkspace } from '@/components/warehouse/LoadContainerWorkspace';
 import { ModeSelector, type WarehouseMode } from '@/components/warehouse/ModeSelector';
 import { ProcessWorkspace } from '@/components/warehouse/ProcessWorkspace';
 import { ReceiveWorkspace } from '@/components/warehouse/ReceiveWorkspace';
@@ -90,6 +91,27 @@ export default function WarehousePage() {
                 selectedWarehouseId={selectedWarehouseId}
                 onWarehouseChange={setSelectedWarehouseId}
                 onProcessed={reload}
+              />
+            ) : (
+              <p className="text-sm text-slate-500">Loading warehouses…</p>
+            )}
+          </Card>
+        </section>
+      )}
+
+      {mode === 'LOAD' && (
+        <section>
+          <h2 className="text-lg font-semibold text-slate-900">Load Container</h2>
+          <p className="mt-1 text-sm text-slate-500">
+            Open or book a container, then scan Processed / Ready items into it. Held, unprocessed, or already-loaded
+            items are rejected automatically.
+          </p>
+          <Card className="mt-3">
+            {warehouses.length > 0 ? (
+              <LoadContainerWorkspace
+                warehouses={warehouses}
+                selectedWarehouseId={selectedWarehouseId}
+                onWarehouseChange={setSelectedWarehouseId}
               />
             ) : (
               <p className="text-sm text-slate-500">Loading warehouses…</p>

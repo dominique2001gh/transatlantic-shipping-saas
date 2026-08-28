@@ -99,9 +99,37 @@ export async function createTestTenant(
   };
 }
 
-/** Deletes a test tenant and (via cascade) everything created under it. */
+/**
+ * Deletes a test tenant and (via cascade) everything created under it.
+ * Retries on transient failures (e.g. brief connection-pool pressure when
+ * many e2e spec files run back-to-back in the same process) instead of
+ * silently swallowing every error — a real, non-transient failure here
+ * must be visible, not hidden, since it means ephemeral test data would
+ * otherwise leak into the shared dev database. `test/global-teardown.ts`
+ * is the deterministic backstop: even if this throws (e.g. the process
+ * is killed before this ever runs), the global teardown sweeps up any
+ * `e2e-*` tenant left behind after the full suite finishes.
+ */
 export async function deleteTestTenant(prisma: PrismaClient, tenantId: string): Promise<void> {
-  await prisma.tenant.delete({ where: { id: tenantId } }).catch(() => undefined);
+  const MAX_ATTEMPTS = 3;
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      await prisma.tenant.delete({ where: { id: tenantId } });
+      return;
+    } catch (error) {
+      lastError = error;
+      // "Record not found" (P2025) means it's already gone — not an error.
+      if ((error as { code?: string }).code === 'P2025') {
+        return;
+      }
+      if (attempt < MAX_ATTEMPTS) {
+        await new Promise((resolve) => setTimeout(resolve, 150 * attempt));
+      }
+    }
+  }
+  console.error(`deleteTestTenant: failed to delete tenant ${tenantId} after ${MAX_ATTEMPTS} attempts.`, lastError);
+  throw lastError;
 }
 
 /** Adds one more user of an arbitrary role to an already-created test tenant — e.g. for RBAC checks. */
