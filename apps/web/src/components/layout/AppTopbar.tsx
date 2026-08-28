@@ -16,7 +16,7 @@ export function AppTopbar({
   const pathname = usePathname();
 
   return (
-    <header className="border-b border-slate-200 bg-white">
+    <header className="border-b border-slate-200 bg-white print:hidden">
       <div className="flex items-center justify-between gap-4 px-4 py-3 sm:px-6">
         <div className="min-w-0">
           <p className="truncate text-sm font-semibold text-slate-900">{tenantLabel}</p>

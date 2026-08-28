@@ -38,3 +38,71 @@ body {
 * {
   @apply border-slate-200;
 }
+
+/* Shipment item labels (Milestone 3B) — printable via window.print(). */
+.label-sheet {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.item-label {
+  width: 3.5in;
+  padding: 0.3in;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.12in;
+  text-align: center;
+  border: 1px solid #cbd5e1;
+  border-radius: 0.5rem;
+  background: white;
+}
+
+.item-label__company {
+  font-weight: 700;
+  font-size: 0.95rem;
+}
+
+.item-label__tracking {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 0.85rem;
+  color: #334155;
+}
+
+.item-label__sequence {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #64748b;
+}
+
+.item-label__type,
+.item-label__destination {
+  font-size: 0.8rem;
+  color: #334155;
+}
+
+.item-label__barcode {
+  width: 100%;
+  max-width: 2.6in;
+}
+
+.item-label__qr {
+  margin-top: 0.05in;
+}
+
+.item-label__code {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+}
+
+@media print {
+  .item-label {
+    border: 1px solid #000;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+}

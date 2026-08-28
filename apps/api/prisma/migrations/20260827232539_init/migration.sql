@@ -1,5 +1,5 @@
 -- CreateEnum
-CREATE TYPE "UserRole" AS ENUM ('PLATFORM_ADMIN', 'TENANT_OWNER', 'TENANT_ADMIN', 'WAREHOUSE_STAFF', 'CUSTOMER_SERVICE', 'ACCOUNTANT', 'DESTINATION_AGENT', 'CUSTOMER');
+CREATE TYPE "UserRole" AS ENUM ('PLATFORM_ADMIN', 'TENANT_OWNER', 'TENANT_ADMIN', 'WAREHOUSE_MANAGER', 'WAREHOUSE_STAFF', 'CUSTOMER_SERVICE', 'ACCOUNTANT', 'DESTINATION_AGENT', 'DRIVER', 'CUSTOMER');
 
 -- CreateEnum
 CREATE TYPE "ShipmentMode" AS ENUM ('AIR', 'OCEAN_LCL', 'OCEAN_FCL', 'RORO');
@@ -9,6 +9,9 @@ CREATE TYPE "ShipmentStatus" AS ENUM ('DRAFT', 'QUOTE_REQUESTED', 'AWAITING_ITEM
 
 -- CreateEnum
 CREATE TYPE "ShipmentItemType" AS ENUM ('BOX', 'BARREL', 'PALLET', 'CRATE', 'VEHICLE', 'MACHINERY', 'HOUSEHOLD_GOODS', 'OTHER');
+
+-- CreateEnum
+CREATE TYPE "ShipmentItemStatus" AS ENUM ('REGISTERED', 'RECEIVED_ORIGIN_WAREHOUSE', 'MEASURED', 'PROCESSED', 'CONSOLIDATED', 'ASSIGNED_TO_CONTAINER', 'LOADED', 'DEPARTED_ORIGIN', 'IN_TRANSIT', 'ARRIVED_DESTINATION', 'RECEIVED_DESTINATION_WAREHOUSE', 'READY_FOR_PICKUP', 'OUT_FOR_DELIVERY', 'DELIVERED', 'PICKED_UP', 'EXCEPTION', 'CANCELLED');
 
 -- CreateEnum
 CREATE TYPE "DimensionUnit" AS ENUM ('IN', 'CM');
@@ -27,6 +30,12 @@ CREATE TYPE "ManifestStatus" AS ENUM ('DRAFT', 'FINALIZED', 'SUBMITTED', 'ARCHIV
 
 -- CreateEnum
 CREATE TYPE "VehicleTitleStatus" AS ENUM ('CLEAN', 'SALVAGE', 'REBUILT', 'LIEN', 'BILL_OF_SALE_ONLY', 'UNKNOWN');
+
+-- CreateEnum
+CREATE TYPE "TrackingEventType" AS ENUM ('SHIPMENT_CREATED', 'ITEM_REGISTERED', 'RECEIVED_AT_WAREHOUSE', 'MEASURED', 'PROCESSED', 'CONSOLIDATED', 'ASSIGNED_TO_CONTAINER', 'REMOVED_FROM_CONTAINER', 'LOADED', 'DEPARTED_ORIGIN', 'IN_TRANSIT', 'ARRIVED_DESTINATION', 'RECEIVED_DESTINATION_WAREHOUSE', 'READY_FOR_PICKUP', 'OUT_FOR_DELIVERY', 'DELIVERED', 'PICKED_UP', 'EXCEPTION', 'CANCELLED', 'NOTE_ADDED');
+
+-- CreateEnum
+CREATE TYPE "TrackingEventSource" AS ENUM ('MANUAL', 'BARCODE_SCAN', 'QR_SCAN', 'SYSTEM', 'API');
 
 -- CreateEnum
 CREATE TYPE "QuoteStatus" AS ENUM ('DRAFT', 'SENT', 'ACCEPTED', 'DECLINED', 'EXPIRED', 'CONVERTED');
@@ -216,7 +225,10 @@ CREATE TABLE "shipment_items" (
     "id" TEXT NOT NULL,
     "tenantId" TEXT NOT NULL,
     "shipmentId" TEXT NOT NULL,
+    "itemCode" TEXT NOT NULL,
+    "sequenceNumber" INTEGER NOT NULL,
     "itemType" "ShipmentItemType" NOT NULL,
+    "status" "ShipmentItemStatus" NOT NULL DEFAULT 'REGISTERED',
     "description" TEXT,
     "quantity" INTEGER NOT NULL DEFAULT 1,
     "length" DECIMAL(10,2),
@@ -226,6 +238,12 @@ CREATE TABLE "shipment_items" (
     "weight" DECIMAL(10,2),
     "weightUnit" "WeightUnit" NOT NULL DEFAULT 'LB',
     "declaredValue" DECIMAL(12,2),
+    "condition" TEXT,
+    "externalTrackingCarrier" TEXT,
+    "externalTrackingNumber" TEXT,
+    "currentWarehouseId" TEXT,
+    "receivedAt" TIMESTAMP(3),
+    "receivedByUserId" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
@@ -270,15 +288,21 @@ CREATE TABLE "containers" (
 );
 
 -- CreateTable
-CREATE TABLE "container_shipments" (
+CREATE TABLE "container_items" (
     "id" TEXT NOT NULL,
     "tenantId" TEXT NOT NULL,
     "containerId" TEXT NOT NULL,
     "shipmentId" TEXT NOT NULL,
-    "loadedAt" TIMESTAMP(3),
+    "shipmentItemId" TEXT NOT NULL,
+    "loadedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "loadedByUserId" TEXT,
+    "removedAt" TIMESTAMP(3),
+    "removedByUserId" TEXT,
+    "removalReason" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
 
-    CONSTRAINT "container_shipments_pkey" PRIMARY KEY ("id")
+    CONSTRAINT "container_items_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -290,6 +314,8 @@ CREATE TABLE "manifests" (
     "manifestNumber" TEXT NOT NULL,
     "status" "ManifestStatus" NOT NULL DEFAULT 'DRAFT',
     "finalizedAt" TIMESTAMP(3),
+    "finalizedByUserId" TEXT,
+    "snapshotJson" JSONB,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
@@ -301,9 +327,15 @@ CREATE TABLE "tracking_events" (
     "id" TEXT NOT NULL,
     "tenantId" TEXT NOT NULL,
     "shipmentId" TEXT NOT NULL,
-    "status" "ShipmentStatus" NOT NULL,
+    "shipmentItemId" TEXT,
+    "eventType" "TrackingEventType" NOT NULL,
+    "source" "TrackingEventSource" NOT NULL DEFAULT 'MANUAL',
+    "status" "ShipmentStatus",
+    "warehouseId" TEXT,
     "location" TEXT,
     "notes" TEXT,
+    "scanIdentifier" TEXT,
+    "metadata" JSONB,
     "occurredAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "createdByUserId" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -470,10 +502,22 @@ CREATE INDEX "shipments_customerId_idx" ON "shipments"("customerId");
 CREATE INDEX "shipments_status_idx" ON "shipments"("status");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "shipment_items_itemCode_key" ON "shipment_items"("itemCode");
+
+-- CreateIndex
 CREATE INDEX "shipment_items_tenantId_idx" ON "shipment_items"("tenantId");
 
 -- CreateIndex
 CREATE INDEX "shipment_items_shipmentId_idx" ON "shipment_items"("shipmentId");
+
+-- CreateIndex
+CREATE INDEX "shipment_items_status_idx" ON "shipment_items"("status");
+
+-- CreateIndex
+CREATE INDEX "shipment_items_currentWarehouseId_idx" ON "shipment_items"("currentWarehouseId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "shipment_items_shipmentId_sequenceNumber_key" ON "shipment_items"("shipmentId", "sequenceNumber");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "vehicle_details_shipmentItemId_key" ON "vehicle_details"("shipmentItemId");
@@ -488,10 +532,16 @@ CREATE INDEX "containers_tenantId_idx" ON "containers"("tenantId");
 CREATE UNIQUE INDEX "containers_tenantId_containerNumber_key" ON "containers"("tenantId", "containerNumber");
 
 -- CreateIndex
-CREATE INDEX "container_shipments_tenantId_idx" ON "container_shipments"("tenantId");
+CREATE INDEX "container_items_tenantId_idx" ON "container_items"("tenantId");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "container_shipments_containerId_shipmentId_key" ON "container_shipments"("containerId", "shipmentId");
+CREATE INDEX "container_items_containerId_idx" ON "container_items"("containerId");
+
+-- CreateIndex
+CREATE INDEX "container_items_shipmentId_idx" ON "container_items"("shipmentId");
+
+-- CreateIndex
+CREATE INDEX "container_items_shipmentItemId_idx" ON "container_items"("shipmentItemId");
 
 -- CreateIndex
 CREATE INDEX "manifests_tenantId_idx" ON "manifests"("tenantId");
@@ -504,6 +554,15 @@ CREATE INDEX "tracking_events_tenantId_idx" ON "tracking_events"("tenantId");
 
 -- CreateIndex
 CREATE INDEX "tracking_events_shipmentId_idx" ON "tracking_events"("shipmentId");
+
+-- CreateIndex
+CREATE INDEX "tracking_events_shipmentItemId_idx" ON "tracking_events"("shipmentItemId");
+
+-- CreateIndex
+CREATE INDEX "tracking_events_warehouseId_idx" ON "tracking_events"("warehouseId");
+
+-- CreateIndex
+CREATE INDEX "tracking_events_eventType_idx" ON "tracking_events"("eventType");
 
 -- CreateIndex
 CREATE INDEX "quotes_tenantId_idx" ON "quotes"("tenantId");
@@ -593,6 +652,12 @@ ALTER TABLE "shipment_items" ADD CONSTRAINT "shipment_items_tenantId_fkey" FOREI
 ALTER TABLE "shipment_items" ADD CONSTRAINT "shipment_items_shipmentId_fkey" FOREIGN KEY ("shipmentId") REFERENCES "shipments"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "shipment_items" ADD CONSTRAINT "shipment_items_currentWarehouseId_fkey" FOREIGN KEY ("currentWarehouseId") REFERENCES "warehouses"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "shipment_items" ADD CONSTRAINT "shipment_items_receivedByUserId_fkey" FOREIGN KEY ("receivedByUserId") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "vehicle_details" ADD CONSTRAINT "vehicle_details_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "tenants"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
@@ -602,13 +667,22 @@ ALTER TABLE "vehicle_details" ADD CONSTRAINT "vehicle_details_shipmentItemId_fke
 ALTER TABLE "containers" ADD CONSTRAINT "containers_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "tenants"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "container_shipments" ADD CONSTRAINT "container_shipments_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "tenants"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "container_items" ADD CONSTRAINT "container_items_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "tenants"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "container_shipments" ADD CONSTRAINT "container_shipments_containerId_fkey" FOREIGN KEY ("containerId") REFERENCES "containers"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "container_items" ADD CONSTRAINT "container_items_containerId_fkey" FOREIGN KEY ("containerId") REFERENCES "containers"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "container_shipments" ADD CONSTRAINT "container_shipments_shipmentId_fkey" FOREIGN KEY ("shipmentId") REFERENCES "shipments"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "container_items" ADD CONSTRAINT "container_items_shipmentId_fkey" FOREIGN KEY ("shipmentId") REFERENCES "shipments"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "container_items" ADD CONSTRAINT "container_items_shipmentItemId_fkey" FOREIGN KEY ("shipmentItemId") REFERENCES "shipment_items"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "container_items" ADD CONSTRAINT "container_items_loadedByUserId_fkey" FOREIGN KEY ("loadedByUserId") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "container_items" ADD CONSTRAINT "container_items_removedByUserId_fkey" FOREIGN KEY ("removedByUserId") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "manifests" ADD CONSTRAINT "manifests_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "tenants"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -617,10 +691,22 @@ ALTER TABLE "manifests" ADD CONSTRAINT "manifests_tenantId_fkey" FOREIGN KEY ("t
 ALTER TABLE "manifests" ADD CONSTRAINT "manifests_containerId_fkey" FOREIGN KEY ("containerId") REFERENCES "containers"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "manifests" ADD CONSTRAINT "manifests_finalizedByUserId_fkey" FOREIGN KEY ("finalizedByUserId") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "tracking_events" ADD CONSTRAINT "tracking_events_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "tenants"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "tracking_events" ADD CONSTRAINT "tracking_events_shipmentId_fkey" FOREIGN KEY ("shipmentId") REFERENCES "shipments"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "tracking_events" ADD CONSTRAINT "tracking_events_shipmentItemId_fkey" FOREIGN KEY ("shipmentItemId") REFERENCES "shipment_items"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "tracking_events" ADD CONSTRAINT "tracking_events_warehouseId_fkey" FOREIGN KEY ("warehouseId") REFERENCES "warehouses"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "tracking_events" ADD CONSTRAINT "tracking_events_createdByUserId_fkey" FOREIGN KEY ("createdByUserId") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "quotes" ADD CONSTRAINT "quotes_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "tenants"("id") ON DELETE CASCADE ON UPDATE CASCADE;

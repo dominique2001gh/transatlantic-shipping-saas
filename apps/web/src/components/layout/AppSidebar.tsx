@@ -16,7 +16,7 @@ export function AppSidebar({
   const pathname = usePathname();
 
   return (
-    <aside className="hidden w-64 shrink-0 border-r border-slate-200 bg-primary-950 text-white lg:flex lg:flex-col">
+    <aside className="hidden w-64 shrink-0 border-r border-slate-200 bg-primary-950 text-white lg:flex lg:flex-col print:hidden">
       <div className="px-6 py-6">
         <p className="text-xs font-semibold uppercase tracking-widest text-primary-300">
           {eyebrow}
