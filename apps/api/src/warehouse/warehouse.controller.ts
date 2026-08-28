@@ -1,11 +1,14 @@
 import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
 import type { AuthenticatedUser } from '@transatlantic/shared';
-import { UserRole } from '@transatlantic/shared';
+import { ShipmentItemStatus, UserRole } from '@transatlantic/shared';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { requireTenantId } from '../common/tenant/tenant.util';
+import { ProcessItemDto } from './dto/process-item.dto';
 import { ReceiveItemDto } from './dto/receive-item.dto';
 import { WarehouseService } from './warehouse.service';
+
+const VALID_ITEM_STATUSES = new Set<string>(Object.values(ShipmentItemStatus));
 
 /**
  * Physical warehouse operations are narrower than general shipment
@@ -48,13 +51,28 @@ export class WarehouseController {
     return this.warehouseService.receiveItem(requireTenantId(user.tenantId), user.id, itemId, dto);
   }
 
+  @Post('items/:itemId/process')
+  process(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('itemId') itemId: string,
+    @Body() dto: ProcessItemDto,
+  ) {
+    return this.warehouseService.processItem(requireTenantId(user.tenantId), user.id, itemId, dto);
+  }
+
   @Get('inventory')
   inventory(
     @CurrentUser() user: AuthenticatedUser,
     @Query('warehouseId') warehouseId?: string,
     @Query('search') search?: string,
+    @Query('status') status?: string,
   ) {
-    return this.warehouseService.getInventory(requireTenantId(user.tenantId), { warehouseId, search });
+    const validStatus = status && VALID_ITEM_STATUSES.has(status) ? (status as ShipmentItemStatus) : undefined;
+    return this.warehouseService.getInventory(requireTenantId(user.tenantId), {
+      warehouseId,
+      search,
+      status: validStatus,
+    });
   }
 
   @Get('activity')

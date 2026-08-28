@@ -1,5 +1,5 @@
 import { ShipmentItemStatus, ShipmentStatus, TrackingEventType } from '@transatlantic/shared';
-import { IsDateString, IsEnum, IsOptional, IsString } from 'class-validator';
+import { IsDateString, IsEnum, IsObject, IsOptional, IsString } from 'class-validator';
 
 export class CreateTrackingEventDto {
   @IsEnum(TrackingEventType)
@@ -36,4 +36,9 @@ export class CreateTrackingEventDto {
   @IsOptional()
   @IsDateString()
   occurredAt?: string;
+
+  /** Flexible structured detail for this event (e.g. measured dimensions, exception detail). */
+  @IsOptional()
+  @IsObject()
+  metadata?: Record<string, unknown>;
 }

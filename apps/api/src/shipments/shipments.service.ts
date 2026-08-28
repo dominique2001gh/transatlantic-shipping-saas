@@ -253,6 +253,7 @@ export class ShipmentsService {
           location: dto.location ?? null,
           notes: dto.notes ?? null,
           scanIdentifier: options?.scanIdentifier ?? null,
+          metadata: (dto.metadata as Prisma.InputJsonValue | undefined) ?? undefined,
           occurredAt: dto.occurredAt ? new Date(dto.occurredAt) : undefined,
           createdByUserId: actorUserId,
         },

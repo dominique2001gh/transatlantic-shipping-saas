@@ -1,4 +1,4 @@
-import { DimensionUnit, ShipmentItemType, WeightUnit } from '@transatlantic/shared';
+import { DimensionUnit, ShipmentItemCondition, ShipmentItemType, WeightUnit } from '@transatlantic/shared';
 import { IsEnum, IsInt, IsNumber, IsOptional, IsString, Min } from 'class-validator';
 
 /**
@@ -50,8 +50,8 @@ export class UpdateShipmentItemDto {
   declaredValue?: number;
 
   @IsOptional()
-  @IsString()
-  condition?: string;
+  @IsEnum(ShipmentItemCondition)
+  condition?: ShipmentItemCondition;
 
   @IsOptional()
   @IsString()

@@ -1,6 +1,8 @@
 import type {
   AddressType,
   DimensionUnit,
+  ItemProcessingResult,
+  ShipmentItemCondition,
   ShipmentItemStatus,
   ShipmentItemType,
   ShipmentMode,
@@ -102,12 +104,15 @@ export interface ShipmentItemSummary {
   weight: string | null;
   weightUnit: WeightUnit;
   declaredValue: string | null;
-  condition: string | null;
+  condition: ShipmentItemCondition | null;
   externalTrackingCarrier: string | null;
   externalTrackingNumber: string | null;
   currentWarehouseId: string | null;
   receivedAt: string | null;
   receivedByUserId: string | null;
+  /** Denormalized convenience only — see ItemInspectionSummary for the full history. */
+  lastInspectedAt: string | null;
+  lastInspectedByUserId: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -193,7 +198,26 @@ export interface WarehouseSummary {
   isDestinationWarehouse: boolean;
 }
 
-/** A fully resolved ShipmentItem — the shape returned by scan/search/receive/inventory. */
+/** One inspection/processing record (Milestone 3C) — append-only history behind a ShipmentItem. */
+export interface ItemInspectionSummary {
+  id: string;
+  weight: string | null;
+  weightUnit: WeightUnit | null;
+  length: string | null;
+  width: string | null;
+  height: string | null;
+  dimensionUnit: DimensionUnit | null;
+  condition: ShipmentItemCondition;
+  result: ItemProcessingResult;
+  hasException: boolean;
+  exceptionDescription: string | null;
+  notes: string | null;
+  inspectedAt: string;
+  inspectedByUser: TrackingEventActor | null;
+  warehouse: { id: string; name: string; code: string } | null;
+}
+
+/** A fully resolved ShipmentItem — the shape returned by scan/search/receive/inventory/process. */
 export interface WarehouseItemDetail {
   id: string;
   itemCode: string;
@@ -203,7 +227,13 @@ export interface WarehouseItemDetail {
   description: string | null;
   weight: string | null;
   weightUnit: WeightUnit;
+  length: string | null;
+  width: string | null;
+  height: string | null;
+  dimensionUnit: DimensionUnit;
+  condition: ShipmentItemCondition | null;
   receivedAt: string | null;
+  lastInspectedAt: string | null;
   shipment: {
     id: string;
     trackingNumber: string;
@@ -219,6 +249,9 @@ export interface WarehouseItemDetail {
   };
   currentWarehouse: { id: string; name: string; code: string } | null;
   receivedByUser: TrackingEventActor | null;
+  lastInspectedByUser: TrackingEventActor | null;
+  /** Most recent inspection, if any — null for an item that has never been processed. */
+  lastInspection: ItemInspectionSummary | null;
 }
 
 export interface WarehouseActivityEntry {

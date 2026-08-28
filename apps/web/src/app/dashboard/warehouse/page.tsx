@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { WarehouseActivityEntry, WarehouseItemDetail, WarehouseSummary } from '@transatlantic/shared';
 import { ModeSelector, type WarehouseMode } from '@/components/warehouse/ModeSelector';
+import { ProcessWorkspace } from '@/components/warehouse/ProcessWorkspace';
 import { ReceiveWorkspace } from '@/components/warehouse/ReceiveWorkspace';
 import { RecentActivityList } from '@/components/warehouse/RecentActivityList';
 import { WarehouseInventoryTable } from '@/components/warehouse/WarehouseInventoryTable';
@@ -67,6 +68,28 @@ export default function WarehousePage() {
                 selectedWarehouseId={selectedWarehouseId}
                 onWarehouseChange={setSelectedWarehouseId}
                 onReceived={reload}
+              />
+            ) : (
+              <p className="text-sm text-slate-500">Loading warehouses…</p>
+            )}
+          </Card>
+        </section>
+      )}
+
+      {mode === 'PROCESS' && (
+        <section>
+          <h2 className="text-lg font-semibold text-slate-900">Process / Inspect Items</h2>
+          <p className="mt-1 text-sm text-slate-500">
+            Scan a received item to record its actual weight, dimensions, and condition. Damaged or flagged items are
+            automatically held and never marked ready for container loading.
+          </p>
+          <Card className="mt-3">
+            {warehouses.length > 0 ? (
+              <ProcessWorkspace
+                warehouses={warehouses}
+                selectedWarehouseId={selectedWarehouseId}
+                onWarehouseChange={setSelectedWarehouseId}
+                onProcessed={reload}
               />
             ) : (
               <p className="text-sm text-slate-500">Loading warehouses…</p>

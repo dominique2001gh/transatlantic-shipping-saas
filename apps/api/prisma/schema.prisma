@@ -193,6 +193,28 @@ enum TrackingEventSource {
   API
 }
 
+/// Controlled vocabulary for the physical condition observed during a
+/// warehouse inspection (Milestone 3C). Replaces the free-text
+/// ShipmentItem.condition that Milestone 3B left as a placeholder.
+enum ShipmentItemCondition {
+  GOOD
+  MINOR_DAMAGE
+  DAMAGED
+  REPACKAGED
+  OTHER
+}
+
+/// Outcome of a warehouse inspection: whether the item may continue
+/// forward through the pipeline (READY) or must not (HOLD). This is
+/// deliberately the only signal container-loading eligibility should ever
+/// need — it maps 1:1 onto ShipmentItemStatus.PROCESSED vs .EXCEPTION, so
+/// "is this item eligible to load" is always a single-column check, never
+/// a derived combination of condition + result + notes.
+enum ItemProcessingResult {
+  READY
+  HOLD
+}
+
 enum QuoteStatus {
   DRAFT
   SENT
@@ -285,25 +307,26 @@ model Tenant {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  settings       TenantSettings?
-  users          User[]
-  customers      Customer[]
-  addresses      Address[]
-  warehouses     Warehouse[]
-  routes         Route[]
-  shipments      Shipment[]
-  shipmentItems  ShipmentItem[]
-  vehicleDetails VehicleDetails[]
-  containers     Container[]
-  containerItems ContainerItem[]
-  manifests      Manifest[]
-  trackingEvents TrackingEvent[]
-  quotes         Quote[]
-  invoices       Invoice[]
-  invoiceItems   InvoiceItem[]
-  payments       Payment[]
-  documents      Document[]
-  notifications  Notification[]
+  settings        TenantSettings?
+  users           User[]
+  customers       Customer[]
+  addresses       Address[]
+  warehouses      Warehouse[]
+  routes          Route[]
+  shipments       Shipment[]
+  shipmentItems   ShipmentItem[]
+  itemInspections ItemInspection[]
+  vehicleDetails  VehicleDetails[]
+  containers      Container[]
+  containerItems  ContainerItem[]
+  manifests       Manifest[]
+  trackingEvents  TrackingEvent[]
+  quotes          Quote[]
+  invoices        Invoice[]
+  invoiceItems    InvoiceItem[]
+  payments        Payment[]
+  documents       Document[]
+  notifications   Notification[]
 
   @@map("tenants")
 }
@@ -311,7 +334,7 @@ model Tenant {
 /// Per-tenant configuration, including the configurable numbering prefixes
 /// referenced throughout the spec (customer numbers, tracking numbers).
 model TenantSettings {
-  id     String @id @default(cuid())
+  id       String @id @default(cuid())
   tenantId String @unique
 
   customerNumberPrefix   String @default("CUST")
@@ -342,27 +365,29 @@ model TenantSettings {
 /// user has a tenantId and is linked 1:1 to a Customer record;
 /// PLATFORM_ADMIN users have tenantId = null.
 model User {
-  id           String   @id @default(cuid())
+  id           String    @id @default(cuid())
   tenantId     String?
-  email        String   @unique
+  email        String    @unique
   passwordHash String
   firstName    String
   lastName     String
   phone        String?
   role         UserRole
-  isActive     Boolean  @default(true)
+  isActive     Boolean   @default(true)
   lastLoginAt  DateTime?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 
   tenant   Tenant?   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   customer Customer? @relation("CustomerUser")
 
   notifications         Notification[]
-  itemsReceived         ShipmentItem[]  // items this user marked received (ShipmentItem.receivedByUserId)
+  itemsReceived         ShipmentItem[] // items this user marked received (ShipmentItem.receivedByUserId)
+  itemsLastInspected    ShipmentItem[]   @relation("ShipmentItemLastInspectedBy") // items this user most recently inspected (denormalized convenience only — see ItemInspection for history)
+  itemInspections       ItemInspection[] // full inspection history this user performed
   trackingEventsCreated TrackingEvent[] // audit trail rows this user is the actor for
-  containerItemsLoaded  ContainerItem[] @relation("ContainerItemLoadedBy")
-  containerItemsRemoved ContainerItem[] @relation("ContainerItemRemovedBy")
+  containerItemsLoaded  ContainerItem[]  @relation("ContainerItemLoadedBy")
+  containerItemsRemoved ContainerItem[]  @relation("ContainerItemRemovedBy")
   manifestsFinalized    Manifest[]
 
   @@index([tenantId])
@@ -383,14 +408,14 @@ model Customer {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  tenant    Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  user      User?      @relation("CustomerUser", fields: [userId], references: [id], onDelete: SetNull)
-  addresses Address[]
-  shipments Shipment[]
-  quotes    Quote[]
-  invoices  Invoice[]
-  payments  Payment[]
-  documents Document[]
+  tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user          User?          @relation("CustomerUser", fields: [userId], references: [id], onDelete: SetNull)
+  addresses     Address[]
+  shipments     Shipment[]
+  quotes        Quote[]
+  invoices      Invoice[]
+  payments      Payment[]
+  documents     Document[]
   notifications Notification[]
 
   @@unique([tenantId, customerNumber])
@@ -459,8 +484,9 @@ model Warehouse {
   /// Updated as items move through receiving, processing, and destination
   /// handoff — this is a live "where is it right now" pointer, not history;
   /// TrackingEvent.warehouseId is the historical record.
-  currentItems   ShipmentItem[]
-  trackingEvents TrackingEvent[]
+  currentItems    ShipmentItem[]
+  trackingEvents  TrackingEvent[]
+  itemInspections ItemInspection[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -470,23 +496,23 @@ model Warehouse {
 /// An optional named lane between two warehouses/countries, used later to
 /// drive quoting and transit-time estimates.
 model Route {
-  id                    String       @id @default(cuid())
-  tenantId              String
-  name                  String
-  originWarehouseId     String?
+  id                     String       @id @default(cuid())
+  tenantId               String
+  name                   String
+  originWarehouseId      String?
   destinationWarehouseId String?
-  originCountry         String
-  destinationCountry    String
-  shipmentMode          ShipmentMode
-  transitDaysEstimate   Int?
-  isActive              Boolean      @default(true)
-  createdAt             DateTime     @default(now())
-  updatedAt             DateTime     @updatedAt
+  originCountry          String
+  destinationCountry     String
+  shipmentMode           ShipmentMode
+  transitDaysEstimate    Int?
+  isActive               Boolean      @default(true)
+  createdAt              DateTime     @default(now())
+  updatedAt              DateTime     @updatedAt
 
-  tenant              Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  originWarehouse     Warehouse? @relation("RouteOriginWarehouse", fields: [originWarehouseId], references: [id], onDelete: SetNull)
+  tenant               Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  originWarehouse      Warehouse? @relation("RouteOriginWarehouse", fields: [originWarehouseId], references: [id], onDelete: SetNull)
   destinationWarehouse Warehouse? @relation("RouteDestinationWarehouse", fields: [destinationWarehouseId], references: [id], onDelete: SetNull)
-  shipments           Shipment[]
+  shipments            Shipment[]
 
   @@index([tenantId])
   @@map("routes")
@@ -509,32 +535,33 @@ model Route {
 /// ShipmentsService, WarehouseService), so this only relaxes a DB
 /// constraint that was stricter than the access pattern requires.
 model Shipment {
-  id                      String         @id @default(cuid())
-  tenantId                String
-  customerId              String
-  trackingNumber          String
-  shipmentMode            ShipmentMode
-  originCountry           String
-  destinationCountry      String
-  originLocation          String?
-  destinationLocation     String?
-  originWarehouseId       String?
-  destinationWarehouseId  String?
-  routeId                 String?
-  status                  ShipmentStatus @default(DRAFT)
-  description             String?
-  declaredValue           Decimal?       @db.Decimal(12, 2)
-  currency                String?
-  createdAt               DateTime       @default(now())
-  updatedAt               DateTime       @updatedAt
+  id                     String         @id @default(cuid())
+  tenantId               String
+  customerId             String
+  trackingNumber         String
+  shipmentMode           ShipmentMode
+  originCountry          String
+  destinationCountry     String
+  originLocation         String?
+  destinationLocation    String?
+  originWarehouseId      String?
+  destinationWarehouseId String?
+  routeId                String?
+  status                 ShipmentStatus @default(DRAFT)
+  description            String?
+  declaredValue          Decimal?       @db.Decimal(12, 2)
+  currency               String?
+  createdAt              DateTime       @default(now())
+  updatedAt              DateTime       @updatedAt
 
-  tenant               Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  customer             Customer        @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  originWarehouse      Warehouse?      @relation("ShipmentOriginWarehouse", fields: [originWarehouseId], references: [id], onDelete: SetNull)
-  destinationWarehouse Warehouse?      @relation("ShipmentDestinationWarehouse", fields: [destinationWarehouseId], references: [id], onDelete: SetNull)
-  route                Route?          @relation(fields: [routeId], references: [id], onDelete: SetNull)
+  tenant               Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customer             Customer         @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  originWarehouse      Warehouse?       @relation("ShipmentOriginWarehouse", fields: [originWarehouseId], references: [id], onDelete: SetNull)
+  destinationWarehouse Warehouse?       @relation("ShipmentDestinationWarehouse", fields: [destinationWarehouseId], references: [id], onDelete: SetNull)
+  route                Route?           @relation(fields: [routeId], references: [id], onDelete: SetNull)
   items                ShipmentItem[]
   trackingEvents       TrackingEvent[]
+  itemInspections      ItemInspection[]
   /// Item-level container assignments for this shipment's items. A single
   /// shipment's items are not guaranteed to all be in the same container.
   containerItems       ContainerItem[]
@@ -556,9 +583,9 @@ model Shipment {
 /// optional but present to support future dimensional/volumetric weight
 /// pricing.
 model ShipmentItem {
-  id             String             @id @default(cuid())
-  tenantId       String
-  shipmentId     String
+  id         String @id @default(cuid())
+  tenantId   String
+  shipmentId String
 
   /// Scan payload. Derived from the parent shipment's trackingNumber plus
   /// this item's sequenceNumber (e.g. "TAL-2026-000001-02"), so it is
@@ -570,22 +597,25 @@ model ShipmentItem {
   /// 1-based position of this item within its shipment (item 2 of 4).
   sequenceNumber Int
 
-  itemType       ShipmentItemType
+  itemType      ShipmentItemType
   /// Denormalized current workflow state; TrackingEvent rows (filtered by
   /// shipmentItemId) are the authoritative history behind this value.
-  status         ShipmentItemStatus @default(REGISTERED)
-  description    String?
-  quantity       Int                @default(1)
-  length         Decimal?           @db.Decimal(10, 2)
-  width          Decimal?           @db.Decimal(10, 2)
-  height         Decimal?           @db.Decimal(10, 2)
-  dimensionUnit  DimensionUnit      @default(IN)
-  weight         Decimal?           @db.Decimal(10, 2)
-  weightUnit     WeightUnit         @default(LB)
-  declaredValue  Decimal?           @db.Decimal(12, 2)
-  /// Free-text condition notes captured during warehouse processing
-  /// (e.g. "minor dent on corner") — not a controlled vocabulary yet.
-  condition      String?
+  status        ShipmentItemStatus     @default(REGISTERED)
+  description   String?
+  quantity      Int                    @default(1)
+  length        Decimal?               @db.Decimal(10, 2)
+  width         Decimal?               @db.Decimal(10, 2)
+  height        Decimal?               @db.Decimal(10, 2)
+  dimensionUnit DimensionUnit          @default(IN)
+  weight        Decimal?               @db.Decimal(10, 2)
+  weightUnit    WeightUnit             @default(LB)
+  declaredValue Decimal?               @db.Decimal(12, 2)
+  /// Controlled-vocabulary physical condition, denormalized from the most
+  /// recent ItemInspection row the same way `status` is denormalized from
+  /// TrackingEvent — null until the item has been inspected at least once.
+  /// See Milestone 3C: ItemInspection is the append-only history behind
+  /// this "current known condition" convenience field.
+  condition     ShipmentItemCondition?
 
   /// Reference-only external carrier tracking info (UPS/FedEx/USPS/Amazon
   /// inbound leg, etc.). Never used as an internal lookup key — itemCode
@@ -600,16 +630,29 @@ model ShipmentItem {
   receivedAt         DateTime?
   receivedByUserId   String?
 
+  /// Denormalized "current summary" convenience fields only — same
+  /// relationship receivedAt/receivedByUserId have to the receiving
+  /// TrackingEvent. ItemInspection is the authoritative, append-only
+  /// history; these two columns just avoid a join for "who/when was this
+  /// last looked at" reads and are overwritten on every (re)inspection.
+  lastInspectedAt       DateTime?
+  lastInspectedByUserId String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  tenant           Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  shipment         Shipment        @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
-  vehicleDetails   VehicleDetails?
-  currentWarehouse Warehouse?      @relation(fields: [currentWarehouseId], references: [id], onDelete: SetNull)
-  receivedByUser   User?           @relation(fields: [receivedByUserId], references: [id], onDelete: SetNull)
-  trackingEvents   TrackingEvent[]
-  containerItems   ContainerItem[]
+  tenant              Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  shipment            Shipment         @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+  vehicleDetails      VehicleDetails?
+  currentWarehouse    Warehouse?       @relation(fields: [currentWarehouseId], references: [id], onDelete: SetNull)
+  receivedByUser      User?            @relation(fields: [receivedByUserId], references: [id], onDelete: SetNull)
+  lastInspectedByUser User?            @relation("ShipmentItemLastInspectedBy", fields: [lastInspectedByUserId], references: [id], onDelete: SetNull)
+  trackingEvents      TrackingEvent[]
+  containerItems      ContainerItem[]
+  /// Full append-only inspection history (Milestone 3C). Ordered by
+  /// inspectedAt for "most recent" reads; never updated or deleted, so
+  /// reinspection always adds a new row instead of overwriting one.
+  inspections         ItemInspection[]
 
   @@unique([shipmentId, sequenceNumber])
   @@unique([tenantId, itemCode])
@@ -618,6 +661,73 @@ model ShipmentItem {
   @@index([status])
   @@index([currentWarehouseId])
   @@map("shipment_items")
+}
+
+/// One warehouse inspection/processing event for a single ShipmentItem
+/// (Milestone 3C). Append-only, like TrackingEvent — a reinspection
+/// creates a new row rather than editing a prior one, so the full history
+/// of what was observed and decided is always reconstructable. The
+/// `trackingEventId` links each inspection to the TrackingEvent it
+/// produced (PROCESSED or EXCEPTION), keeping the audit trail's single
+/// timeline in sync with this table's richer structured detail.
+///
+/// `condition`/`result` here are the point-in-time record; ShipmentItem's
+/// `condition`/`lastInspectedAt`/`lastInspectedByUserId` are only a
+/// denormalized "most recent" convenience read of this table — never the
+/// other way around. `result` never gets its own denormalized copy on
+/// ShipmentItem: ShipmentItemStatus (PROCESSED vs EXCEPTION) is already
+/// the single authoritative "is this item eligible to move forward"
+/// signal, so a future container-loading check only ever needs to read
+/// one column, never combine this table with ShipmentItem.status.
+///
+/// Photos/damage documentation are intentionally not modeled yet —
+/// Document already has a `PHOTO` DocumentType but no ShipmentItem/
+/// inspection FK. Adding a nullable `shipmentItemId` (or
+/// `itemInspectionId`) to Document later is a small, additive migration,
+/// not a redesign of this table.
+model ItemInspection {
+  id             String @id @default(cuid())
+  tenantId       String
+  shipmentId     String
+  shipmentItemId String
+  warehouseId    String
+
+  /// Actual measurements captured during this inspection. Distinct from
+  /// (and, on success, copied forward into) ShipmentItem's own
+  /// length/width/height/weight columns, which this inspection makes
+  /// authoritative going forward — see WarehouseService.processItem.
+  weight        Decimal?       @db.Decimal(10, 2)
+  weightUnit    WeightUnit?
+  length        Decimal?       @db.Decimal(10, 2)
+  width         Decimal?       @db.Decimal(10, 2)
+  height        Decimal?       @db.Decimal(10, 2)
+  dimensionUnit DimensionUnit?
+
+  condition            ShipmentItemCondition
+  result               ItemProcessingResult
+  hasException         Boolean               @default(false)
+  exceptionDescription String?
+  notes                String?
+
+  inspectedByUserId String?
+  inspectedAt       DateTime @default(now())
+  trackingEventId   String?  @unique
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant          Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  shipment        Shipment       @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+  shipmentItem    ShipmentItem   @relation(fields: [shipmentItemId], references: [id], onDelete: Cascade)
+  warehouse       Warehouse      @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+  inspectedByUser User?          @relation(fields: [inspectedByUserId], references: [id], onDelete: SetNull)
+  trackingEvent   TrackingEvent? @relation(fields: [trackingEventId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@index([shipmentId])
+  @@index([shipmentItemId])
+  @@index([warehouseId])
+  @@map("item_inspections")
 }
 
 /// Extra detail attached to a ShipmentItem of type VEHICLE. Modeled as a
@@ -687,13 +797,13 @@ model Container {
 /// constraint here, because a legitimate item history can include more
 /// than one load/remove cycle over time.
 model ContainerItem {
-  id              String    @id @default(cuid())
-  tenantId        String
-  containerId     String
+  id             String @id @default(cuid())
+  tenantId       String
+  containerId    String
   /// Denormalized alongside shipmentItemId so manifest generation can
   /// group/join by shipment without an extra hop through ShipmentItem.
-  shipmentId      String
-  shipmentItemId  String
+  shipmentId     String
+  shipmentItemId String
 
   loadedAt        DateTime  @default(now())
   loadedByUserId  String?
@@ -738,9 +848,9 @@ model Manifest {
   createdAt         DateTime       @default(now())
   updatedAt         DateTime       @updatedAt
 
-  tenant           Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  container        Container? @relation(fields: [containerId], references: [id], onDelete: SetNull)
-  finalizedByUser  User?      @relation(fields: [finalizedByUserId], references: [id], onDelete: SetNull)
+  tenant          Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  container       Container? @relation(fields: [containerId], references: [id], onDelete: SetNull)
+  finalizedByUser User?      @relation(fields: [finalizedByUserId], references: [id], onDelete: SetNull)
 
   @@unique([tenantId, manifestNumber])
   @@index([tenantId])
@@ -763,16 +873,16 @@ model Manifest {
 /// null for purely operational/item-level events that don't move the
 /// shipment's overall status (e.g. MEASURED, ASSIGNED_TO_CONTAINER).
 model TrackingEvent {
-  id             String              @id @default(cuid())
+  id             String  @id @default(cuid())
   tenantId       String
   shipmentId     String
   shipmentItemId String?
 
-  eventType      TrackingEventType
+  eventType TrackingEventType
   /// How this event was captured (scan vs. manual vs. system-generated).
-  source         TrackingEventSource @default(MANUAL)
+  source    TrackingEventSource @default(MANUAL)
   /// Shipment-level status this event resulted in, when applicable.
-  status         ShipmentStatus?
+  status    ShipmentStatus?
 
   warehouseId    String?
   location       String?
@@ -788,11 +898,15 @@ model TrackingEvent {
   createdByUserId String?
   createdAt       DateTime @default(now())
 
-  tenant        Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  shipment      Shipment      @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
-  shipmentItem  ShipmentItem? @relation(fields: [shipmentItemId], references: [id], onDelete: Cascade)
-  warehouse     Warehouse?    @relation(fields: [warehouseId], references: [id], onDelete: SetNull)
-  createdByUser User?         @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
+  tenant         Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  shipment       Shipment        @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+  shipmentItem   ShipmentItem?   @relation(fields: [shipmentItemId], references: [id], onDelete: Cascade)
+  warehouse      Warehouse?      @relation(fields: [warehouseId], references: [id], onDelete: SetNull)
+  createdByUser  User?           @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
+  /// The ItemInspection this event was produced by, when eventType is
+  /// PROCESSED or EXCEPTION as a result of Milestone 3C processing —
+  /// null for every other event type.
+  itemInspection ItemInspection?
 
   @@index([tenantId])
   @@index([shipmentId])
@@ -907,18 +1021,18 @@ model Payment {
 // ==========================================================================
 
 model Document {
-  id              String       @id @default(cuid())
-  tenantId        String
-  customerId      String?
-  shipmentId      String?
-  type            DocumentType
-  fileName        String
-  fileUrl         String
-  mimeType        String?
-  fileSizeBytes   Int?
+  id               String       @id @default(cuid())
+  tenantId         String
+  customerId       String?
+  shipmentId       String?
+  type             DocumentType
+  fileName         String
+  fileUrl          String
+  mimeType         String?
+  fileSizeBytes    Int?
   uploadedByUserId String?
-  createdAt       DateTime     @default(now())
-  updatedAt       DateTime     @updatedAt
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
 
   tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   customer Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)

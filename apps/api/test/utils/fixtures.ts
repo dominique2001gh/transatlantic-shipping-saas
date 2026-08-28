@@ -103,3 +103,25 @@ export async function createTestTenant(
 export async function deleteTestTenant(prisma: PrismaClient, tenantId: string): Promise<void> {
   await prisma.tenant.delete({ where: { id: tenantId } }).catch(() => undefined);
 }
+
+/** Adds one more user of an arbitrary role to an already-created test tenant — e.g. for RBAC checks. */
+export async function createUserInTenant(
+  prisma: PrismaClient,
+  tenantId: string,
+  label: string,
+  role: UserRole,
+): Promise<{ id: string; email: string; password: string }> {
+  const runId = randomUUID().slice(0, 8);
+  const passwordHash = await bcrypt.hash(TEST_PASSWORD, 10);
+  const user = await prisma.user.create({
+    data: {
+      tenantId,
+      email: `${label.toLowerCase()}-${runId}@example.test`,
+      passwordHash,
+      firstName: 'E2E',
+      lastName: label,
+      role,
+    },
+  });
+  return { id: user.id, email: user.email, password: TEST_PASSWORD };
+}

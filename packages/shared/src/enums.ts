@@ -131,6 +131,29 @@ export enum TrackingEventSource {
   API = 'API',
 }
 
+/**
+ * Controlled vocabulary for the physical condition observed during a
+ * warehouse inspection (Milestone 3C). Replaces the free-text
+ * ShipmentItem.condition Milestone 3B left as a placeholder.
+ */
+export enum ShipmentItemCondition {
+  GOOD = 'GOOD',
+  MINOR_DAMAGE = 'MINOR_DAMAGE',
+  DAMAGED = 'DAMAGED',
+  REPACKAGED = 'REPACKAGED',
+  OTHER = 'OTHER',
+}
+
+/**
+ * Outcome of a warehouse inspection: whether the item may continue
+ * forward through the pipeline. Maps 1:1 onto ShipmentItemStatus.PROCESSED
+ * (READY) vs .EXCEPTION (HOLD) — see WarehouseService.processItem.
+ */
+export enum ItemProcessingResult {
+  READY = 'READY',
+  HOLD = 'HOLD',
+}
+
 export enum DimensionUnit {
   IN = 'IN',
   CM = 'CM',

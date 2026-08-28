@@ -7,13 +7,13 @@ interface ModeOption {
 }
 
 /**
- * Only RECEIVE is implemented in this milestone. The other modes are
+ * RECEIVE (3B) and PROCESS (3C) are implemented. The remaining modes are
  * listed (disabled) so the operation-mode-first architecture the product
  * needs is visible now, without building their workflows early.
  */
 const MODES: ModeOption[] = [
   { key: 'RECEIVE', label: 'Receive', available: true },
-  { key: 'PROCESS', label: 'Process / Inspect', available: false },
+  { key: 'PROCESS', label: 'Process / Inspect', available: true },
   { key: 'LOAD', label: 'Load Container', available: false },
   { key: 'DESTINATION_RECEIVE', label: 'Destination Receive', available: false },
   { key: 'PICKUP_DELIVERY', label: 'Pickup / Delivery', available: false },

@@ -7,9 +7,17 @@ export function humanizeEnumValue(value: string): string {
     .join(' ');
 }
 
-const SUCCESS_STATUSES = new Set(['DELIVERED', 'COMPLETED', 'PICKED_UP', 'READY_FOR_PICKUP']);
+const SUCCESS_STATUSES = new Set([
+  'DELIVERED',
+  'COMPLETED',
+  'PICKED_UP',
+  'READY_FOR_PICKUP',
+  'PROCESSED',
+  'READY',
+  'GOOD',
+]);
 const NEUTRAL_STATUSES = new Set(['DRAFT', 'REGISTERED']);
-const WARNING_STATUSES = new Set(['CANCELLED', 'EXCEPTION']);
+const WARNING_STATUSES = new Set(['CANCELLED', 'EXCEPTION', 'HOLD', 'MINOR_DAMAGE', 'DAMAGED']);
 
 /** Best-effort color mapping shared across ShipmentStatus, ShipmentItemStatus, etc. */
 export function statusBadgeVariant(status: string): 'neutral' | 'primary' | 'accent' | 'warning' | 'success' {

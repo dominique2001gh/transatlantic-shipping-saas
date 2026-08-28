@@ -1,4 +1,12 @@
-import type { WarehouseActivityEntry, WarehouseItemDetail, WarehouseSummary } from '@transatlantic/shared';
+import type {
+  DimensionUnit,
+  ItemProcessingResult,
+  ShipmentItemCondition,
+  WarehouseActivityEntry,
+  WarehouseItemDetail,
+  WarehouseSummary,
+  WeightUnit,
+} from '@transatlantic/shared';
 import { apiFetch } from './api';
 import { getStoredToken } from './auth';
 
@@ -13,6 +21,24 @@ export interface ReceiveItemInput {
   notes?: string;
   scanned: boolean;
   scanIdentifier?: string;
+}
+
+export interface ProcessItemInput {
+  warehouseId: string;
+  weight?: number;
+  weightUnit?: WeightUnit;
+  length?: number;
+  width?: number;
+  height?: number;
+  dimensionUnit?: DimensionUnit;
+  condition: ShipmentItemCondition;
+  result: ItemProcessingResult;
+  hasException?: boolean;
+  exceptionDescription?: string;
+  notes?: string;
+  scanned: boolean;
+  scanIdentifier?: string;
+  reinspection?: boolean;
 }
 
 export function listWarehouseLocations(): Promise<WarehouseSummary[]> {
@@ -39,10 +65,23 @@ export function receiveItem(itemId: string, input: ReceiveItemInput): Promise<Wa
   });
 }
 
-export function getInventory(params?: { warehouseId?: string; search?: string }): Promise<WarehouseItemDetail[]> {
+export function processItem(itemId: string, input: ProcessItemInput): Promise<WarehouseItemDetail> {
+  return apiFetch<WarehouseItemDetail>(`/warehouse/items/${itemId}/process`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+    token: authToken(),
+  });
+}
+
+export function getInventory(params?: {
+  warehouseId?: string;
+  search?: string;
+  status?: string;
+}): Promise<WarehouseItemDetail[]> {
   const query = new URLSearchParams();
   if (params?.warehouseId) query.set('warehouseId', params.warehouseId);
   if (params?.search) query.set('search', params.search);
+  if (params?.status) query.set('status', params.status);
   const qs = query.toString() ? `?${query.toString()}` : '';
   return apiFetch<WarehouseItemDetail[]>(`/warehouse/inventory${qs}`, { token: authToken() });
 }
