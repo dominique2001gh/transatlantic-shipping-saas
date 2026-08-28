@@ -330,6 +330,120 @@ describe('Process/Inspect workflow (e2e)', () => {
       expect(dbShipment.status).toBe('PROCESSING');
       expect(dbShipment.status).not.toBe('READY_FOR_CONSOLIDATION');
     });
+
+    it('downgrades READY_FOR_CONSOLIDATION back to PROCESSING when a reinspection puts an item on hold', async () => {
+      const shipment = await createSingleShipment(app, tokenA, tenantA.customerId, 2);
+      await receiveItem(app, tokenA, shipment.items[0].id, tenantA.warehouseId);
+      await receiveItem(app, tokenA, shipment.items[1].id, tenantA.warehouseId);
+      await processOnce(app, tokenA, shipment.items[0].id, tenantA.warehouseId, { condition: 'GOOD', result: 'READY' });
+      await processOnce(app, tokenA, shipment.items[1].id, tenantA.warehouseId, { condition: 'GOOD', result: 'READY' });
+
+      let dbShipment = await prisma.shipment.findUniqueOrThrow({ where: { id: shipment.id } });
+      expect(dbShipment.status).toBe('READY_FOR_CONSOLIDATION');
+
+      // Deliberate reinspection finds a problem on one already-processed item.
+      const reinspectRes = await request(app.getHttpServer())
+        .post(`/warehouse/items/${shipment.items[0].id}/process`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send(
+          processBody(tenantA.warehouseId, {
+            condition: 'DAMAGED',
+            result: 'HOLD',
+            hasException: true,
+            exceptionDescription: 'Found damage on reinspection after consolidation-ready',
+            reinspection: true,
+          }),
+        );
+      expect(reinspectRes.status).toBe(201);
+
+      dbShipment = await prisma.shipment.findUniqueOrThrow({ where: { id: shipment.id } });
+      expect(dbShipment.status).toBe('PROCESSING');
+
+      const downgradeEvent = await prisma.trackingEvent.findFirst({
+        where: { shipmentId: shipment.id, shipmentItemId: null, status: 'PROCESSING', source: 'SYSTEM' },
+        orderBy: { occurredAt: 'desc' },
+      });
+      expect(downgradeEvent).not.toBeNull();
+      expect(downgradeEvent?.eventType).toBe('EXCEPTION');
+    });
+
+    it('recovers to READY_FOR_CONSOLIDATION once the held item is reinspected back to READY', async () => {
+      const shipment = await createSingleShipment(app, tokenA, tenantA.customerId, 2);
+      await receiveItem(app, tokenA, shipment.items[0].id, tenantA.warehouseId);
+      await receiveItem(app, tokenA, shipment.items[1].id, tenantA.warehouseId);
+      await processOnce(app, tokenA, shipment.items[0].id, tenantA.warehouseId, { condition: 'GOOD', result: 'READY' });
+      await processOnce(app, tokenA, shipment.items[1].id, tenantA.warehouseId, { condition: 'GOOD', result: 'READY' });
+      // Downgrade it.
+      await request(app.getHttpServer())
+        .post(`/warehouse/items/${shipment.items[0].id}/process`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send(
+          processBody(tenantA.warehouseId, {
+            condition: 'DAMAGED',
+            result: 'HOLD',
+            hasException: true,
+            exceptionDescription: 'Temporary hold',
+            reinspection: true,
+          }),
+        );
+      let dbShipment = await prisma.shipment.findUniqueOrThrow({ where: { id: shipment.id } });
+      expect(dbShipment.status).toBe('PROCESSING');
+
+      // Correct it back to READY.
+      const recoverRes = await request(app.getHttpServer())
+        .post(`/warehouse/items/${shipment.items[0].id}/process`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send(processBody(tenantA.warehouseId, { condition: 'GOOD', result: 'READY', reinspection: true }));
+      expect(recoverRes.status).toBe(201);
+
+      dbShipment = await prisma.shipment.findUniqueOrThrow({ where: { id: shipment.id } });
+      expect(dbShipment.status).toBe('READY_FOR_CONSOLIDATION');
+
+      // Both the downgrade and the recovery are separate, non-overwritten shipment-level SYSTEM events.
+      const rollupEvents = await prisma.trackingEvent.findMany({
+        where: {
+          shipmentId: shipment.id,
+          shipmentItemId: null,
+          source: 'SYSTEM',
+          status: { in: ['PROCESSING', 'READY_FOR_CONSOLIDATION'] },
+        },
+        orderBy: { occurredAt: 'asc' },
+      });
+      const statusSequence = rollupEvents.map((e) => e.status);
+      expect(statusSequence).toContain('READY_FOR_CONSOLIDATION');
+      expect(statusSequence.filter((s) => s === 'READY_FOR_CONSOLIDATION')).toHaveLength(2); // reached it twice
+      expect(statusSequence.filter((s) => s === 'PROCESSING').length).toBeGreaterThanOrEqual(2); // started + downgraded
+    });
+
+    it('never touches a shipment that has already progressed past READY_FOR_CONSOLIDATION', async () => {
+      const shipment = await createSingleShipment(app, tokenA, tenantA.customerId, 1);
+      await receiveItem(app, tokenA, shipment.items[0].id, tenantA.warehouseId);
+      await processOnce(app, tokenA, shipment.items[0].id, tenantA.warehouseId, { condition: 'GOOD', result: 'READY' });
+
+      let dbShipment = await prisma.shipment.findUniqueOrThrow({ where: { id: shipment.id } });
+      expect(dbShipment.status).toBe('READY_FOR_CONSOLIDATION');
+
+      // Simulate the shipment having legitimately progressed further (future Container Loading milestone).
+      await prisma.shipment.update({ where: { id: shipment.id }, data: { status: 'CONSOLIDATED' } });
+
+      // Reinspect the item into EXCEPTION — must NOT drag an already-consolidated shipment backward.
+      const res = await request(app.getHttpServer())
+        .post(`/warehouse/items/${shipment.items[0].id}/process`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send(
+          processBody(tenantA.warehouseId, {
+            condition: 'DAMAGED',
+            result: 'HOLD',
+            hasException: true,
+            exceptionDescription: 'Found after consolidation',
+            reinspection: true,
+          }),
+        );
+      expect(res.status).toBe(201);
+
+      dbShipment = await prisma.shipment.findUniqueOrThrow({ where: { id: shipment.id } });
+      expect(dbShipment.status).toBe('CONSOLIDATED'); // unchanged — never downgraded
+    });
   });
 });
 

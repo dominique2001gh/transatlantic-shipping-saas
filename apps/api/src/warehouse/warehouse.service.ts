@@ -456,19 +456,32 @@ export class WarehouseService {
   }
 
   /**
-   * Mirrors maybeRollupShipmentStatus for the processing stage: advances
-   * WAREHOUSE_RECEIVED -> PROCESSING the first time any item is processed,
-   * then PROCESSING -> READY_FOR_CONSOLIDATION once every item on the
-   * shipment is PROCESSED. An item left in EXCEPTION blocks the final
-   * rollup indefinitely — by design (see CRITICAL STATUS RULE in
-   * processItem): a shipment can never reach READY_FOR_CONSOLIDATION while
-   * any item is on hold. Forward-only and only from an eligible source
-   * status, same guard shape as the receiving rollup.
+   * Mirrors maybeRollupShipmentStatus for the processing stage, and is
+   * bidirectional between PROCESSING and READY_FOR_CONSOLIDATION:
+   *   - WAREHOUSE_RECEIVED -> PROCESSING the first time any item is
+   *     processed (forward-only; nothing ever un-starts processing).
+   *   - PROCESSING -> READY_FOR_CONSOLIDATION once every item on the
+   *     shipment is PROCESSED.
+   *   - READY_FOR_CONSOLIDATION -> PROCESSING if a later call (typically a
+   *     deliberate reinspection) leaves any item no longer PROCESSED —
+   *     e.g. reinspected into EXCEPTION/HOLD. This is what stops a held
+   *     item from letting its shipment falsely keep reporting itself
+   *     ready for container loading.
+   *   - Recovery back to READY_FOR_CONSOLIDATION isn't special-cased: once
+   *     downgraded to PROCESSING, the next call that clears the exception
+   *     re-enters the same forward branch above.
+   *
+   * The eligible-status allow-list is the safety rail: only these three
+   * statuses are ever touched. A shipment that has legitimately progressed
+   * further (CONSOLIDATED, BOOKED, LOADED, ... COMPLETED/CANCELLED) is
+   * never read as reachable here, so it can never be downgraded — matching
+   * the invariant "never regress a shipment past consolidation/loading".
    */
   private async maybeRollupToReadyForConsolidation(tenantId: string, actorUserId: string, shipmentId: string) {
     const ROLLUP_ELIGIBLE_STATUSES: DbShipmentStatus[] = [
       DbShipmentStatus.WAREHOUSE_RECEIVED,
       DbShipmentStatus.PROCESSING,
+      DbShipmentStatus.READY_FOR_CONSOLIDATION,
     ];
 
     const shipment = await this.prisma.shipment.findFirst({
@@ -516,6 +529,18 @@ export class WarehouseService {
           eventType: TrackingEventType.PROCESSED,
           status: ShipmentStatus.READY_FOR_CONSOLIDATION,
           notes: 'All items processed and ready for consolidation',
+        },
+        { source: TrackingEventSource.SYSTEM },
+      );
+    } else if (currentStatus === DbShipmentStatus.READY_FOR_CONSOLIDATION && !allProcessed) {
+      await this.shipmentsService.createTrackingEvent(
+        tenantId,
+        actorUserId,
+        shipmentId,
+        {
+          eventType: TrackingEventType.EXCEPTION,
+          status: ShipmentStatus.PROCESSING,
+          notes: 'Reverted to processing — an item requires attention before consolidation',
         },
         { source: TrackingEventSource.SYSTEM },
       );
