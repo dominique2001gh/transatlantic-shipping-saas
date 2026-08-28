@@ -500,11 +500,19 @@ model Route {
 /// human-friendly identifier — the database id is never exposed to
 /// customers. A shipment is a customer-facing grouping; see ShipmentItem
 /// for the independently scannable physical pieces inside it.
+///
+/// MULTI-TENANT SAAS: `trackingNumber` is unique per tenant, not globally.
+/// Two independent logistics companies on this platform may each issue
+/// "TAL-2026-000001" (or, more realistically, collide on the same
+/// prefix/sequence combination) without conflicting — every lookup is
+/// already scoped by tenantId at the application layer (see
+/// ShipmentsService, WarehouseService), so this only relaxes a DB
+/// constraint that was stricter than the access pattern requires.
 model Shipment {
   id                      String         @id @default(cuid())
   tenantId                String
   customerId              String
-  trackingNumber          String         @unique
+  trackingNumber          String
   shipmentMode            ShipmentMode
   originCountry           String
   destinationCountry      String
@@ -534,6 +542,7 @@ model Shipment {
   invoices             Invoice[]
   documents            Document[]
 
+  @@unique([tenantId, trackingNumber])
   @@index([tenantId])
   @@index([customerId])
   @@index([status])
@@ -553,9 +562,11 @@ model ShipmentItem {
 
   /// Scan payload. Derived from the parent shipment's trackingNumber plus
   /// this item's sequenceNumber (e.g. "TAL-2026-000001-02"), so it is
-  /// globally unique the same way trackingNumber already is, and remains
-  /// short enough to hand-key if a scanner fails.
-  itemCode       String             @unique
+  /// unique per tenant the same way trackingNumber is (see the
+  /// MULTI-TENANT SAAS note on Shipment.trackingNumber above — every scan
+  /// lookup is already tenantId-scoped at the application layer), and
+  /// remains short enough to hand-key if a scanner fails.
+  itemCode       String
   /// 1-based position of this item within its shipment (item 2 of 4).
   sequenceNumber Int
 
@@ -601,6 +612,7 @@ model ShipmentItem {
   containerItems   ContainerItem[]
 
   @@unique([shipmentId, sequenceNumber])
+  @@unique([tenantId, itemCode])
   @@index([tenantId])
   @@index([shipmentId])
   @@index([status])
