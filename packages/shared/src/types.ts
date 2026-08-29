@@ -329,9 +329,8 @@ export interface ContainerDetail {
 }
 
 // ==========================================================================
-// MANIFESTS (Milestone 3E-A — foundation only: create/list/detail.
-// Assignment, finalize, and depart are later controlled steps and are
-// not reflected in these shapes' behavior yet, only their structure.)
+// MANIFESTS (3E-A: create/list/detail. 3E-B: container/item assignment.
+// 3E-C: finalize (DRAFT -> FINALIZED) and depart (FINALIZED -> DEPARTED).)
 // ==========================================================================
 
 /** One direct (air-freight) item assignment to a manifest — not yet writable in 3E-A. */

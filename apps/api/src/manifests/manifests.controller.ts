@@ -28,14 +28,24 @@ const WAREHOUSE_ROLES = [
   UserRole.WAREHOUSE_STAFF,
 ];
 
+/**
+ * Finalizing and departing are both bigger, harder-to-reverse actions —
+ * same narrower set, staff excluded. Departing in particular is the most
+ * consequential action in the whole manifest lifecycle (it's real,
+ * physical movement), so it deliberately isn't opened up any wider than
+ * finalize.
+ */
+const FINALIZE_ROLES = [UserRole.TENANT_OWNER, UserRole.TENANT_ADMIN, UserRole.WAREHOUSE_MANAGER];
+const DEPART_ROLES = FINALIZE_ROLES;
+
 const VALID_STATUSES = new Set<string>(Object.values(ManifestStatus));
 const VALID_MODES = new Set<string>(Object.values(ShipmentMode));
 
 /**
- * Milestone 3E-A: create/list/detail. Milestone 3E-B adds assignment/
+ * Milestone 3E-A: create/list/detail. Milestone 3E-B: assignment/
  * unassignment of containers (Ocean/RoRo) and direct items (Air).
- * Finalizing and recording departure are still deliberately separate,
- * later controlled steps — no routes for them exist yet.
+ * Milestone 3E-C: finalize (DRAFT -> FINALIZED) and depart
+ * (FINALIZED -> DEPARTED).
  */
 @Controller('manifests')
 export class ManifestsController {
@@ -110,5 +120,17 @@ export class ManifestsController {
     @Body() dto: UnassignDto,
   ) {
     return this.manifestsService.unassignItem(requireTenantId(user.tenantId), user.id, manifestId, itemId, dto);
+  }
+
+  @Post(':id/finalize')
+  @Roles(...FINALIZE_ROLES)
+  finalize(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+    return this.manifestsService.finalize(requireTenantId(user.tenantId), user.id, id);
+  }
+
+  @Post(':id/depart')
+  @Roles(...DEPART_ROLES)
+  depart(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+    return this.manifestsService.depart(requireTenantId(user.tenantId), user.id, id);
   }
 }
