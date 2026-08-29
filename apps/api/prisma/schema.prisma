@@ -99,6 +99,12 @@ enum ShipmentItemStatus {
   PROCESSED
   CONSOLIDATED
   ASSIGNED_TO_CONTAINER
+  /// Air-freight equivalent of ASSIGNED_TO_CONTAINER (Milestone 3E) —
+  /// used only for items assigned directly to a Manifest with no
+  /// intermediate Container, so the air-freight path never needs to
+  /// borrow the ocean-container status. Assignment itself is a later
+  /// controlled step; this value is added now for schema completeness.
+  ASSIGNED_TO_MANIFEST
   LOADED
   DEPARTED_ORIGIN
   IN_TRANSIT
@@ -144,6 +150,10 @@ enum ContainerStatus {
 enum ManifestStatus {
   DRAFT
   FINALIZED
+  /// Milestone 3E-A adds this value to complete the schema now; the
+  /// depart action itself (transition + roll-forward) is a deliberately
+  /// separate, later controlled step — see Manifest.departedAt below.
+  DEPARTED
   SUBMITTED
   ARCHIVED
 }
@@ -169,6 +179,10 @@ enum TrackingEventType {
   CONSOLIDATED
   ASSIGNED_TO_CONTAINER
   REMOVED_FROM_CONTAINER
+  /// Air-freight direct-assignment equivalents of
+  /// ASSIGNED_TO_CONTAINER/REMOVED_FROM_CONTAINER (Milestone 3E).
+  ASSIGNED_TO_MANIFEST
+  REMOVED_FROM_MANIFEST
   LOADED
   DEPARTED_ORIGIN
   IN_TRANSIT
@@ -320,6 +334,7 @@ model Tenant {
   containers      Container[]
   containerItems  ContainerItem[]
   manifests       Manifest[]
+  manifestItems   ManifestItem[]
   trackingEvents  TrackingEvent[]
   quotes          Quote[]
   invoices        Invoice[]
@@ -345,6 +360,9 @@ model TenantSettings {
 
   invoiceNumberPrefix   String @default("INV")
   invoiceNumberSequence Int    @default(0)
+
+  manifestNumberPrefix   String @default("MAN")
+  manifestNumberSequence Int    @default(0)
 
   defaultOriginCountry      String?
   defaultDestinationCountry String?
@@ -389,7 +407,10 @@ model User {
   containerItemsLoaded  ContainerItem[]  @relation("ContainerItemLoadedBy")
   containerItemsRemoved ContainerItem[]  @relation("ContainerItemRemovedBy")
   containersFinalized   Container[]
-  manifestsFinalized    Manifest[]
+  manifestsFinalized    Manifest[]       @relation("ManifestFinalizedBy")
+  manifestsDeparted     Manifest[]       @relation("ManifestDepartedBy")
+  manifestItemsAdded    ManifestItem[]   @relation("ManifestItemAddedBy")
+  manifestItemsRemoved  ManifestItem[]   @relation("ManifestItemRemovedBy")
 
   @@index([tenantId])
   @@map("users")
@@ -490,6 +511,8 @@ model Warehouse {
   itemInspections ItemInspection[]
   /// Containers currently being loaded at this warehouse (Milestone 3D).
   containers      Container[]
+  /// Manifests originating from this warehouse (Milestone 3E).
+  manifests       Manifest[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -519,6 +542,9 @@ model Route {
   /// Containers declared to be traveling this route (Milestone 3D) — used
   /// only for a soft destination-compatibility check when loading items.
   containers           Container[]
+  /// Manifests declared to be traveling this route (Milestone 3E) — same
+  /// soft-check purpose as Container.route above.
+  manifests            Manifest[]
 
   @@index([tenantId])
   @@map("routes")
@@ -571,6 +597,8 @@ model Shipment {
   /// Item-level container assignments for this shipment's items. A single
   /// shipment's items are not guaranteed to all be in the same container.
   containerItems       ContainerItem[]
+  /// Item-level direct manifest assignments (air-freight path, Milestone 3E).
+  manifestItems        ManifestItem[]
   quotes               Quote[]
   invoices             Invoice[]
   documents            Document[]
@@ -655,6 +683,7 @@ model ShipmentItem {
   lastInspectedByUser User?            @relation("ShipmentItemLastInspectedBy", fields: [lastInspectedByUserId], references: [id], onDelete: SetNull)
   trackingEvents      TrackingEvent[]
   containerItems      ContainerItem[]
+  manifestItems       ManifestItem[]
   /// Full append-only inspection history (Milestone 3C). Ordered by
   /// inspectedAt for "most recent" reads; never updated or deleted, so
   /// reinspection always adds a new row instead of overwriting one.
@@ -784,6 +813,12 @@ model Container {
   status                   ContainerStatus @default(BOOKED)
   warehouseId              String?
   routeId                  String?
+  /// Milestone 3E: the manifest (transport movement) this LOADED
+  /// container is scheduled on — null until assigned. A container can be
+  /// on at most one manifest at a time (assignment itself, and the
+  /// eligibility rules around it, are a later controlled step; this
+  /// column is schema-only for now).
+  manifestId               String?
   originPort               String?
   destinationPort          String?
   departureDate            DateTime?
@@ -797,13 +832,14 @@ model Container {
   tenant                 Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   warehouse              Warehouse?      @relation(fields: [warehouseId], references: [id], onDelete: SetNull)
   route                  Route?          @relation(fields: [routeId], references: [id], onDelete: SetNull)
+  manifest               Manifest?       @relation(fields: [manifestId], references: [id], onDelete: SetNull)
   loadingFinalizedByUser User?           @relation(fields: [loadingFinalizedByUserId], references: [id], onDelete: SetNull)
   items                  ContainerItem[]
-  manifests              Manifest[]
 
   @@unique([tenantId, containerNumber])
   @@index([tenantId])
   @@index([warehouseId])
+  @@index([manifestId])
   @@map("containers")
 }
 
@@ -852,33 +888,123 @@ model ContainerItem {
   @@map("container_items")
 }
 
-/// A cargo manifest, typically produced per-container per-route. Contents
-/// are derived from the container's ContainerItem rows rather than
-/// hand-maintained. `snapshotJson` freezes that derived view at the moment
-/// of finalization so a FINALIZED/SUBMITTED manifest reads consistently
-/// even if container contents are corrected afterward — while DRAFT, the
-/// manifest can be regenerated live from current ContainerItem rows.
+/// A manifest represents one transport movement (one vessel voyage or one
+/// flight) — the generalization Milestone 3E needed so air freight is
+/// never forced through the ocean-container concept. A manifest carries
+/// cargo via two independent, mode-exclusive paths:
+///   - Ocean/RoRo: one or more already-sealed (LOADED) Containers, linked
+///     from Container.manifestId (see Container). A manifest never
+///     touches those containers' ShipmentItems directly.
+///   - Air: ShipmentItems assigned straight to the manifest with no
+///     container in between, via ManifestItem below.
+/// `shipmentMode` determines which path is valid for a given manifest —
+/// enforced at the application layer once assignment is implemented, not
+/// by a DB constraint (Prisma has no cross-table CHECK support here).
+///
+/// Contents are always derivable live from Container.manifestId +
+/// ManifestItem rather than hand-maintained. `snapshotJson` freezes that
+/// derived view at finalize time, the same relationship
+/// Container.loadingFinalizedAt has to ContainerItem.
+///
+/// MILESTONE 3E-A SCOPE: this migration adds the full data model and the
+/// create/list/detail backend. Assigning containers/items, finalizing,
+/// and recording departure (and the resulting status roll-forward) are
+/// deliberately separate, later controlled steps — `finalizedAt`/
+/// `finalizedByUserId`/`departedAt`/`departedByUserId`/`snapshotJson`
+/// all exist now but are only ever written by that later work.
 model Manifest {
-  id                String         @id @default(cuid())
-  tenantId          String
-  containerId       String?
-  routeId           String?
-  manifestNumber    String
-  status            ManifestStatus @default(DRAFT)
+  id             String         @id @default(cuid())
+  tenantId       String
+  manifestNumber String
+  status         ManifestStatus @default(DRAFT)
+  shipmentMode   ShipmentMode
+
+  /// The warehouse this movement originates from. Used (once assignment
+  /// is implemented) to validate that every container/item assigned to
+  /// this manifest is physically at the same location.
+  originWarehouseId   String?
+  routeId             String?
+  originLocation      String?
+  destinationLocation String?
+
+  /// Shipping line or airline — one generic field for both modes.
+  carrierName  String?
+  /// Ocean only.
+  vesselName   String?
+  voyageNumber String?
+  /// Air only.
+  flightNumber String?
+
+  plannedDepartureAt DateTime?
+  estimatedArrivalAt DateTime?
+
   finalizedAt       DateTime?
   finalizedByUserId String?
-  /// Immutable snapshot of derived container contents at finalize time.
-  snapshotJson      Json?
-  createdAt         DateTime       @default(now())
-  updatedAt         DateTime       @updatedAt
+  departedAt        DateTime?
+  departedByUserId  String?
 
-  tenant          Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  container       Container? @relation(fields: [containerId], references: [id], onDelete: SetNull)
-  finalizedByUser User?      @relation(fields: [finalizedByUserId], references: [id], onDelete: SetNull)
+  /// Immutable snapshot of derived contents (containers + direct items)
+  /// at finalize time.
+  snapshotJson Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant          Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  originWarehouse Warehouse?     @relation(fields: [originWarehouseId], references: [id], onDelete: SetNull)
+  route           Route?         @relation(fields: [routeId], references: [id], onDelete: SetNull)
+  finalizedByUser User?          @relation("ManifestFinalizedBy", fields: [finalizedByUserId], references: [id], onDelete: SetNull)
+  departedByUser  User?          @relation("ManifestDepartedBy", fields: [departedByUserId], references: [id], onDelete: SetNull)
+  /// Sealed/loaded containers scheduled on this manifest (ocean/RoRo path).
+  containers      Container[]
+  /// Items assigned directly to this manifest with no container (air path).
+  items           ManifestItem[]
 
   @@unique([tenantId, manifestNumber])
   @@index([tenantId])
+  @@index([originWarehouseId])
   @@map("manifests")
+}
+
+/// Direct item-to-manifest assignment for the air-freight path — the
+/// structural equivalent of ContainerItem, minus any container. Same
+/// soft-remove audit pattern: a row is never deleted when an item is
+/// unassigned, only marked removed, so the assignment history stays
+/// auditable. "Currently assigned" = removedAt IS NULL.
+///
+/// MILESTONE 3E-A SCOPE: this table exists now so the schema is complete;
+/// nothing writes to it yet — assignment is a later controlled step.
+model ManifestItem {
+  id             String @id @default(cuid())
+  tenantId       String
+  manifestId     String
+  /// Denormalized alongside shipmentItemId, same reasoning as
+  /// ContainerItem.shipmentId — lets reporting group/join by shipment
+  /// without an extra hop through ShipmentItem.
+  shipmentId     String
+  shipmentItemId String
+
+  addedAt         DateTime  @default(now())
+  addedByUserId   String?
+  removedAt       DateTime?
+  removedByUserId String?
+  removalReason   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant        Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  manifest      Manifest     @relation(fields: [manifestId], references: [id], onDelete: Cascade)
+  shipment      Shipment     @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+  shipmentItem  ShipmentItem @relation(fields: [shipmentItemId], references: [id], onDelete: Cascade)
+  addedByUser   User?        @relation("ManifestItemAddedBy", fields: [addedByUserId], references: [id], onDelete: SetNull)
+  removedByUser User?        @relation("ManifestItemRemovedBy", fields: [removedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@index([manifestId])
+  @@index([shipmentId])
+  @@index([shipmentItemId])
+  @@map("manifest_items")
 }
 
 // ==========================================================================

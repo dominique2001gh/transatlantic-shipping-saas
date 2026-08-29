@@ -83,6 +83,9 @@ export enum ShipmentItemStatus {
   PROCESSED = 'PROCESSED',
   CONSOLIDATED = 'CONSOLIDATED',
   ASSIGNED_TO_CONTAINER = 'ASSIGNED_TO_CONTAINER',
+  /// Air-freight equivalent of ASSIGNED_TO_CONTAINER (Milestone 3E) — used
+  /// only for items assigned directly to a Manifest with no container.
+  ASSIGNED_TO_MANIFEST = 'ASSIGNED_TO_MANIFEST',
   LOADED = 'LOADED',
   DEPARTED_ORIGIN = 'DEPARTED_ORIGIN',
   IN_TRANSIT = 'IN_TRANSIT',
@@ -108,6 +111,8 @@ export enum TrackingEventType {
   CONSOLIDATED = 'CONSOLIDATED',
   ASSIGNED_TO_CONTAINER = 'ASSIGNED_TO_CONTAINER',
   REMOVED_FROM_CONTAINER = 'REMOVED_FROM_CONTAINER',
+  ASSIGNED_TO_MANIFEST = 'ASSIGNED_TO_MANIFEST',
+  REMOVED_FROM_MANIFEST = 'REMOVED_FROM_MANIFEST',
   LOADED = 'LOADED',
   DEPARTED_ORIGIN = 'DEPARTED_ORIGIN',
   IN_TRANSIT = 'IN_TRANSIT',
@@ -186,6 +191,9 @@ export enum ContainerStatus {
 export enum ManifestStatus {
   DRAFT = 'DRAFT',
   FINALIZED = 'FINALIZED',
+  /// Milestone 3E-A adds this value for schema completeness; the depart
+  /// action itself is a deliberately separate, later controlled step.
+  DEPARTED = 'DEPARTED',
   SUBMITTED = 'SUBMITTED',
   ARCHIVED = 'ARCHIVED',
 }

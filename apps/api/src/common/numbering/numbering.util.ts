@@ -37,3 +37,23 @@ export async function generateTrackingNumber(prisma: PrismaClient, tenantId: str
     settings.trackingNumberSequence,
   );
 }
+
+/**
+ * A manifest number is an internal reference (unlike containerNumber,
+ * which is staff-entered because real ISO container numbers are assigned
+ * externally by the shipping line) — the same prefix+year+sequence shape
+ * as trackingNumber suits it, so this reuses formatTrackingNumber's
+ * formatter rather than inventing a parallel one.
+ */
+export async function generateManifestNumber(prisma: PrismaClient, tenantId: string): Promise<string> {
+  const settings = await prisma.tenantSettings.update({
+    where: { tenantId },
+    data: { manifestNumberSequence: { increment: 1 } },
+    select: { manifestNumberPrefix: true, manifestNumberSequence: true },
+  });
+  return formatTrackingNumber(
+    settings.manifestNumberPrefix,
+    new Date().getFullYear(),
+    settings.manifestNumberSequence,
+  );
+}

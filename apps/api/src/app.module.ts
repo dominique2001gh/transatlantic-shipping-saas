@@ -7,6 +7,7 @@ import { CustomersModule } from './customers/customers.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
 import { HealthModule } from './health/health.module';
+import { ManifestsModule } from './manifests/manifests.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ShipmentsModule } from './shipments/shipments.module';
 import { TenantsModule } from './tenants/tenants.module';
@@ -24,6 +25,7 @@ import { WarehouseModule } from './warehouse/warehouse.module';
     ShipmentsModule,
     WarehouseModule,
     ContainersModule,
+    ManifestsModule,
     HealthModule,
   ],
   providers: [

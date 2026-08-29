@@ -4,6 +4,7 @@ import type {
   ContainerType,
   DimensionUnit,
   ItemProcessingResult,
+  ManifestStatus,
   ShipmentItemCondition,
   ShipmentItemStatus,
   ShipmentItemType,
@@ -325,4 +326,76 @@ export interface ContainerDetail {
   summary: ContainerContentsSummary;
   /** Present only on a loadItem response when the item's destination doesn't match the container's route. */
   destinationWarning?: string;
+}
+
+// ==========================================================================
+// MANIFESTS (Milestone 3E-A — foundation only: create/list/detail.
+// Assignment, finalize, and depart are later controlled steps and are
+// not reflected in these shapes' behavior yet, only their structure.)
+// ==========================================================================
+
+/** One direct (air-freight) item assignment to a manifest — not yet writable in 3E-A. */
+export interface ManifestItemSummary {
+  id: string;
+  addedAt: string;
+  addedByUser: TrackingEventActor | null;
+  shipmentItem: {
+    id: string;
+    itemCode: string;
+    itemType: ShipmentItemType;
+    description: string | null;
+    weight: string | null;
+    weightUnit: WeightUnit;
+    status: ShipmentItemStatus;
+  };
+  shipment: {
+    id: string;
+    trackingNumber: string;
+    destinationCountry: string;
+    destinationLocation: string | null;
+    customer: { id: string; customerNumber: string; firstName: string; lastName: string };
+  };
+}
+
+/** Minimal container summary as seen from a manifest — full detail lives at GET /containers/:id. */
+export interface ManifestContainerSummary {
+  id: string;
+  containerNumber: string;
+  containerType: ContainerType;
+  status: ContainerStatus;
+}
+
+/** Live-computed contents summary — never stored, always derived. Always zero in 3E-A (nothing can be assigned yet). */
+export interface ManifestContentsSummary {
+  containerCount: number;
+  itemCount: number;
+  customerCount: number;
+  weightByUnit: Record<string, number>;
+}
+
+export interface ManifestDetail {
+  id: string;
+  tenantId: string;
+  manifestNumber: string;
+  status: ManifestStatus;
+  shipmentMode: ShipmentMode;
+  originLocation: string | null;
+  destinationLocation: string | null;
+  carrierName: string | null;
+  vesselName: string | null;
+  voyageNumber: string | null;
+  flightNumber: string | null;
+  plannedDepartureAt: string | null;
+  estimatedArrivalAt: string | null;
+  finalizedAt: string | null;
+  departedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  originWarehouse: { id: string; name: string; code: string } | null;
+  route: { id: string; name: string; originCountry: string; destinationCountry: string } | null;
+  finalizedByUser: TrackingEventActor | null;
+  departedByUser: TrackingEventActor | null;
+  containers: ManifestContainerSummary[];
+  items: ManifestItemSummary[];
+  summary: ManifestContentsSummary;
 }
