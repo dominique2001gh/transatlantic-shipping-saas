@@ -326,6 +326,14 @@ export interface ContainerDetail {
   summary: ContainerContentsSummary;
   /** Present only on a loadItem response when the item's destination doesn't match the container's route. */
   destinationWarning?: string;
+  /**
+   * Non-null once this (LOADED) container has been assigned to an Ocean/
+   * RoRo manifest (Milestone 3E). Needed by the Manifest frontend's
+   * container picker to distinguish "eligible" from "already assigned"
+   * containers before attempting an assignment.
+   */
+  manifestId: string | null;
+  manifest: { id: string; manifestNumber: string } | null;
 }
 
 // ==========================================================================

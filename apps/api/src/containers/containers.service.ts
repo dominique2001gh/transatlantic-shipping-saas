@@ -49,6 +49,9 @@ const CONTAINER_DETAIL_INCLUDE = {
   route: { select: { id: true, name: true, originCountry: true, destinationCountry: true } },
   loadingFinalizedByUser: { select: ACTOR_SELECT },
   items: ACTIVE_CONTAINER_ITEM_INCLUDE,
+  // Milestone 3E Manifest frontend needs to tell "eligible" apart from
+  // "already assigned" containers before attempting an assignment.
+  manifest: { select: { id: true, manifestNumber: true } },
 } satisfies Prisma.ContainerInclude;
 
 type ContainerDetailRaw = Prisma.ContainerGetPayload<{ include: typeof CONTAINER_DETAIL_INCLUDE }>;
