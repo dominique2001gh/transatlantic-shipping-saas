@@ -37,6 +37,35 @@ export function clearSession(): void {
   localStorage.removeItem(USER_KEY);
 }
 
+/** Module-level guard so a burst of concurrent 401s (or a 401 racing a manual click) only navigates once. */
+let loggingOut = false;
+
+/**
+ * Canonical logout. Clears the stored session and sends the user to
+ * /login via a full navigation (not client-side router.push) so that no
+ * stale in-memory state anywhere in the tree — tenant name, sidebar,
+ * cached user label — can survive; the whole app remounts fresh.
+ *
+ * Deliberately does not call the API: there is no server-side session or
+ * refresh-token to revoke (JWTs here are stateless, verified only by
+ * signature/expiry — see JwtStrategy), so this only ever touches
+ * localStorage and the browser location. That also means it works
+ * reliably even when the current token is already expired or invalid —
+ * nothing here depends on it being valid.
+ *
+ * Guarded against redirect loops: a no-op once already on /login, and
+ * idempotent if called more than once (e.g. several in-flight requests
+ * all 401 together).
+ */
+export function logout(): void {
+  if (loggingOut) return;
+  if (typeof window === 'undefined') return;
+  if (window.location.pathname === '/login') return;
+  loggingOut = true;
+  clearSession();
+  window.location.href = '/login';
+}
+
 /** Where to send a user immediately after login, based on their role. */
 export function homeRouteForRole(role: UserRole): string {
   switch (role) {

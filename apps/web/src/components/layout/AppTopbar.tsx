@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import type { NavItem } from '@/lib/nav';
+import { logout } from '@/lib/auth';
 
 export function AppTopbar({
   items,
@@ -33,6 +34,13 @@ export function AppTopbar({
               .join('')
               .toUpperCase()}
           </div>
+          <button
+            type="button"
+            onClick={() => logout()}
+            className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+          >
+            Log out
+          </button>
         </div>
       </div>
       {/* Mobile nav strip — the sidebar is hidden below the lg breakpoint. */}
