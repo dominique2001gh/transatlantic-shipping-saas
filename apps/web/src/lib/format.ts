@@ -15,8 +15,12 @@ const SUCCESS_STATUSES = new Set([
   'PROCESSED',
   'READY',
   'GOOD',
+  'ARRIVED',
+  'ARRIVED_DESTINATION',
+  'RECEIVED_DESTINATION_WAREHOUSE',
+  'CLOSED',
 ]);
-const NEUTRAL_STATUSES = new Set(['DRAFT', 'REGISTERED']);
+const NEUTRAL_STATUSES = new Set(['DRAFT', 'REGISTERED', 'UNLOADING']);
 const WARNING_STATUSES = new Set(['CANCELLED', 'EXCEPTION', 'HOLD', 'MINOR_DAMAGE', 'DAMAGED']);
 
 /** Best-effort color mapping shared across ShipmentStatus, ShipmentItemStatus, etc. */

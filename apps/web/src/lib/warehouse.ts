@@ -10,6 +10,16 @@ import type {
 import { apiFetch } from './api';
 import { getStoredToken } from './auth';
 
+export interface DestinationReceiveItemInput {
+  warehouseId: string;
+  condition: ShipmentItemCondition;
+  hasException?: boolean;
+  exceptionDescription?: string;
+  notes?: string;
+  scanned: boolean;
+  scanIdentifier?: string;
+}
+
 function authToken(): string {
   const token = getStoredToken();
   if (!token) throw new Error('Not authenticated');
@@ -67,6 +77,17 @@ export function receiveItem(itemId: string, input: ReceiveItemInput): Promise<Wa
 
 export function processItem(itemId: string, input: ProcessItemInput): Promise<WarehouseItemDetail> {
   return apiFetch<WarehouseItemDetail>(`/warehouse/items/${itemId}/process`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+    token: authToken(),
+  });
+}
+
+export function destinationReceiveItem(
+  itemId: string,
+  input: DestinationReceiveItemInput,
+): Promise<WarehouseItemDetail & { destinationWarning?: string }> {
+  return apiFetch<WarehouseItemDetail & { destinationWarning?: string }>(`/warehouse/items/${itemId}/destination-receive`, {
     method: 'POST',
     body: JSON.stringify(input),
     token: authToken(),

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import type { WarehouseActivityEntry, WarehouseItemDetail, WarehouseSummary } from '@transatlantic/shared';
+import { DestinationReceiveWorkspace } from '@/components/warehouse/DestinationReceiveWorkspace';
 import { LoadContainerWorkspace } from '@/components/warehouse/LoadContainerWorkspace';
 import { ModeSelector, type WarehouseMode } from '@/components/warehouse/ModeSelector';
 import { ProcessWorkspace } from '@/components/warehouse/ProcessWorkspace';
@@ -112,6 +113,29 @@ export default function WarehousePage() {
                 warehouses={warehouses}
                 selectedWarehouseId={selectedWarehouseId}
                 onWarehouseChange={setSelectedWarehouseId}
+              />
+            ) : (
+              <p className="text-sm text-slate-500">Loading warehouses…</p>
+            )}
+          </Card>
+        </section>
+      )}
+
+      {mode === 'DESTINATION_RECEIVE' && (
+        <section>
+          <h2 className="text-lg font-semibold text-slate-900">Destination Receive</h2>
+          <p className="mt-1 text-sm text-slate-500">
+            Scan an arrived item&apos;s label to record it as physically received at this destination warehouse.
+            Damaged, missing, or discrepant cargo is flagged and held for review instead — it never silently counts
+            as received.
+          </p>
+          <Card className="mt-3">
+            {warehouses.length > 0 ? (
+              <DestinationReceiveWorkspace
+                warehouses={warehouses}
+                selectedWarehouseId={selectedWarehouseId}
+                onWarehouseChange={setSelectedWarehouseId}
+                onReceived={reload}
               />
             ) : (
               <p className="text-sm text-slate-500">Loading warehouses…</p>

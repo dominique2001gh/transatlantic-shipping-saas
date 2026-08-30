@@ -12,7 +12,7 @@ import { Card } from '@/components/ui/Card';
 import { ApiError } from '@/lib/api';
 import { getStoredUser } from '@/lib/auth';
 import { formatDateTime, humanizeEnumValue } from '@/lib/format';
-import { departManifest, finalizeManifest, getManifest, listManifests } from '@/lib/manifests';
+import { arriveManifest, departManifest, finalizeManifest, getManifest, listManifests } from '@/lib/manifests';
 import { listWarehouseLocations } from '@/lib/warehouse';
 
 /** Same role sets ManifestsController enforces server-side — see manifests.controller.ts. */
@@ -32,6 +32,8 @@ const WAREHOUSE_ROLES = new Set<UserRole>([
 ]);
 const FINALIZE_ROLES = new Set<UserRole>([UserRole.TENANT_OWNER, UserRole.TENANT_ADMIN, UserRole.WAREHOUSE_MANAGER]);
 const DEPART_ROLES = FINALIZE_ROLES;
+/** Milestone 3F: marking a movement arrived is exactly the action DESTINATION_AGENT exists for — additive only. */
+const ARRIVE_ROLES = new Set<UserRole>([...FINALIZE_ROLES, UserRole.DESTINATION_AGENT]);
 
 const OCEAN_MODES = new Set<ShipmentMode>([ShipmentMode.OCEAN_LCL, ShipmentMode.OCEAN_FCL, ShipmentMode.RORO]);
 
@@ -45,6 +47,7 @@ export default function ManifestsPage() {
   const canAssignItem = !!currentUser && WAREHOUSE_ROLES.has(currentUser.role);
   const canFinalize = !!currentUser && FINALIZE_ROLES.has(currentUser.role);
   const canDepart = !!currentUser && DEPART_ROLES.has(currentUser.role);
+  const canArrive = !!currentUser && ARRIVE_ROLES.has(currentUser.role);
 
   const [manifests, setManifests] = useState<ManifestDetail[] | null>(null);
   const [statusFilter, setStatusFilter] = useState<(typeof STATUS_FILTERS)[number]>('ALL');
@@ -54,6 +57,7 @@ export default function ManifestsPage() {
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [finalizing, setFinalizing] = useState(false);
   const [departing, setDeparting] = useState(false);
+  const [arriving, setArriving] = useState(false);
 
   const reload = useCallback(() => {
     if (!canView) return;
@@ -130,6 +134,30 @@ export default function ManifestsPage() {
       setError(err instanceof ApiError ? err.message : 'Failed to depart manifest.');
     } finally {
       setDeparting(false);
+    }
+  }
+
+  async function handleArrive() {
+    if (!selected) return;
+    if (
+      !window.confirm(
+        `Mark manifest ${selected.manifestNumber} as arrived? This means the cargo has physically landed at ` +
+          `destination — it does NOT mark individual items as received. Staff will still scan each package in ` +
+          `separately under Warehouse → Destination Receive.`,
+      )
+    ) {
+      return;
+    }
+    setArriving(true);
+    setError(null);
+    try {
+      await arriveManifest(selected.id);
+      await refreshSelected();
+      reload();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed to mark manifest arrived.');
+    } finally {
+      setArriving(false);
     }
   }
 
@@ -219,7 +247,7 @@ export default function ManifestsPage() {
                 <th className="px-4 py-3 font-medium">Containers</th>
                 <th className="px-4 py-3 font-medium">Items</th>
                 <th className="px-4 py-3 font-medium">Weight</th>
-                <th className="px-4 py-3 font-medium">Departure</th>
+                <th className="px-4 py-3 font-medium">Movement</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -264,11 +292,13 @@ export default function ManifestsPage() {
                     <td className="px-4 py-3 text-slate-600">{manifest.summary.itemCount}</td>
                     <td className="px-4 py-3 text-slate-500">{rowWeight || '—'}</td>
                     <td className="px-4 py-3 text-slate-500">
-                      {manifest.departedAt
-                        ? `Departed ${formatDateTime(manifest.departedAt)}`
-                        : manifest.plannedDepartureAt
-                          ? `Planned ${formatDateTime(manifest.plannedDepartureAt)}`
-                          : '—'}
+                      {manifest.arrivedAt
+                        ? `Arrived ${formatDateTime(manifest.arrivedAt)}`
+                        : manifest.departedAt
+                          ? `Departed ${formatDateTime(manifest.departedAt)}`
+                          : manifest.plannedDepartureAt
+                            ? `Planned ${formatDateTime(manifest.plannedDepartureAt)}`
+                            : '—'}
                     </td>
                   </tr>
                 );
@@ -333,6 +363,14 @@ export default function ManifestsPage() {
               {selected.departedByUser ? ` by ${selected.departedByUser.firstName} ${selected.departedByUser.lastName}` : ''}.
             </p>
           )}
+          {selected.status === ManifestStatus.ARRIVED && (
+            <p className="mt-4 rounded-lg bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-800">
+              This manifest has arrived at destination. Arrived {selected.arrivedAt ? formatDateTime(selected.arrivedAt) : ''}
+              {selected.arrivedByUser ? ` by ${selected.arrivedByUser.firstName} ${selected.arrivedByUser.lastName}` : ''}.
+              Individual packages still need to be scanned in under Warehouse → Destination Receive — arriving the
+              manifest does not mark any item as received.
+            </p>
+          )}
 
           <div className="mt-5">
             {isOcean ? (
@@ -358,6 +396,16 @@ export default function ManifestsPage() {
                 </Button>
               ) : (
                 <p className="text-sm text-slate-500">Only a warehouse manager or admin can depart this manifest.</p>
+              ))}
+            {selected.status === ManifestStatus.DEPARTED &&
+              (canArrive ? (
+                <Button type="button" onClick={handleArrive} disabled={arriving}>
+                  {arriving ? 'Marking arrived…' : 'Mark as arrived'}
+                </Button>
+              ) : (
+                <p className="text-sm text-slate-500">
+                  Only a warehouse manager, admin, or destination agent can mark this manifest arrived.
+                </p>
               ))}
           </div>
         </Card>

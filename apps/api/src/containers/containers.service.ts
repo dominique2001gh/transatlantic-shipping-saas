@@ -74,8 +74,42 @@ function summarizeContents(container: ContainerDetailRaw) {
   };
 }
 
+/** Milestone 3F: destinationSummary is present only once a container has reached ARRIVED or later. */
+const CONTAINER_ARRIVED_OR_LATER: DbContainerStatus[] = [
+  DbContainerStatus.ARRIVED,
+  DbContainerStatus.UNLOADING,
+  DbContainerStatus.CLOSED,
+];
+
+/**
+ * Live-computed, destination-side progress — never stored, always
+ * derived from current ContainerItem + ShipmentItem.status. Deliberately
+ * distinguishes "outstanding" (not yet scanned in at destination) from
+ * "exception" (scanned in but damaged/missing/flagged) from "received" —
+ * an outstanding or exception item is never folded into receivedCount,
+ * so a discrepancy can never be silently hidden, including after CLOSE.
+ */
+function summarizeDestination(container: ContainerDetailRaw) {
+  if (!CONTAINER_ARRIVED_OR_LATER.includes(container.status)) {
+    return null;
+  }
+  let receivedCount = 0;
+  let exceptionCount = 0;
+  let outstandingCount = 0;
+  for (const containerItem of container.items) {
+    if (containerItem.shipmentItem.status === DbShipmentItemStatus.RECEIVED_DESTINATION_WAREHOUSE) {
+      receivedCount += 1;
+    } else if (containerItem.shipmentItem.status === DbShipmentItemStatus.EXCEPTION) {
+      exceptionCount += 1;
+    } else {
+      outstandingCount += 1;
+    }
+  }
+  return { receivedCount, outstandingCount, exceptionCount };
+}
+
 function presentContainer(container: ContainerDetailRaw) {
-  return { ...container, summary: summarizeContents(container) };
+  return { ...container, summary: summarizeContents(container), destinationSummary: summarizeDestination(container) };
 }
 
 @Injectable()
@@ -359,6 +393,50 @@ export class ContainersService {
       await this.maybeRollupShipmentConsolidation(tenantId, actorUserId, shipmentId);
     }
 
+    return this.findById(tenantId, container.id);
+  }
+
+  /**
+   * Milestone 3F: ARRIVED -> UNLOADING — staff has broken the seal and
+   * begun destination processing. A pure container-status bookkeeping
+   * transition, same as BOOKED -> LOADING in loadItem() above: it does
+   * not itself change any item's status (items are already
+   * ARRIVED_DESTINATION from the manifest's own arrive() cascade), so no
+   * TrackingEvent is written here — there is nothing new to report on
+   * any individual shipment yet.
+   */
+  async openForUnloading(tenantId: string, containerId: string) {
+    const container = await this.prisma.container.findFirst({ where: { id: containerId, tenantId } });
+    if (!container) {
+      throw new NotFoundException('Container not found');
+    }
+    if (container.status !== DbContainerStatus.ARRIVED) {
+      throw new ConflictException(`Container must be ARRIVED to open for unloading (current: ${container.status}).`);
+    }
+    await this.prisma.container.update({ where: { id: container.id }, data: { status: DbContainerStatus.UNLOADING } });
+    return this.findById(tenantId, container.id);
+  }
+
+  /**
+   * Milestone 3F: UNLOADING -> CLOSED — staff has finished destination
+   * processing for this container. Deliberately does NOT require every
+   * item to have been received: a still-outstanding or EXCEPTION item is
+   * a real discrepancy, not a blocker — closing just means "we're done
+   * looking," and the discrepancy stays fully visible afterward via
+   * destinationSummary (see summarizeDestination) rather than being
+   * silently dropped. No item ever advances past
+   * RECEIVED_DESTINATION_WAREHOUSE as a side effect of closing — Ready
+   * for Pickup/Delivery is a distinct later milestone.
+   */
+  async closeUnloading(tenantId: string, containerId: string) {
+    const container = await this.prisma.container.findFirst({ where: { id: containerId, tenantId } });
+    if (!container) {
+      throw new NotFoundException('Container not found');
+    }
+    if (container.status !== DbContainerStatus.UNLOADING) {
+      throw new ConflictException(`Container must be UNLOADING to close (current: ${container.status}).`);
+    }
+    await this.prisma.container.update({ where: { id: container.id }, data: { status: DbContainerStatus.CLOSED } });
     return this.findById(tenantId, container.id);
   }
 

@@ -21,11 +21,45 @@ import {
 } from '@transatlantic/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { ShipmentsService } from '../shipments/shipments.service';
+import { DestinationReceiveItemDto } from './dto/destination-receive-item.dto';
 import { ProcessItemDto } from './dto/process-item.dto';
 import { ReceiveItemDto } from './dto/receive-item.dto';
 
 const ACTOR_SELECT = { id: true, firstName: true, lastName: true } as const;
 const WAREHOUSE_SELECT = { id: true, name: true, code: true } as const;
+
+/**
+ * "Reached at least PROCESSED" — same "reached at least this stage"
+ * pattern already established in ManifestsService (ITEM_COMMITTED_OR_LATER
+ * etc.), applied here to fix a real, pre-existing bug in
+ * maybeRollupToReadyForConsolidation: an item that has moved *past*
+ * PROCESSED (e.g. already ASSIGNED_TO_CONTAINER because it was loaded
+ * before a sibling item finished processing) is still, correctly,
+ * "processed" — an exact `status === PROCESSED` check would permanently
+ * stop matching that item the moment it advances, which meant a
+ * multi-item shipment processed and loaded in an interleaved order
+ * (process item1, load item1, process item2, load item2 — a completely
+ * normal floor-staff sequence) could get stuck at PROCESSING forever,
+ * never reaching READY_FOR_CONSOLIDATION, even though every item was
+ * legitimately fully processed. Discovered via Milestone 3F's own
+ * multi-item destination-receive testing, not something that milestone
+ * introduced.
+ */
+const ITEM_PROCESSED_OR_LATER: DbShipmentItemStatus[] = [
+  DbShipmentItemStatus.PROCESSED,
+  DbShipmentItemStatus.CONSOLIDATED,
+  DbShipmentItemStatus.ASSIGNED_TO_CONTAINER,
+  DbShipmentItemStatus.ASSIGNED_TO_MANIFEST,
+  DbShipmentItemStatus.LOADED,
+  DbShipmentItemStatus.DEPARTED_ORIGIN,
+  DbShipmentItemStatus.IN_TRANSIT,
+  DbShipmentItemStatus.ARRIVED_DESTINATION,
+  DbShipmentItemStatus.RECEIVED_DESTINATION_WAREHOUSE,
+  DbShipmentItemStatus.READY_FOR_PICKUP,
+  DbShipmentItemStatus.OUT_FOR_DELIVERY,
+  DbShipmentItemStatus.DELIVERED,
+  DbShipmentItemStatus.PICKED_UP,
+];
 
 /**
  * Shared shape for every endpoint that resolves to a full ShipmentItem
@@ -367,6 +401,145 @@ export class WarehouseService {
     return presentItem(processed);
   }
 
+  /**
+   * Milestone 3F, the other half of destination receiving (see
+   * ManifestsService.arrive for the bulk/automatic "container/manifest
+   * arrived" half). This is the individual, staff-scanned, per-item
+   * action: an item must have ARRIVED_DESTINATION (its transport unit
+   * has landed) before it is eligible here, and this is the only place
+   * ShipmentItemStatus.RECEIVED_DESTINATION_WAREHOUSE is ever set.
+   *
+   * Same dual-outcome shape as processItem: a damaged or flagged item
+   * can never be marked received in the same action that flags it — it
+   * goes to EXCEPTION instead. A "missing" item (one that never
+   * physically arrived with its container/manifest) is recorded the
+   * same way: call this manually (scanned: false) with hasException:
+   * true and a descriptive note — there is nothing to scan for cargo
+   * that isn't there, so this is a deliberate manual-only path rather
+   * than a separate endpoint.
+   *
+   * CRITICAL STATUS RULE (reinforced per the approved milestone spec):
+   * RECEIVED_DESTINATION_WAREHOUSE means only "the destination warehouse
+   * has physically reconciled this item" — it is NOT Ready for
+   * Pickup/Delivery, which is a distinct, later milestone with its own
+   * reconciliation/condition/hold/business-rule gate. Nothing in this
+   * method (or the shipment rollups it can trigger) ever sets or implies
+   * READY_FOR_PICKUP.
+   */
+  async destinationReceiveItem(tenantId: string, actorUserId: string, itemId: string, dto: DestinationReceiveItemDto) {
+    const item = await this.prisma.shipmentItem.findFirst({
+      where: { id: itemId, tenantId },
+      include: { shipment: { select: { id: true, status: true, destinationWarehouseId: true } } },
+    });
+    if (!item) {
+      throw new NotFoundException('Item not found');
+    }
+    if (item.shipment.status === DbShipmentStatus.CANCELLED) {
+      throw new ConflictException('This shipment has been cancelled and cannot receive items.');
+    }
+
+    if (item.status !== DbShipmentItemStatus.ARRIVED_DESTINATION) {
+      if (item.status === DbShipmentItemStatus.RECEIVED_DESTINATION_WAREHOUSE) {
+        throw new ConflictException(
+          `This item was already received at the destination warehouse on ${item.lastInspectedAt?.toLocaleString() ?? 'a previous visit'}.`,
+        );
+      }
+      if (item.status === DbShipmentItemStatus.EXCEPTION) {
+        throw new ConflictException(
+          'This item is on hold with an exception and cannot be received. Resolve the exception first.',
+        );
+      }
+      throw new ConflictException(
+        `This item's current status (${item.status}) is not eligible for destination receiving. ` +
+          `Its manifest/container must arrive first.`,
+      );
+    }
+
+    const warehouse = await this.prisma.warehouse.findFirst({ where: { id: dto.warehouseId, tenantId } });
+    if (!warehouse) {
+      throw new NotFoundException('Warehouse not found');
+    }
+
+    if (dto.hasException && !dto.exceptionDescription?.trim()) {
+      throw new BadRequestException('exceptionDescription is required when hasException is true.');
+    }
+
+    // Soft destination-warehouse check — a mismatch is surfaced, not
+    // blocked, same posture as the container-loading destinationWarning.
+    let destinationWarning: string | undefined;
+    if (item.shipment.destinationWarehouseId && item.shipment.destinationWarehouseId !== dto.warehouseId) {
+      destinationWarning = "This item's shipment destination warehouse does not match the warehouse selected here.";
+    }
+
+    const isGood = !dto.hasException && dto.condition !== ShipmentItemCondition.DAMAGED;
+    const newItemStatus = isGood ? ShipmentItemStatus.RECEIVED_DESTINATION_WAREHOUSE : ShipmentItemStatus.EXCEPTION;
+    const eventType = isGood ? TrackingEventType.RECEIVED_DESTINATION_WAREHOUSE : TrackingEventType.EXCEPTION;
+    const defaultNotes = isGood
+      ? `Received at destination warehouse ${warehouse.name}`
+      : `Held at destination warehouse ${warehouse.name}${dto.exceptionDescription ? `: ${dto.exceptionDescription}` : ''}`;
+
+    const event = await this.shipmentsService.createTrackingEvent(
+      tenantId,
+      actorUserId,
+      item.shipmentId,
+      {
+        eventType,
+        shipmentItemId: item.id,
+        itemStatus: newItemStatus,
+        warehouseId: dto.warehouseId,
+        notes: dto.notes ?? defaultNotes,
+        metadata: {
+          condition: dto.condition,
+          hasException: !!dto.hasException,
+          exceptionDescription: dto.exceptionDescription ?? null,
+          ...(destinationWarning ? { destinationWarning } : {}),
+        },
+      },
+      {
+        source: dto.scanned ? TrackingEventSource.BARCODE_SCAN : TrackingEventSource.MANUAL,
+        scanIdentifier: dto.scanIdentifier,
+      },
+    );
+
+    await this.prisma.shipmentItem.update({
+      where: { id: item.id },
+      data: {
+        condition: dto.condition,
+        lastInspectedAt: event.occurredAt,
+        lastInspectedByUserId: actorUserId,
+      },
+    });
+
+    // Reuses ItemInspection (the same structured, warehouse-scoped
+    // condition/exception history origin processing already writes to)
+    // rather than a new table — a Manager reporting on damage/exception
+    // rates by warehouse should see origin and destination discrepancies
+    // in one place.
+    await this.prisma.itemInspection.create({
+      data: {
+        tenantId,
+        shipmentId: item.shipmentId,
+        shipmentItemId: item.id,
+        warehouseId: dto.warehouseId,
+        condition: dto.condition,
+        result: isGood ? ItemProcessingResult.READY : ItemProcessingResult.HOLD,
+        hasException: !!dto.hasException,
+        exceptionDescription: dto.exceptionDescription ?? null,
+        notes: dto.notes ?? null,
+        inspectedByUserId: actorUserId,
+        inspectedAt: event.occurredAt,
+        trackingEventId: event.id,
+      },
+    });
+
+    const received = await this.prisma.shipmentItem.findUniqueOrThrow({
+      where: { id: item.id },
+      include: ITEM_DETAIL_INCLUDE,
+    });
+    const result = presentItem(received);
+    return destinationWarning ? { ...result, destinationWarning } : result;
+  }
+
   /** Items currently associated with a warehouse — a live view, not a separate stored record. */
   async getInventory(
     tenantId: string,
@@ -499,7 +672,7 @@ export class WarehouseService {
 
     const anyProcessingActivity = shipment.items.some(
       (shipmentItem) =>
-        shipmentItem.status === DbShipmentItemStatus.PROCESSED ||
+        ITEM_PROCESSED_OR_LATER.includes(shipmentItem.status) ||
         shipmentItem.status === DbShipmentItemStatus.EXCEPTION,
     );
     if (currentStatus === DbShipmentStatus.WAREHOUSE_RECEIVED && anyProcessingActivity) {
@@ -517,9 +690,7 @@ export class WarehouseService {
       currentStatus = DbShipmentStatus.PROCESSING;
     }
 
-    const allProcessed = shipment.items.every(
-      (shipmentItem) => shipmentItem.status === DbShipmentItemStatus.PROCESSED,
-    );
+    const allProcessed = shipment.items.every((shipmentItem) => ITEM_PROCESSED_OR_LATER.includes(shipmentItem.status));
     if (currentStatus === DbShipmentStatus.PROCESSING && allProcessed) {
       await this.shipmentsService.createTrackingEvent(
         tenantId,

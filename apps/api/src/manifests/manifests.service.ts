@@ -35,6 +35,7 @@ const MANIFEST_DETAIL_INCLUDE = {
   route: { select: { id: true, name: true, originCountry: true, destinationCountry: true } },
   finalizedByUser: { select: ACTOR_SELECT },
   departedByUser: { select: ACTOR_SELECT },
+  arrivedByUser: { select: ACTOR_SELECT },
   containers: {
     select: {
       id: true,
@@ -178,6 +179,15 @@ const ITEM_LOADED_OR_LATER: DbShipmentItemStatus[] = [
 const ITEM_DEPARTED_OR_LATER: DbShipmentItemStatus[] = [
   DbShipmentItemStatus.DEPARTED_ORIGIN,
   DbShipmentItemStatus.IN_TRANSIT,
+  DbShipmentItemStatus.ARRIVED_DESTINATION,
+  DbShipmentItemStatus.RECEIVED_DESTINATION_WAREHOUSE,
+  DbShipmentItemStatus.READY_FOR_PICKUP,
+  DbShipmentItemStatus.OUT_FOR_DELIVERY,
+  DbShipmentItemStatus.DELIVERED,
+  DbShipmentItemStatus.PICKED_UP,
+];
+/** Milestone 3F: used by maybeRollupShipmentArrival below. */
+const ITEM_ARRIVED_OR_LATER: DbShipmentItemStatus[] = [
   DbShipmentItemStatus.ARRIVED_DESTINATION,
   DbShipmentItemStatus.RECEIVED_DESTINATION_WAREHOUSE,
   DbShipmentItemStatus.READY_FOR_PICKUP,
@@ -1011,6 +1021,143 @@ export class ManifestsService {
   }
 
   /**
+   * DEPARTED -> ARRIVED. This is the "the whole transport movement has
+   * landed" gate — bulk and automatic, and deliberately distinct from
+   * any individual item being physically received at a destination
+   * warehouse (WarehouseService.destinationReceiveItem, Milestone 3F's
+   * other half: a separate, later, per-item, staff-scanned action that
+   * happens asynchronously and partially over time). Arriving a manifest
+   * never sets ShipmentItemStatus.RECEIVED_DESTINATION_WAREHOUSE or
+   * ShipmentStatus beyond ARRIVED_DESTINATION — Ready for Pickup/Delivery
+   * is out of scope here and belongs to a later milestone.
+   *
+   * Cascades:
+   *   - Ocean/RoRo: every container on this manifest DEPARTED -> ARRIVED,
+   *     with actualArrival stamped.
+   *   - Air: no containers to cascade.
+   *   - Every affected item (via its container, or directly for air):
+   *     DEPARTED_ORIGIN -> ARRIVED_DESTINATION.
+   *
+   * Same posture as finalize()/depart(): all eligibility validated
+   * before any write, so a rejected arrive leaves everything untouched;
+   * re-arriving an already-ARRIVED manifest hits the same "must be
+   * DEPARTED" guard as every other mutation here — 409, no duplicate
+   * side effects.
+   */
+  async arrive(tenantId: string, actorUserId: string, manifestId: string) {
+    const manifest = await this.prisma.manifest.findFirst({ where: { id: manifestId, tenantId } });
+    if (!manifest) {
+      throw new NotFoundException('Manifest not found');
+    }
+    if (manifest.status !== DbManifestStatus.DEPARTED) {
+      throw new ConflictException(`Manifest must be DEPARTED to mark arrived (current: ${manifest.status}).`);
+    }
+
+    const isAir = manifest.shipmentMode === DbShipmentMode.AIR;
+    const arrivedAt = new Date();
+    const affectedShipmentIds = new Set<string>();
+
+    if (isAir) {
+      const manifestItems = await this.prisma.manifestItem.findMany({
+        where: { manifestId: manifest.id, tenantId, removedAt: null },
+        include: {
+          shipmentItem: { select: { id: true, itemCode: true, status: true } },
+          shipment: { select: { id: true } },
+        },
+      });
+      if (manifestItems.length === 0) {
+        throw new ConflictException('This manifest has no items to mark arrived.');
+      }
+      for (const manifestItem of manifestItems) {
+        if (manifestItem.shipmentItem.status !== DbShipmentItemStatus.DEPARTED_ORIGIN) {
+          throw new ConflictException(
+            `Item ${manifestItem.shipmentItem.itemCode} is not in a departed state (status: ${manifestItem.shipmentItem.status}).`,
+          );
+        }
+      }
+
+      for (const manifestItem of manifestItems) {
+        await this.shipmentsService.createTrackingEvent(
+          tenantId,
+          actorUserId,
+          manifestItem.shipment.id,
+          {
+            eventType: TrackingEventType.ARRIVED_DESTINATION,
+            shipmentItemId: manifestItem.shipmentItem.id,
+            itemStatus: ShipmentItemStatus.ARRIVED_DESTINATION,
+            notes: `Arrived on manifest ${manifest.manifestNumber}`,
+            metadata: { manifestId: manifest.id, manifestNumber: manifest.manifestNumber },
+          },
+          { source: TrackingEventSource.SYSTEM },
+        );
+        affectedShipmentIds.add(manifestItem.shipment.id);
+      }
+    } else {
+      const containers = await this.prisma.container.findMany({
+        where: { manifestId: manifest.id, tenantId },
+        include: {
+          items: {
+            where: { removedAt: null },
+            include: {
+              shipmentItem: { select: { id: true, itemCode: true, status: true } },
+              shipment: { select: { id: true } },
+            },
+          },
+        },
+      });
+      if (containers.length === 0) {
+        throw new ConflictException('This manifest has no containers to mark arrived.');
+      }
+      for (const container of containers) {
+        if (container.status !== DbContainerStatus.DEPARTED) {
+          throw new ConflictException(
+            `Container ${container.containerNumber} is not in a departed state (status: ${container.status}).`,
+          );
+        }
+      }
+
+      for (const container of containers) {
+        for (const containerItem of container.items) {
+          await this.shipmentsService.createTrackingEvent(
+            tenantId,
+            actorUserId,
+            containerItem.shipment.id,
+            {
+              eventType: TrackingEventType.ARRIVED_DESTINATION,
+              shipmentItemId: containerItem.shipmentItem.id,
+              itemStatus: ShipmentItemStatus.ARRIVED_DESTINATION,
+              notes: `Arrived on manifest ${manifest.manifestNumber} (container ${container.containerNumber})`,
+              metadata: {
+                manifestId: manifest.id,
+                manifestNumber: manifest.manifestNumber,
+                containerId: container.id,
+                containerNumber: container.containerNumber,
+              },
+            },
+            { source: TrackingEventSource.SYSTEM },
+          );
+          affectedShipmentIds.add(containerItem.shipment.id);
+        }
+        await this.prisma.container.update({
+          where: { id: container.id },
+          data: { status: DbContainerStatus.ARRIVED, actualArrival: arrivedAt },
+        });
+      }
+    }
+
+    await this.prisma.manifest.update({
+      where: { id: manifest.id },
+      data: { status: DbManifestStatus.ARRIVED, arrivedAt, arrivedByUserId: actorUserId },
+    });
+
+    for (const shipmentId of affectedShipmentIds) {
+      await this.maybeRollupShipmentArrival(tenantId, actorUserId, shipmentId);
+    }
+
+    return this.findById(tenantId, manifest.id);
+  }
+
+  /**
    * Mirrors ContainersService.maybeRollupShipmentConsolidation for the
    * direct (air) item path — same READY_FOR_CONSOLIDATION <-> CONSOLIDATED
    * <-> LOADED semantics, generalized to also recognize
@@ -1137,6 +1284,52 @@ export class ManifestsService {
         eventType: TrackingEventType.DEPARTED_ORIGIN,
         status: ShipmentStatus.DEPARTED,
         notes: 'All items departed origin',
+      },
+      { source: TrackingEventSource.SYSTEM },
+    );
+  }
+
+  /**
+   * Mirrors maybeRollupShipmentDeparture exactly, one stage further:
+   * advances a shipment to ARRIVED_DESTINATION only once EVERY one of its
+   * items has reached ARRIVED_DESTINATION or later — same partial/split-
+   * shipment guard (some items may arrive on an earlier manifest, others
+   * on a later one), same "reached at least this stage" checks, same
+   * forward-only, never-downgraded posture.
+   *
+   * Deliberately stops here: this milestone (3F) never advances a
+   * shipment past ARRIVED_DESTINATION, regardless of how many of its
+   * items go on to be individually RECEIVED_DESTINATION_WAREHOUSE — Ready
+   * for Pickup/Delivery is a distinct later milestone with its own
+   * reconciliation/condition/hold/business-rule gate, not something this
+   * rollup should ever imply.
+   */
+  private async maybeRollupShipmentArrival(tenantId: string, actorUserId: string, shipmentId: string) {
+    const ROLLUP_ELIGIBLE_STATUSES: DbShipmentStatus[] = [DbShipmentStatus.DEPARTED, DbShipmentStatus.IN_TRANSIT];
+
+    const shipment = await this.prisma.shipment.findFirst({
+      where: { id: shipmentId, tenantId },
+      include: { items: { select: { status: true } } },
+    });
+    if (!shipment || shipment.items.length === 0) {
+      return;
+    }
+    if (!ROLLUP_ELIGIBLE_STATUSES.includes(shipment.status)) {
+      return;
+    }
+    const allArrived = shipment.items.every((shipmentItem) => ITEM_ARRIVED_OR_LATER.includes(shipmentItem.status));
+    if (!allArrived) {
+      return;
+    }
+
+    await this.shipmentsService.createTrackingEvent(
+      tenantId,
+      actorUserId,
+      shipmentId,
+      {
+        eventType: TrackingEventType.ARRIVED_DESTINATION,
+        status: ShipmentStatus.ARRIVED_DESTINATION,
+        notes: 'All items arrived at destination',
       },
       { source: TrackingEventSource.SYSTEM },
     );

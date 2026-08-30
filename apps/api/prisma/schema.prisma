@@ -154,6 +154,12 @@ enum ManifestStatus {
   /// depart action itself (transition + roll-forward) is a deliberately
   /// separate, later controlled step — see Manifest.departedAt below.
   DEPARTED
+  /// Milestone 3F: the whole transport movement has landed at
+  /// destination — see Manifest.arrivedAt below. Distinct from any
+  /// individual item being physically received at a destination
+  /// warehouse (ShipmentItemStatus.RECEIVED_DESTINATION_WAREHOUSE),
+  /// which happens per-item, later, and asynchronously.
+  ARRIVED
   SUBMITTED
   ARCHIVED
 }
@@ -409,6 +415,7 @@ model User {
   containersFinalized   Container[]
   manifestsFinalized    Manifest[]       @relation("ManifestFinalizedBy")
   manifestsDeparted     Manifest[]       @relation("ManifestDepartedBy")
+  manifestsArrived      Manifest[]       @relation("ManifestArrivedBy")
   manifestItemsAdded    ManifestItem[]   @relation("ManifestItemAddedBy")
   manifestItemsRemoved  ManifestItem[]   @relation("ManifestItemRemovedBy")
 
@@ -942,6 +949,13 @@ model Manifest {
   finalizedByUserId String?
   departedAt        DateTime?
   departedByUserId  String?
+  /// Milestone 3F: when this movement's cargo landed at destination.
+  /// Setting this cascades every affected container to ARRIVED and every
+  /// affected item to ARRIVED_DESTINATION — it does not itself mean any
+  /// individual item has been physically received at a destination
+  /// warehouse (that is a separate, later, per-item action).
+  arrivedAt        DateTime?
+  arrivedByUserId  String?
 
   /// Immutable snapshot of derived contents (containers + direct items)
   /// at finalize time.
@@ -955,6 +969,7 @@ model Manifest {
   route           Route?         @relation(fields: [routeId], references: [id], onDelete: SetNull)
   finalizedByUser User?          @relation("ManifestFinalizedBy", fields: [finalizedByUserId], references: [id], onDelete: SetNull)
   departedByUser  User?          @relation("ManifestDepartedBy", fields: [departedByUserId], references: [id], onDelete: SetNull)
+  arrivedByUser   User?          @relation("ManifestArrivedBy", fields: [arrivedByUserId], references: [id], onDelete: SetNull)
   /// Sealed/loaded containers scheduled on this manifest (ocean/RoRo path).
   containers      Container[]
   /// Items assigned directly to this manifest with no container (air path).

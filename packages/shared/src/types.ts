@@ -304,6 +304,19 @@ export interface ContainerContentsSummary {
   weightByUnit: Record<string, number>;
 }
 
+/**
+ * Live-computed, destination-side progress (Milestone 3F). Present only
+ * once the container has reached ARRIVED or later — null beforehand.
+ * `outstandingCount` is never silently folded into `receivedCount`: a
+ * still-outstanding or EXCEPTION item is always visible here, even after
+ * the container is CLOSED, so a discrepancy can never be hidden.
+ */
+export interface ContainerDestinationSummary {
+  receivedCount: number;
+  outstandingCount: number;
+  exceptionCount: number;
+}
+
 export interface ContainerDetail {
   id: string;
   tenantId: string;
@@ -334,6 +347,8 @@ export interface ContainerDetail {
    */
   manifestId: string | null;
   manifest: { id: string; manifestNumber: string } | null;
+  /** Milestone 3F: null until this container has ARRIVED — see ContainerDestinationSummary. */
+  destinationSummary: ContainerDestinationSummary | null;
 }
 
 // ==========================================================================
@@ -396,12 +411,15 @@ export interface ManifestDetail {
   estimatedArrivalAt: string | null;
   finalizedAt: string | null;
   departedAt: string | null;
+  /** Milestone 3F: when this movement's cargo landed at destination. */
+  arrivedAt: string | null;
   createdAt: string;
   updatedAt: string;
   originWarehouse: { id: string; name: string; code: string } | null;
   route: { id: string; name: string; originCountry: string; destinationCountry: string } | null;
   finalizedByUser: TrackingEventActor | null;
   departedByUser: TrackingEventActor | null;
+  arrivedByUser: TrackingEventActor | null;
   containers: ManifestContainerSummary[];
   items: ManifestItemSummary[];
   summary: ManifestContentsSummary;

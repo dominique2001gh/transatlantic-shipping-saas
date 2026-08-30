@@ -273,15 +273,26 @@ export class ShipmentsService {
         if (dto.itemStatus) {
           itemUpdateData.status = dto.itemStatus;
         }
-        // Stamp the "where is it / who received it" convenience fields the
-        // first time a receiving event fires for this item, so item-count
-        // reads (itemCounts.received) don't require joining tracking_events.
+        // Stamp the "who received it, and when" convenience fields only
+        // the *first* time a receiving event fires for this item — this
+        // is always the origin receive, and must never be overwritten by
+        // a later destination receive (Milestone 3F), which is a
+        // separate physical event with its own actor/timestamp already
+        // captured on the TrackingEvent row itself.
         if (isReceivingEvent && !item.receivedAt) {
           itemUpdateData.receivedAt = created.occurredAt;
           itemUpdateData.receivedByUser = { connect: { id: actorUserId } };
-          if (dto.warehouseId) {
-            itemUpdateData.currentWarehouse = { connect: { id: dto.warehouseId } };
-          }
+        }
+        // "Where is it right now" is a live pointer, not history — unlike
+        // receivedAt/receivedByUser above, this must update on *every*
+        // receiving event that carries a warehouseId, including a
+        // destination receive after the item already has an origin
+        // receivedAt. Without this, Milestone 3F's destination receive
+        // would flip ShipmentItemStatus.RECEIVED_DESTINATION_WAREHOUSE
+        // but silently leave currentWarehouseId pointing at the origin
+        // warehouse.
+        if (isReceivingEvent && dto.warehouseId) {
+          itemUpdateData.currentWarehouse = { connect: { id: dto.warehouseId } };
         }
 
         if (Object.keys(itemUpdateData).length > 0) {

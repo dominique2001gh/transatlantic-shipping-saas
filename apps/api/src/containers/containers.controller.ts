@@ -31,6 +31,16 @@ const WAREHOUSE_ROLES = [
 /** Sealing a container is a bigger, harder-to-reverse action — supervisor-level only, staff excluded. */
 const FINALIZE_ROLES = [UserRole.TENANT_OWNER, UserRole.TENANT_ADMIN, UserRole.WAREHOUSE_MANAGER];
 
+/**
+ * Milestone 3F: opening an arrived container for unloading is destination
+ * floor work — same shape as WAREHOUSE_ROLES, plus DESTINATION_AGENT
+ * (view-only everywhere until now; this is exactly the action that role
+ * exists for). Additive only — nothing narrowed.
+ */
+const DESTINATION_ROLES = [...WAREHOUSE_ROLES, UserRole.DESTINATION_AGENT];
+/** Closing out unloading is the destination-side equivalent of FINALIZE_ROLES — supervisor-level, staff excluded. */
+const CLOSE_ROLES = [...FINALIZE_ROLES, UserRole.DESTINATION_AGENT];
+
 const VALID_CONTAINER_STATUSES = new Set<string>(Object.values(ContainerStatus));
 
 @Controller('containers')
@@ -86,5 +96,17 @@ export class ContainersController {
   @Roles(...FINALIZE_ROLES)
   finalize(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Body() dto: FinalizeContainerDto) {
     return this.containersService.finalize(requireTenantId(user.tenantId), user.id, id, dto);
+  }
+
+  @Post(':id/open')
+  @Roles(...DESTINATION_ROLES)
+  openForUnloading(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+    return this.containersService.openForUnloading(requireTenantId(user.tenantId), id);
+  }
+
+  @Post(':id/close')
+  @Roles(...CLOSE_ROLES)
+  closeUnloading(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+    return this.containersService.closeUnloading(requireTenantId(user.tenantId), id);
   }
 }

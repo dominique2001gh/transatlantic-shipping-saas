@@ -66,3 +66,17 @@ export function finalizeContainer(containerId: string, sealNumber?: string): Pro
     token: authToken(),
   });
 }
+
+export function openContainerForUnloading(containerId: string): Promise<ContainerDetail> {
+  return apiFetch<ContainerDetail>(`/containers/${containerId}/open`, {
+    method: 'POST',
+    token: authToken(),
+  });
+}
+
+export function closeContainerUnloading(containerId: string): Promise<ContainerDetail> {
+  return apiFetch<ContainerDetail>(`/containers/${containerId}/close`, {
+    method: 'POST',
+    token: authToken(),
+  });
+}

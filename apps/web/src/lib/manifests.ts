@@ -100,3 +100,10 @@ export function departManifest(manifestId: string): Promise<ManifestDetail> {
     token: authToken(),
   });
 }
+
+export function arriveManifest(manifestId: string): Promise<ManifestDetail> {
+  return apiFetch<ManifestDetail>(`/manifests/${manifestId}/arrive`, {
+    method: 'POST',
+    token: authToken(),
+  });
+}

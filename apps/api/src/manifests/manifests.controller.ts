@@ -37,6 +37,13 @@ const WAREHOUSE_ROLES = [
  */
 const FINALIZE_ROLES = [UserRole.TENANT_OWNER, UserRole.TENANT_ADMIN, UserRole.WAREHOUSE_MANAGER];
 const DEPART_ROLES = FINALIZE_ROLES;
+/**
+ * Milestone 3F: marking a movement arrived is exactly the action
+ * DESTINATION_AGENT exists for — a deliberate, additive widening (this
+ * role has been view-only everywhere until now). Everyone already in
+ * FINALIZE_ROLES/DEPART_ROLES keeps the same access; nothing is narrowed.
+ */
+const ARRIVE_ROLES = [...FINALIZE_ROLES, UserRole.DESTINATION_AGENT];
 
 const VALID_STATUSES = new Set<string>(Object.values(ManifestStatus));
 const VALID_MODES = new Set<string>(Object.values(ShipmentMode));
@@ -132,5 +139,11 @@ export class ManifestsController {
   @Roles(...DEPART_ROLES)
   depart(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
     return this.manifestsService.depart(requireTenantId(user.tenantId), user.id, id);
+  }
+
+  @Post(':id/arrive')
+  @Roles(...ARRIVE_ROLES)
+  arrive(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+    return this.manifestsService.arrive(requireTenantId(user.tenantId), user.id, id);
   }
 }

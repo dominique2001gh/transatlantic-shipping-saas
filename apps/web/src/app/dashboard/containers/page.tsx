@@ -9,12 +9,38 @@ import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { ApiError } from '@/lib/api';
 import { getStoredUser } from '@/lib/auth';
-import { finalizeContainer, listContainers, unloadItemFromContainer } from '@/lib/containers';
+import {
+  closeContainerUnloading,
+  finalizeContainer,
+  listContainers,
+  openContainerForUnloading,
+  unloadItemFromContainer,
+} from '@/lib/containers';
 import { formatDateTime } from '@/lib/format';
 
 const FINALIZE_ROLES = new Set<UserRole>([UserRole.TENANT_OWNER, UserRole.TENANT_ADMIN, UserRole.WAREHOUSE_MANAGER]);
+/** Milestone 3F: mirrors ContainersController's DESTINATION_ROLES — opening for unloading is destination floor work. */
+const OPEN_ROLES = new Set<UserRole>([
+  UserRole.TENANT_OWNER,
+  UserRole.TENANT_ADMIN,
+  UserRole.WAREHOUSE_MANAGER,
+  UserRole.WAREHOUSE_STAFF,
+  UserRole.DESTINATION_AGENT,
+]);
+/** Mirrors ContainersController's CLOSE_ROLES — supervisor-level, staff excluded, same shape as FINALIZE_ROLES. */
+const CLOSE_ROLES = new Set<UserRole>([...FINALIZE_ROLES, UserRole.DESTINATION_AGENT]);
 
-const STATUS_FILTERS = ['ALL', 'BOOKED', 'LOADING', 'LOADED', 'DEPARTED', 'IN_TRANSIT', 'ARRIVED', 'CLOSED'] as const;
+const STATUS_FILTERS = [
+  'ALL',
+  'BOOKED',
+  'LOADING',
+  'LOADED',
+  'DEPARTED',
+  'IN_TRANSIT',
+  'ARRIVED',
+  'UNLOADING',
+  'CLOSED',
+] as const;
 
 export default function ContainersPage() {
   const [containers, setContainers] = useState<ContainerDetail[] | null>(null);
@@ -23,9 +49,13 @@ export default function ContainersPage() {
   const [error, setError] = useState<string | null>(null);
   const [finalizing, setFinalizing] = useState(false);
   const [removingItemId, setRemovingItemId] = useState<string | null>(null);
+  const [opening, setOpening] = useState(false);
+  const [closing, setClosing] = useState(false);
 
   const currentUser = getStoredUser();
   const canFinalize = !!currentUser && FINALIZE_ROLES.has(currentUser.role);
+  const canOpen = !!currentUser && OPEN_ROLES.has(currentUser.role);
+  const canClose = !!currentUser && CLOSE_ROLES.has(currentUser.role);
 
   const reload = useCallback(() => {
     listContainers(statusFilter === 'ALL' ? undefined : { status: statusFilter })
@@ -63,6 +93,42 @@ export default function ContainersPage() {
       setError(err instanceof ApiError ? err.message : 'Failed to remove item.');
     } finally {
       setRemovingItemId(null);
+    }
+  }
+
+  async function handleOpen() {
+    if (!selected) return;
+    setOpening(true);
+    setError(null);
+    try {
+      await openContainerForUnloading(selected.id);
+      reload();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed to open container for unloading.');
+    } finally {
+      setOpening(false);
+    }
+  }
+
+  async function handleClose() {
+    if (!selected) return;
+    if (
+      !window.confirm(
+        `Close out unloading for container ${selected.containerNumber}? Any still-outstanding or flagged items ` +
+          `will remain visible as a discrepancy — closing does not mark them received.`,
+      )
+    ) {
+      return;
+    }
+    setClosing(true);
+    setError(null);
+    try {
+      await closeContainerUnloading(selected.id);
+      reload();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed to close container.');
+    } finally {
+      setClosing(false);
     }
   }
 
@@ -166,11 +232,60 @@ export default function ContainersPage() {
             <ContainerContentsList container={selected} onRemove={handleRemove} removing={removingItemId} />
           </div>
 
+          {selected.destinationSummary && (
+            <div className="mt-4 flex flex-wrap gap-x-6 gap-y-1 rounded-lg bg-slate-50 px-4 py-3 text-sm text-slate-600">
+              <span>
+                <strong className="text-emerald-700">{selected.destinationSummary.receivedCount}</strong> received at
+                destination
+              </span>
+              <span>
+                <strong className={selected.destinationSummary.outstandingCount > 0 ? 'text-amber-700' : 'text-slate-900'}>
+                  {selected.destinationSummary.outstandingCount}
+                </strong>{' '}
+                still outstanding
+              </span>
+              <span>
+                <strong className={selected.destinationSummary.exceptionCount > 0 ? 'text-red-700' : 'text-slate-900'}>
+                  {selected.destinationSummary.exceptionCount}
+                </strong>{' '}
+                flagged / exception
+              </span>
+            </div>
+          )}
+
           {selected.status === 'LOADING' && canFinalize && (
             <div className="mt-5">
               <Button type="button" onClick={handleFinalize} disabled={finalizing}>
                 {finalizing ? 'Finalizing…' : 'Finalize / Seal Container'}
               </Button>
+            </div>
+          )}
+
+          {selected.status === 'ARRIVED' && (
+            <div className="mt-5">
+              {canOpen ? (
+                <Button type="button" onClick={handleOpen} disabled={opening}>
+                  {opening ? 'Opening…' : 'Open for Unloading'}
+                </Button>
+              ) : (
+                <p className="text-sm text-slate-500">
+                  Only warehouse staff, a manager, admin, or destination agent can open this container.
+                </p>
+              )}
+            </div>
+          )}
+
+          {selected.status === 'UNLOADING' && (
+            <div className="mt-5">
+              {canClose ? (
+                <Button type="button" onClick={handleClose} disabled={closing}>
+                  {closing ? 'Closing…' : 'Close Unloading'}
+                </Button>
+              ) : (
+                <p className="text-sm text-slate-500">
+                  Only a warehouse manager, admin, or destination agent can close out unloading.
+                </p>
+              )}
             </div>
           )}
         </Card>

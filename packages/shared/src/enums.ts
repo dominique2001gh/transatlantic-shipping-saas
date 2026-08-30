@@ -194,6 +194,10 @@ export enum ManifestStatus {
   /// Milestone 3E-A adds this value for schema completeness; the depart
   /// action itself is a deliberately separate, later controlled step.
   DEPARTED = 'DEPARTED',
+  /// Milestone 3F: the whole transport movement has landed at
+  /// destination. Distinct from any individual item being physically
+  /// received at a destination warehouse.
+  ARRIVED = 'ARRIVED',
   SUBMITTED = 'SUBMITTED',
   ARCHIVED = 'ARCHIVED',
 }
