@@ -235,6 +235,17 @@ enum ItemProcessingResult {
   HOLD
 }
 
+/// Distinguishes the two final-handoff paths PickupDeliveryRecord can
+/// represent. Milestone: Customer Pickup only implements PICKUP; DELIVERY
+/// is defined now (not implemented — no service/controller path creates
+/// one yet) so the later Delivery/Driver milestone reuses this same model
+/// and the same shipment-completion rollup instead of requiring a schema
+/// redesign or a second parallel table.
+enum HandoffType {
+  PICKUP
+  DELIVERY
+}
+
 enum QuoteStatus {
   DRAFT
   SENT
@@ -327,27 +338,28 @@ model Tenant {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  settings        TenantSettings?
-  users           User[]
-  customers       Customer[]
-  addresses       Address[]
-  warehouses      Warehouse[]
-  routes          Route[]
-  shipments       Shipment[]
-  shipmentItems   ShipmentItem[]
-  itemInspections ItemInspection[]
-  vehicleDetails  VehicleDetails[]
-  containers      Container[]
-  containerItems  ContainerItem[]
-  manifests       Manifest[]
-  manifestItems   ManifestItem[]
-  trackingEvents  TrackingEvent[]
-  quotes          Quote[]
-  invoices        Invoice[]
-  invoiceItems    InvoiceItem[]
-  payments        Payment[]
-  documents       Document[]
-  notifications   Notification[]
+  settings              TenantSettings?
+  users                 User[]
+  customers             Customer[]
+  addresses             Address[]
+  warehouses            Warehouse[]
+  routes                Route[]
+  shipments             Shipment[]
+  shipmentItems         ShipmentItem[]
+  itemInspections       ItemInspection[]
+  pickupDeliveryRecords PickupDeliveryRecord[]
+  vehicleDetails        VehicleDetails[]
+  containers            Container[]
+  containerItems        ContainerItem[]
+  manifests             Manifest[]
+  manifestItems         ManifestItem[]
+  trackingEvents        TrackingEvent[]
+  quotes                Quote[]
+  invoices              Invoice[]
+  invoiceItems          InvoiceItem[]
+  payments              Payment[]
+  documents             Document[]
+  notifications         Notification[]
 
   @@map("tenants")
 }
@@ -405,19 +417,21 @@ model User {
   tenant   Tenant?   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   customer Customer? @relation("CustomerUser")
 
-  notifications         Notification[]
-  itemsReceived         ShipmentItem[] // items this user marked received (ShipmentItem.receivedByUserId)
-  itemsLastInspected    ShipmentItem[]   @relation("ShipmentItemLastInspectedBy") // items this user most recently inspected (denormalized convenience only — see ItemInspection for history)
-  itemInspections       ItemInspection[] // full inspection history this user performed
-  trackingEventsCreated TrackingEvent[] // audit trail rows this user is the actor for
-  containerItemsLoaded  ContainerItem[]  @relation("ContainerItemLoadedBy")
-  containerItemsRemoved ContainerItem[]  @relation("ContainerItemRemovedBy")
-  containersFinalized   Container[]
-  manifestsFinalized    Manifest[]       @relation("ManifestFinalizedBy")
-  manifestsDeparted     Manifest[]       @relation("ManifestDepartedBy")
-  manifestsArrived      Manifest[]       @relation("ManifestArrivedBy")
-  manifestItemsAdded    ManifestItem[]   @relation("ManifestItemAddedBy")
-  manifestItemsRemoved  ManifestItem[]   @relation("ManifestItemRemovedBy")
+  notifications                 Notification[]
+  itemsReceived                 ShipmentItem[] // items this user marked received (ShipmentItem.receivedByUserId)
+  itemsLastInspected            ShipmentItem[]         @relation("ShipmentItemLastInspectedBy") // items this user most recently inspected (denormalized convenience only — see ItemInspection for history)
+  itemInspections               ItemInspection[] // full inspection history this user performed
+  pickupDeliveryRecordsHandled  PickupDeliveryRecord[] @relation("PickupDeliveryHandledBy") // handoffs this user personally performed
+  pickupDeliveryRecordsAsDriver PickupDeliveryRecord[] @relation("PickupDeliveryDriver") // deliveries this user drove/couriered (unused until Delivery milestone)
+  trackingEventsCreated         TrackingEvent[] // audit trail rows this user is the actor for
+  containerItemsLoaded          ContainerItem[]        @relation("ContainerItemLoadedBy")
+  containerItemsRemoved         ContainerItem[]        @relation("ContainerItemRemovedBy")
+  containersFinalized           Container[]
+  manifestsFinalized            Manifest[]             @relation("ManifestFinalizedBy")
+  manifestsDeparted             Manifest[]             @relation("ManifestDepartedBy")
+  manifestsArrived              Manifest[]             @relation("ManifestArrivedBy")
+  manifestItemsAdded            ManifestItem[]         @relation("ManifestItemAddedBy")
+  manifestItemsRemoved          ManifestItem[]         @relation("ManifestItemRemovedBy")
 
   @@index([tenantId])
   @@map("users")
@@ -513,13 +527,14 @@ model Warehouse {
   /// Updated as items move through receiving, processing, and destination
   /// handoff — this is a live "where is it right now" pointer, not history;
   /// TrackingEvent.warehouseId is the historical record.
-  currentItems    ShipmentItem[]
-  trackingEvents  TrackingEvent[]
-  itemInspections ItemInspection[]
+  currentItems          ShipmentItem[]
+  trackingEvents        TrackingEvent[]
+  itemInspections       ItemInspection[]
+  pickupDeliveryRecords PickupDeliveryRecord[]
   /// Containers currently being loaded at this warehouse (Milestone 3D).
-  containers      Container[]
+  containers            Container[]
   /// Manifests originating from this warehouse (Milestone 3E).
-  manifests       Manifest[]
+  manifests             Manifest[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -593,22 +608,23 @@ model Shipment {
   createdAt              DateTime       @default(now())
   updatedAt              DateTime       @updatedAt
 
-  tenant               Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  customer             Customer         @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  originWarehouse      Warehouse?       @relation("ShipmentOriginWarehouse", fields: [originWarehouseId], references: [id], onDelete: SetNull)
-  destinationWarehouse Warehouse?       @relation("ShipmentDestinationWarehouse", fields: [destinationWarehouseId], references: [id], onDelete: SetNull)
-  route                Route?           @relation(fields: [routeId], references: [id], onDelete: SetNull)
-  items                ShipmentItem[]
-  trackingEvents       TrackingEvent[]
-  itemInspections      ItemInspection[]
+  tenant                Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customer              Customer               @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  originWarehouse       Warehouse?             @relation("ShipmentOriginWarehouse", fields: [originWarehouseId], references: [id], onDelete: SetNull)
+  destinationWarehouse  Warehouse?             @relation("ShipmentDestinationWarehouse", fields: [destinationWarehouseId], references: [id], onDelete: SetNull)
+  route                 Route?                 @relation(fields: [routeId], references: [id], onDelete: SetNull)
+  items                 ShipmentItem[]
+  trackingEvents        TrackingEvent[]
+  itemInspections       ItemInspection[]
+  pickupDeliveryRecords PickupDeliveryRecord[]
   /// Item-level container assignments for this shipment's items. A single
   /// shipment's items are not guaranteed to all be in the same container.
-  containerItems       ContainerItem[]
+  containerItems        ContainerItem[]
   /// Item-level direct manifest assignments (air-freight path, Milestone 3E).
-  manifestItems        ManifestItem[]
-  quotes               Quote[]
-  invoices             Invoice[]
-  documents            Document[]
+  manifestItems         ManifestItem[]
+  quotes                Quote[]
+  invoices              Invoice[]
+  documents             Document[]
 
   @@unique([tenantId, trackingNumber])
   @@index([tenantId])
@@ -682,19 +698,23 @@ model ShipmentItem {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  tenant              Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  shipment            Shipment         @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
-  vehicleDetails      VehicleDetails?
-  currentWarehouse    Warehouse?       @relation(fields: [currentWarehouseId], references: [id], onDelete: SetNull)
-  receivedByUser      User?            @relation(fields: [receivedByUserId], references: [id], onDelete: SetNull)
-  lastInspectedByUser User?            @relation("ShipmentItemLastInspectedBy", fields: [lastInspectedByUserId], references: [id], onDelete: SetNull)
-  trackingEvents      TrackingEvent[]
-  containerItems      ContainerItem[]
-  manifestItems       ManifestItem[]
+  tenant                Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  shipment              Shipment               @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+  vehicleDetails        VehicleDetails?
+  currentWarehouse      Warehouse?             @relation(fields: [currentWarehouseId], references: [id], onDelete: SetNull)
+  receivedByUser        User?                  @relation(fields: [receivedByUserId], references: [id], onDelete: SetNull)
+  lastInspectedByUser   User?                  @relation("ShipmentItemLastInspectedBy", fields: [lastInspectedByUserId], references: [id], onDelete: SetNull)
+  trackingEvents        TrackingEvent[]
+  containerItems        ContainerItem[]
+  manifestItems         ManifestItem[]
   /// Full append-only inspection history (Milestone 3C). Ordered by
   /// inspectedAt for "most recent" reads; never updated or deleted, so
   /// reinspection always adds a new row instead of overwriting one.
-  inspections         ItemInspection[]
+  inspections           ItemInspection[]
+  /// Full pickup/delivery handoff history (Customer Pickup milestone).
+  /// Ordered by handledAt for "most recent" reads; never updated or
+  /// deleted — same append-only posture as `inspections` above.
+  pickupDeliveryRecords PickupDeliveryRecord[]
 
   @@unique([shipmentId, sequenceNumber])
   @@unique([tenantId, itemCode])
@@ -770,6 +790,67 @@ model ItemInspection {
   @@index([shipmentItemId])
   @@index([warehouseId])
   @@map("item_inspections")
+}
+
+/// One final-handoff event for a single ShipmentItem — Customer Pickup
+/// (Milestone: Pickup) or, later, courier Delivery (schema-ready now, not
+/// yet implemented — see HandoffType). Append-only and immutable like
+/// ItemInspection: a correction is a new row, never an edit to an existing
+/// one, so the handoff record a recipient signed for/was verified against
+/// can never be silently changed after the fact.
+///
+/// Deliberately does not yet have signature/photo columns. The plan (see
+/// the Document model's own comment) is a later, additive
+/// `Document.shipmentItemId` (or `pickupDeliveryRecordId`) FK — adding
+/// that is a small migration, not a redesign of this table or the
+/// pickup/delivery workflow built on top of it.
+model PickupDeliveryRecord {
+  id             String @id @default(cuid())
+  tenantId       String
+  shipmentId     String
+  shipmentItemId String
+  /// The destination warehouse this handoff physically happened at —
+  /// same "must match the item's currentWarehouseId" invariant
+  /// WarehouseService.destinationReceiveItem already enforces for
+  /// receiving, enforced here in the pickup/delivery service.
+  warehouseId    String
+
+  type HandoffType
+
+  recipientName        String
+  recipientPhone       String?
+  recipientIdReference String?
+  notes                String?
+
+  /// Courier/driver for a DELIVERY record — always null for PICKUP.
+  /// Nullable and unused today; populated once the Delivery milestone's
+  /// dispatch step exists.
+  driverUserId String?
+
+  handledByUserId String?
+  handledAt       DateTime @default(now())
+  /// Links to the TrackingEvent this record produced — same
+  /// one-to-one pattern ItemInspection.trackingEventId already uses,
+  /// keeping the audit trail's single timeline in sync with this table's
+  /// richer structured detail.
+  trackingEventId String?  @unique
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  shipment      Shipment       @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+  shipmentItem  ShipmentItem   @relation(fields: [shipmentItemId], references: [id], onDelete: Cascade)
+  warehouse     Warehouse      @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+  handledByUser User?          @relation("PickupDeliveryHandledBy", fields: [handledByUserId], references: [id], onDelete: SetNull)
+  driverUser    User?          @relation("PickupDeliveryDriver", fields: [driverUserId], references: [id], onDelete: SetNull)
+  trackingEvent TrackingEvent? @relation(fields: [trackingEventId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@index([shipmentId])
+  @@index([shipmentItemId])
+  @@index([warehouseId])
+  @@map("pickup_delivery_records")
 }
 
 /// Extra detail attached to a ShipmentItem of type VEHICLE. Modeled as a
@@ -954,8 +1035,8 @@ model Manifest {
   /// affected item to ARRIVED_DESTINATION — it does not itself mean any
   /// individual item has been physically received at a destination
   /// warehouse (that is a separate, later, per-item action).
-  arrivedAt        DateTime?
-  arrivedByUserId  String?
+  arrivedAt         DateTime?
+  arrivedByUserId   String?
 
   /// Immutable snapshot of derived contents (containers + direct items)
   /// at finalize time.
@@ -1063,15 +1144,18 @@ model TrackingEvent {
   createdByUserId String?
   createdAt       DateTime @default(now())
 
-  tenant         Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  shipment       Shipment        @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
-  shipmentItem   ShipmentItem?   @relation(fields: [shipmentItemId], references: [id], onDelete: Cascade)
-  warehouse      Warehouse?      @relation(fields: [warehouseId], references: [id], onDelete: SetNull)
-  createdByUser  User?           @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
+  tenant               Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  shipment             Shipment              @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+  shipmentItem         ShipmentItem?         @relation(fields: [shipmentItemId], references: [id], onDelete: Cascade)
+  warehouse            Warehouse?            @relation(fields: [warehouseId], references: [id], onDelete: SetNull)
+  createdByUser        User?                 @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
   /// The ItemInspection this event was produced by, when eventType is
   /// PROCESSED or EXCEPTION as a result of Milestone 3C processing —
   /// null for every other event type.
-  itemInspection ItemInspection?
+  itemInspection       ItemInspection?
+  /// The PickupDeliveryRecord this event was produced by, when eventType
+  /// is PICKED_UP (or, later, DELIVERED) — null for every other event type.
+  pickupDeliveryRecord PickupDeliveryRecord?
 
   @@index([tenantId])
   @@index([shipmentId])

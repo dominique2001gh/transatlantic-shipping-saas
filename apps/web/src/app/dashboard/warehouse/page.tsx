@@ -1,10 +1,11 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { WarehouseActivityEntry, WarehouseItemDetail, WarehouseSummary } from '@transatlantic/shared';
 import { DestinationReceiveWorkspace } from '@/components/warehouse/DestinationReceiveWorkspace';
 import { LoadContainerWorkspace } from '@/components/warehouse/LoadContainerWorkspace';
 import { ModeSelector, type WarehouseMode } from '@/components/warehouse/ModeSelector';
+import { PickupWorkspace } from '@/components/warehouse/PickupWorkspace';
 import { ProcessWorkspace } from '@/components/warehouse/ProcessWorkspace';
 import { ReceiveWorkspace } from '@/components/warehouse/ReceiveWorkspace';
 import { RecentActivityList } from '@/components/warehouse/RecentActivityList';
@@ -12,6 +13,15 @@ import { WarehouseInventoryTable } from '@/components/warehouse/WarehouseInvento
 import { Card } from '@/components/ui/Card';
 import { ApiError } from '@/lib/api';
 import { getInventory, getRecentActivity, listWarehouseLocations } from '@/lib/warehouse';
+
+/** Which side of the network a mode operates on — determines the warehouse it should default to. */
+type WarehouseSide = 'ORIGIN' | 'DESTINATION';
+function sideForMode(mode: WarehouseMode): WarehouseSide {
+  // Destination Receive and Pickup/Delivery both operate on cargo already
+  // at (or arriving at) the destination warehouse — neither should ever
+  // default to the origin warehouse. See yesterday's DFW-default fix.
+  return mode === 'DESTINATION_RECEIVE' || mode === 'PICKUP_DELIVERY' ? 'DESTINATION' : 'ORIGIN';
+}
 
 export default function WarehousePage() {
   const [mode, setMode] = useState<WarehouseMode>('RECEIVE');
@@ -24,13 +34,40 @@ export default function WarehousePage() {
 
   useEffect(() => {
     listWarehouseLocations()
-      .then((locations) => {
-        setWarehouses(locations);
-        const originDefault = locations.find((warehouse) => warehouse.isOriginWarehouse) ?? locations[0];
-        if (originDefault) setSelectedWarehouseId(originDefault.id);
-      })
+      .then(setWarehouses)
       .catch((err) => setError(err instanceof ApiError ? err.message : 'Failed to load warehouses.'));
   }, []);
+
+  /**
+   * Keep the selected warehouse on the correct side of the network for the
+   * active mode. Receive/Process/Load are origin-side floor work and
+   * should default to the tenant's origin warehouse; Destination Receive
+   * is the opposite end of the same shipment's journey and must default
+   * to a warehouse flagged isDestinationWarehouse — never silently inherit
+   * whatever origin warehouse was selected for the other modes (that was
+   * the bug: this page used a single selectedWarehouseId for every mode,
+   * defaulted once to the origin warehouse, and never revisited it).
+   *
+   * `lastDefaultedSideRef` records which side we last auto-defaulted for,
+   * so this only fires on an actual origin<->destination mode crossing —
+   * a manual pick within one mode (or across modes on the same side, e.g.
+   * Receive -> Process) is never fought. Nothing here assumes a specific
+   * tenant's warehouse names/count: it reads the isOriginWarehouse /
+   * isDestinationWarehouse flags already on each tenant's own Warehouse
+   * rows, so it holds for any tenant with at least one warehouse flagged
+   * on each side.
+   */
+  const lastDefaultedSideRef = useRef<WarehouseSide | null>(null);
+  useEffect(() => {
+    if (warehouses.length === 0) return;
+    const side = sideForMode(mode);
+    if (lastDefaultedSideRef.current === side) return;
+    lastDefaultedSideRef.current = side;
+    const preferred =
+      warehouses.find((warehouse) => (side === 'DESTINATION' ? warehouse.isDestinationWarehouse : warehouse.isOriginWarehouse)) ??
+      warehouses[0];
+    if (preferred) setSelectedWarehouseId(preferred.id);
+  }, [mode, warehouses]);
 
   const reload = useCallback(() => {
     getInventory({ warehouseId: selectedWarehouseId || undefined, search: inventorySearch || undefined })
@@ -136,6 +173,28 @@ export default function WarehousePage() {
                 selectedWarehouseId={selectedWarehouseId}
                 onWarehouseChange={setSelectedWarehouseId}
                 onReceived={reload}
+              />
+            ) : (
+              <p className="text-sm text-slate-500">Loading warehouses…</p>
+            )}
+          </Card>
+        </section>
+      )}
+
+      {mode === 'PICKUP_DELIVERY' && (
+        <section>
+          <h2 className="text-lg font-semibold text-slate-900">Pickup / Delivery</h2>
+          <p className="mt-1 text-sm text-slate-500">
+            Scan an item received at this destination warehouse to record a customer picking it up in person.
+            (Delivery / driver dispatch is a separate, later milestone.)
+          </p>
+          <Card className="mt-3">
+            {warehouses.length > 0 ? (
+              <PickupWorkspace
+                warehouses={warehouses}
+                selectedWarehouseId={selectedWarehouseId}
+                onWarehouseChange={setSelectedWarehouseId}
+                onPickedUp={reload}
               />
             ) : (
               <p className="text-sm text-slate-500">Loading warehouses…</p>

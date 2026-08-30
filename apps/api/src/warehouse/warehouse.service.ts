@@ -3,6 +3,7 @@ import type { Prisma } from '@prisma/client';
 // Prisma's generated enums (aliased) — used only when comparing values
 // that came directly out of a Prisma query result.
 import {
+  HandoffType,
   ShipmentItemStatus as DbShipmentItemStatus,
   ShipmentStatus as DbShipmentStatus,
   TrackingEventSource,
@@ -22,6 +23,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { ShipmentsService } from '../shipments/shipments.service';
 import { DestinationReceiveItemDto } from './dto/destination-receive-item.dto';
+import { PickupItemDto } from './dto/pickup-item.dto';
 import { ProcessItemDto } from './dto/process-item.dto';
 import { ReceiveItemDto } from './dto/receive-item.dto';
 
@@ -60,6 +62,17 @@ const ITEM_PROCESSED_OR_LATER: DbShipmentItemStatus[] = [
   DbShipmentItemStatus.DELIVERED,
   DbShipmentItemStatus.PICKED_UP,
 ];
+
+/**
+ * Customer Pickup milestone. The two terminal "cargo actually left the
+ * building" outcomes a ShipmentItem can reach — PICKED_UP (this
+ * milestone) and DELIVERED (schema-ready, not yet reachable by any
+ * service/controller path). maybeRollupShipmentCompletion below checks
+ * against this array, not against PICKED_UP alone, specifically so the
+ * later Delivery milestone can start producing DELIVERED items without
+ * needing to touch this rollup at all.
+ */
+const ITEM_TERMINAL_HANDOFF: DbShipmentItemStatus[] = [DbShipmentItemStatus.PICKED_UP, DbShipmentItemStatus.DELIVERED];
 
 /**
  * Shared shape for every endpoint that resolves to a full ShipmentItem
@@ -538,6 +551,199 @@ export class WarehouseService {
     });
     const result = presentItem(received);
     return destinationWarning ? { ...result, destinationWarning } : result;
+  }
+
+  /**
+   * Customer Pickup milestone. Records a customer taking physical
+   * possession of an item that has already been verified at the
+   * destination warehouse (RECEIVED_DESTINATION_WAREHOUSE) — this method
+   * does not re-judge condition/exception, that already happened at
+   * destination-receive; it only records who took the item, confirms it
+   * left the building, and closes out this item's handoff.
+   *
+   * Eligibility and safety, in order:
+   *   - item.status must be RECEIVED_DESTINATION_WAREHOUSE. Anything else
+   *     (already PICKED_UP/DELIVERED, still ARRIVED_DESTINATION and never
+   *     received, EXCEPTION, etc.) is a hard reject with a specific
+   *     message — this is also what makes a duplicate pickup, a stale
+   *     double-submit, or a pickup attempted before the item ever reached
+   *     the destination warehouse all safe: whichever request the DB
+   *     commits first flips the status, and every subsequent one re-reads
+   *     the now-changed status and is rejected here, the same idempotent
+   *     read-then-reject pattern destinationReceiveItem already uses for
+   *     "already received."
+   *   - item.currentWarehouseId must equal dto.warehouseId exactly — a
+   *     HARD reject, unlike destinationReceiveItem's soft
+   *     destinationWarning. Handing cargo to someone at a warehouse that
+   *     isn't physically holding it is not something to merely flag.
+   *   - tenantId scoping on every query makes cross-tenant access
+   *     structurally impossible, same as every other method here.
+   */
+  async pickupItem(tenantId: string, actorUserId: string, itemId: string, dto: PickupItemDto) {
+    const item = await this.prisma.shipmentItem.findFirst({
+      where: { id: itemId, tenantId },
+      include: { shipment: { select: { id: true, status: true } } },
+    });
+    if (!item) {
+      throw new NotFoundException('Item not found');
+    }
+    if (item.shipment.status === DbShipmentStatus.CANCELLED) {
+      throw new ConflictException('This shipment has been cancelled and cannot be picked up.');
+    }
+
+    if (item.status !== DbShipmentItemStatus.RECEIVED_DESTINATION_WAREHOUSE) {
+      if (item.status === DbShipmentItemStatus.PICKED_UP) {
+        throw new ConflictException(
+          `This item was already picked up${item.lastInspectedAt ? ` on ${item.lastInspectedAt.toLocaleString()}` : ''}.`,
+        );
+      }
+      if (item.status === DbShipmentItemStatus.DELIVERED) {
+        throw new ConflictException('This item was already delivered and cannot also be picked up.');
+      }
+      if (item.status === DbShipmentItemStatus.EXCEPTION) {
+        throw new ConflictException(
+          'This item is on hold with an exception and cannot be picked up. Resolve the exception first.',
+        );
+      }
+      throw new ConflictException(
+        `This item's current status (${item.status}) is not eligible for pickup. ` +
+          `It must be received at the destination warehouse first.`,
+      );
+    }
+
+    const warehouse = await this.prisma.warehouse.findFirst({ where: { id: dto.warehouseId, tenantId } });
+    if (!warehouse) {
+      throw new NotFoundException('Warehouse not found');
+    }
+
+    if (item.currentWarehouseId !== dto.warehouseId) {
+      throw new ConflictException(
+        "This item is not currently at the selected warehouse — pickup must happen from the warehouse actually holding it.",
+      );
+    }
+
+    const event = await this.shipmentsService.createTrackingEvent(
+      tenantId,
+      actorUserId,
+      item.shipmentId,
+      {
+        eventType: TrackingEventType.PICKED_UP,
+        shipmentItemId: item.id,
+        itemStatus: ShipmentItemStatus.PICKED_UP,
+        warehouseId: dto.warehouseId,
+        notes: dto.notes ?? `Picked up by ${dto.recipientName}`,
+        metadata: {
+          recipientName: dto.recipientName,
+          recipientPhone: dto.recipientPhone ?? null,
+          recipientIdReference: dto.recipientIdReference ?? null,
+        },
+      },
+      {
+        source: dto.scanned ? TrackingEventSource.BARCODE_SCAN : TrackingEventSource.MANUAL,
+        scanIdentifier: dto.scanIdentifier,
+      },
+    );
+
+    // The item has physically left the warehouse — currentWarehouseId is
+    // a live "where is it right now" pointer (see ShipmentItem's own
+    // schema comment), so it goes to null rather than staying pointed at
+    // the warehouse it was picked up from, or it would keep appearing in
+    // that warehouse's inventory forever. TrackingEvent.warehouseId above
+    // (and the PickupDeliveryRecord below) permanently keep the fact that
+    // the handoff happened at this warehouse — nothing historical is lost.
+    await this.prisma.shipmentItem.update({
+      where: { id: item.id },
+      data: { currentWarehouseId: null },
+    });
+
+    // Immutable structured record of this handoff — see PickupDeliveryRecord's
+    // schema comment for why this exists alongside the generic TrackingEvent
+    // (a real home for recipient/driver detail, and later signature/photo,
+    // instead of overloading TrackingEvent.metadata for something this
+    // business-critical).
+    await this.prisma.pickupDeliveryRecord.create({
+      data: {
+        tenantId,
+        shipmentId: item.shipmentId,
+        shipmentItemId: item.id,
+        warehouseId: dto.warehouseId,
+        type: HandoffType.PICKUP,
+        recipientName: dto.recipientName,
+        recipientPhone: dto.recipientPhone,
+        recipientIdReference: dto.recipientIdReference,
+        notes: dto.notes,
+        handledByUserId: actorUserId,
+        handledAt: event.occurredAt,
+        trackingEventId: event.id,
+      },
+    });
+
+    await this.maybeRollupShipmentCompletion(tenantId, actorUserId, item.shipmentId);
+
+    const received = await this.prisma.shipmentItem.findUniqueOrThrow({
+      where: { id: item.id },
+      include: ITEM_DETAIL_INCLUDE,
+    });
+    return presentItem(received);
+  }
+
+  /**
+   * Advances a shipment to COMPLETED once every one of its applicable
+   * items has reached a terminal handoff status (see ITEM_TERMINAL_HANDOFF
+   * above) — mirrors ManifestsService.maybeRollupShipmentArrival exactly:
+   * same eligible-source-status allow-list guard, same "every item at
+   * least this far along" check, same forward-only/never-downgraded
+   * posture, same SYSTEM-sourced shipment-level tracking event with no
+   * shipmentItemId. CANCELLED items are excluded from the "every item"
+   * check — a cancelled item was never going to be handed off and must
+   * not block a shipment's otherwise-complete siblings; an EXCEPTION item,
+   * deliberately, is not excluded, so an unresolved discrepancy keeps
+   * blocking completion instead of being silently outvoted, matching
+   * ContainersService.closeUnloading's posture on discrepancies.
+   *
+   * Reuses eventType PICKED_UP (status carries the real news, COMPLETED)
+   * rather than adding a new TrackingEventType — same "eventType and
+   * status don't have to share a name" precedent already established by
+   * RECEIVED_AT_WAREHOUSE -> WAREHOUSE_RECEIVED and PROCESSED -> PROCESSING
+   * above. Once Delivery exists and a shipment can complete via a mix of
+   * picked-up and delivered items, this eventType choice should be
+   * revisited — it will still be technically correct (at least one item
+   * really was picked up) but may no longer be the most informative label.
+   */
+  private async maybeRollupShipmentCompletion(tenantId: string, actorUserId: string, shipmentId: string) {
+    const ROLLUP_ELIGIBLE_STATUSES: DbShipmentStatus[] = [DbShipmentStatus.ARRIVED_DESTINATION];
+
+    const shipment = await this.prisma.shipment.findFirst({
+      where: { id: shipmentId, tenantId },
+      include: { items: { select: { status: true } } },
+    });
+    if (!shipment || shipment.items.length === 0) {
+      return;
+    }
+    if (!ROLLUP_ELIGIBLE_STATUSES.includes(shipment.status)) {
+      return;
+    }
+
+    const applicableItems = shipment.items.filter((shipmentItem) => shipmentItem.status !== DbShipmentItemStatus.CANCELLED);
+    if (applicableItems.length === 0) {
+      return;
+    }
+    const allHandedOff = applicableItems.every((shipmentItem) => ITEM_TERMINAL_HANDOFF.includes(shipmentItem.status));
+    if (!allHandedOff) {
+      return;
+    }
+
+    await this.shipmentsService.createTrackingEvent(
+      tenantId,
+      actorUserId,
+      shipmentId,
+      {
+        eventType: TrackingEventType.PICKED_UP,
+        status: ShipmentStatus.COMPLETED,
+        notes: 'All applicable items reached a final handoff status',
+      },
+      { source: TrackingEventSource.SYSTEM },
+    );
   }
 
   /** Items currently associated with a warehouse — a live view, not a separate stored record. */

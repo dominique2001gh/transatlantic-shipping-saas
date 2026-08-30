@@ -5,6 +5,7 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { requireTenantId } from '../common/tenant/tenant.util';
 import { DestinationReceiveItemDto } from './dto/destination-receive-item.dto';
+import { PickupItemDto } from './dto/pickup-item.dto';
 import { ProcessItemDto } from './dto/process-item.dto';
 import { ReceiveItemDto } from './dto/receive-item.dto';
 import { WarehouseService } from './warehouse.service';
@@ -27,9 +28,16 @@ const WAREHOUSE_ROLES = [
  * Milestone 3F: destination receiving is exactly the action
  * DESTINATION_AGENT exists for — a deliberate, additive widening (this
  * role has been view-only everywhere until now). Overrides the
- * class-level @Roles(...WAREHOUSE_ROLES) only for this one route
+ * class-level @Roles(...WAREHOUSE_ROLES) only for these routes
  * (RolesGuard uses getAllAndOverride — method-level wins); every other
  * warehouse route's access is unchanged.
+ *
+ * Customer Pickup milestone: reused as-is (not a new role set) for
+ * items/:itemId/pickup — handing cargo to a customer at the destination
+ * warehouse is the same floor-work tier as destination-receive, performed
+ * by the same staff. Kept under this name rather than renamed/duplicated
+ * since the role membership is identical; Delivery/Driver, when it
+ * arrives, may need its own set (UserRole.DRIVER is not added here).
  */
 const DESTINATION_RECEIVE_ROLES = [...WAREHOUSE_ROLES, UserRole.DESTINATION_AGENT];
 
@@ -119,5 +127,12 @@ export class WarehouseController {
     @Body() dto: DestinationReceiveItemDto,
   ) {
     return this.warehouseService.destinationReceiveItem(requireTenantId(user.tenantId), user.id, itemId, dto);
+  }
+
+  /** Customer Pickup milestone. See WarehouseService.pickupItem for the eligibility/warehouse-match rules. */
+  @Post('items/:itemId/pickup')
+  @Roles(...DESTINATION_RECEIVE_ROLES)
+  pickup(@CurrentUser() user: AuthenticatedUser, @Param('itemId') itemId: string, @Body() dto: PickupItemDto) {
+    return this.warehouseService.pickupItem(requireTenantId(user.tenantId), user.id, itemId, dto);
   }
 }

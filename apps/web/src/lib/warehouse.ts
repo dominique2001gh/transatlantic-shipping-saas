@@ -20,6 +20,16 @@ export interface DestinationReceiveItemInput {
   scanIdentifier?: string;
 }
 
+export interface PickupItemInput {
+  warehouseId: string;
+  recipientName: string;
+  recipientPhone?: string;
+  recipientIdReference?: string;
+  notes?: string;
+  scanned: boolean;
+  scanIdentifier?: string;
+}
+
 function authToken(): string {
   const token = getStoredToken();
   if (!token) throw new Error('Not authenticated');
@@ -88,6 +98,14 @@ export function destinationReceiveItem(
   input: DestinationReceiveItemInput,
 ): Promise<WarehouseItemDetail & { destinationWarning?: string }> {
   return apiFetch<WarehouseItemDetail & { destinationWarning?: string }>(`/warehouse/items/${itemId}/destination-receive`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+    token: authToken(),
+  });
+}
+
+export function pickupItem(itemId: string, input: PickupItemInput): Promise<WarehouseItemDetail> {
+  return apiFetch<WarehouseItemDetail>(`/warehouse/items/${itemId}/pickup`, {
     method: 'POST',
     body: JSON.stringify(input),
     token: authToken(),
