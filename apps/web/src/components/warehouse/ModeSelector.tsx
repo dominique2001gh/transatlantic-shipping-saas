@@ -8,10 +8,9 @@ interface ModeOption {
 
 /**
  * RECEIVE (3B), PROCESS (3C), LOAD (3D), DESTINATION_RECEIVE (3F), and
- * PICKUP_DELIVERY (Customer Pickup milestone) are implemented.
- * PICKUP_DELIVERY currently only implements Customer Pickup — Delivery /
- * Driver / Dispatch is a separate, later milestone that will build inside
- * this same tab, not a new one, once Customer Pickup has been verified.
+ * PICKUP_DELIVERY (Customer Pickup + Delivery/Driver Dispatch) are
+ * implemented. PICKUP_DELIVERY hosts both — see PickupWorkspace, the one
+ * scan-then-choose workspace behind this tab.
  */
 const MODES: ModeOption[] = [
   { key: 'RECEIVE', label: 'Receive', available: true },

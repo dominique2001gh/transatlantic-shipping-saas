@@ -30,6 +30,43 @@ export interface PickupItemInput {
   scanIdentifier?: string;
 }
 
+export interface DispatchItemInput {
+  warehouseId: string;
+  recipientName: string;
+  recipientPhone?: string;
+  deliveryAddress?: string;
+  driverUserId?: string;
+  courierName?: string;
+  courierPhone?: string;
+  courierReference?: string;
+  notes?: string;
+  scanned: boolean;
+  scanIdentifier?: string;
+}
+
+export interface DeliverItemInput {
+  warehouseId: string;
+  recipientName: string;
+  recipientPhone?: string;
+  recipientIdReference?: string;
+  driverUserId?: string;
+  courierName?: string;
+  courierPhone?: string;
+  courierReference?: string;
+  notes?: string;
+  scanned: boolean;
+  scanIdentifier?: string;
+}
+
+export interface ReturnItemInput {
+  warehouseId: string;
+  failureReason: string;
+  hasException?: boolean;
+  notes?: string;
+  scanned: boolean;
+  scanIdentifier?: string;
+}
+
 function authToken(): string {
   const token = getStoredToken();
   if (!token) throw new Error('Not authenticated');
@@ -106,6 +143,30 @@ export function destinationReceiveItem(
 
 export function pickupItem(itemId: string, input: PickupItemInput): Promise<WarehouseItemDetail> {
   return apiFetch<WarehouseItemDetail>(`/warehouse/items/${itemId}/pickup`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+    token: authToken(),
+  });
+}
+
+export function dispatchItem(itemId: string, input: DispatchItemInput): Promise<WarehouseItemDetail> {
+  return apiFetch<WarehouseItemDetail>(`/warehouse/items/${itemId}/dispatch`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+    token: authToken(),
+  });
+}
+
+export function deliverItem(itemId: string, input: DeliverItemInput): Promise<WarehouseItemDetail> {
+  return apiFetch<WarehouseItemDetail>(`/warehouse/items/${itemId}/deliver`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+    token: authToken(),
+  });
+}
+
+export function returnItem(itemId: string, input: ReturnItemInput): Promise<WarehouseItemDetail> {
+  return apiFetch<WarehouseItemDetail>(`/warehouse/items/${itemId}/return`, {
     method: 'POST',
     body: JSON.stringify(input),
     token: authToken(),

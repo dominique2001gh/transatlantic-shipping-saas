@@ -4,10 +4,13 @@ import { ShipmentItemStatus, UserRole } from '@transatlantic/shared';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { requireTenantId } from '../common/tenant/tenant.util';
+import { DeliverItemDto } from './dto/deliver-item.dto';
 import { DestinationReceiveItemDto } from './dto/destination-receive-item.dto';
+import { DispatchItemDto } from './dto/dispatch-item.dto';
 import { PickupItemDto } from './dto/pickup-item.dto';
 import { ProcessItemDto } from './dto/process-item.dto';
 import { ReceiveItemDto } from './dto/receive-item.dto';
+import { ReturnItemDto } from './dto/return-item.dto';
 import { WarehouseService } from './warehouse.service';
 
 const VALID_ITEM_STATUSES = new Set<string>(Object.values(ShipmentItemStatus));
@@ -36,8 +39,15 @@ const WAREHOUSE_ROLES = [
  * items/:itemId/pickup — handing cargo to a customer at the destination
  * warehouse is the same floor-work tier as destination-receive, performed
  * by the same staff. Kept under this name rather than renamed/duplicated
- * since the role membership is identical; Delivery/Driver, when it
- * arrives, may need its own set (UserRole.DRIVER is not added here).
+ * since the role membership is identical.
+ *
+ * Delivery/Driver Dispatch milestone: dispatch/deliver/return reuse this
+ * same set too — all three are staff actions performed at (or about) the
+ * destination warehouse, not driver actions. UserRole.DRIVER is
+ * deliberately still not added here — a driver self-service confirmation
+ * flow is real future work, not V1 (see WarehouseService.deliverItem's
+ * doc comment on how a driver is currently only ever recorded, never a
+ * caller of these routes).
  */
 const DESTINATION_RECEIVE_ROLES = [...WAREHOUSE_ROLES, UserRole.DESTINATION_AGENT];
 
@@ -134,5 +144,26 @@ export class WarehouseController {
   @Roles(...DESTINATION_RECEIVE_ROLES)
   pickup(@CurrentUser() user: AuthenticatedUser, @Param('itemId') itemId: string, @Body() dto: PickupItemDto) {
     return this.warehouseService.pickupItem(requireTenantId(user.tenantId), user.id, itemId, dto);
+  }
+
+  /** Delivery/Driver Dispatch milestone. See WarehouseService.dispatchItem. */
+  @Post('items/:itemId/dispatch')
+  @Roles(...DESTINATION_RECEIVE_ROLES)
+  dispatch(@CurrentUser() user: AuthenticatedUser, @Param('itemId') itemId: string, @Body() dto: DispatchItemDto) {
+    return this.warehouseService.dispatchItem(requireTenantId(user.tenantId), user.id, itemId, dto);
+  }
+
+  /** Delivery/Driver Dispatch milestone. See WarehouseService.deliverItem. */
+  @Post('items/:itemId/deliver')
+  @Roles(...DESTINATION_RECEIVE_ROLES)
+  deliver(@CurrentUser() user: AuthenticatedUser, @Param('itemId') itemId: string, @Body() dto: DeliverItemDto) {
+    return this.warehouseService.deliverItem(requireTenantId(user.tenantId), user.id, itemId, dto);
+  }
+
+  /** Delivery/Driver Dispatch milestone. See WarehouseService.returnItem. */
+  @Post('items/:itemId/return')
+  @Roles(...DESTINATION_RECEIVE_ROLES)
+  returnToWarehouse(@CurrentUser() user: AuthenticatedUser, @Param('itemId') itemId: string, @Body() dto: ReturnItemDto) {
+    return this.warehouseService.returnItem(requireTenantId(user.tenantId), user.id, itemId, dto);
   }
 }

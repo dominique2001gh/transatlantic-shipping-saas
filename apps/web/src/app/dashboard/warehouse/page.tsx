@@ -185,8 +185,9 @@ export default function WarehousePage() {
         <section>
           <h2 className="text-lg font-semibold text-slate-900">Pickup / Delivery</h2>
           <p className="mt-1 text-sm text-slate-500">
-            Scan an item received at this destination warehouse to record a customer picking it up in person.
-            (Delivery / driver dispatch is a separate, later milestone.)
+            Scan an item to see what it&apos;s eligible for: a received item can be picked up in person or dispatched
+            for delivery; an item already out for delivery can be confirmed delivered or returned after a failed
+            attempt.
           </p>
           <Card className="mt-3">
             {warehouses.length > 0 ? (

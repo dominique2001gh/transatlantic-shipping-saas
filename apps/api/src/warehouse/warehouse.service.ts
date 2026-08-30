@@ -22,10 +22,13 @@ import {
 } from '@transatlantic/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { ShipmentsService } from '../shipments/shipments.service';
+import { DeliverItemDto } from './dto/deliver-item.dto';
 import { DestinationReceiveItemDto } from './dto/destination-receive-item.dto';
+import { DispatchItemDto } from './dto/dispatch-item.dto';
 import { PickupItemDto } from './dto/pickup-item.dto';
 import { ProcessItemDto } from './dto/process-item.dto';
 import { ReceiveItemDto } from './dto/receive-item.dto';
+import { ReturnItemDto } from './dto/return-item.dto';
 
 const ACTOR_SELECT = { id: true, firstName: true, lastName: true } as const;
 const WAREHOUSE_SELECT = { id: true, name: true, code: true } as const;
@@ -64,13 +67,14 @@ const ITEM_PROCESSED_OR_LATER: DbShipmentItemStatus[] = [
 ];
 
 /**
- * Customer Pickup milestone. The two terminal "cargo actually left the
- * building" outcomes a ShipmentItem can reach — PICKED_UP (this
- * milestone) and DELIVERED (schema-ready, not yet reachable by any
- * service/controller path). maybeRollupShipmentCompletion below checks
- * against this array, not against PICKED_UP alone, specifically so the
- * later Delivery milestone can start producing DELIVERED items without
- * needing to touch this rollup at all.
+ * The two terminal "cargo actually left the building" outcomes a
+ * ShipmentItem can reach — PICKED_UP (Customer Pickup) and DELIVERED
+ * (Delivery/Driver Dispatch, via deliverItem). maybeRollupShipmentCompletion
+ * below checks against this array, not against either value alone, so a
+ * shipment with a mix of picked-up and delivered items (or either kind
+ * alone) reaches COMPLETED the same way. This array was written during
+ * Customer Pickup specifically so this Delivery milestone would not need
+ * to touch the rollup itself — confirmed true, only this comment changed.
  */
 const ITEM_TERMINAL_HANDOFF: DbShipmentItemStatus[] = [DbShipmentItemStatus.PICKED_UP, DbShipmentItemStatus.DELIVERED];
 
@@ -688,6 +692,365 @@ export class WarehouseService {
   }
 
   /**
+   * Delivery/Driver Dispatch milestone. Hands an item off to a driver or
+   * courier — RECEIVED_DESTINATION_WAREHOUSE -> OUT_FOR_DELIVERY. Same
+   * eligibility/safety shape as pickupItem (status guard doubles as
+   * duplicate/stale-submit protection, hard currentWarehouseId match,
+   * tenant scoping throughout), plus one extra rule: at least one of
+   * driverUserId or courierName must identify who is taking the item.
+   * Deliberately flexible rather than a required single field or a
+   * dedicated Driver entity — some tenants staff deliveries with a
+   * logged-in employee (driverUserId, a real User), others with an
+   * independent driver or third-party courier company that has no
+   * application account at all (courierName/courierPhone/courierReference,
+   * free text). Not a terminal handoff — does not touch the shipment
+   * completion rollup.
+   */
+  async dispatchItem(tenantId: string, actorUserId: string, itemId: string, dto: DispatchItemDto) {
+    if (!dto.driverUserId && !dto.courierName?.trim()) {
+      throw new BadRequestException('Either driverUserId or courierName is required to dispatch an item.');
+    }
+
+    const item = await this.prisma.shipmentItem.findFirst({
+      where: { id: itemId, tenantId },
+      include: { shipment: { select: { id: true, status: true } } },
+    });
+    if (!item) {
+      throw new NotFoundException('Item not found');
+    }
+    if (item.shipment.status === DbShipmentStatus.CANCELLED) {
+      throw new ConflictException('This shipment has been cancelled and cannot be dispatched.');
+    }
+
+    if (item.status !== DbShipmentItemStatus.RECEIVED_DESTINATION_WAREHOUSE) {
+      if (item.status === DbShipmentItemStatus.OUT_FOR_DELIVERY) {
+        throw new ConflictException('This item is already out for delivery.');
+      }
+      if (item.status === DbShipmentItemStatus.DELIVERED) {
+        throw new ConflictException('This item has already been delivered and cannot be dispatched again.');
+      }
+      if (item.status === DbShipmentItemStatus.PICKED_UP) {
+        throw new ConflictException('This item was already picked up by the customer and cannot be dispatched for delivery.');
+      }
+      if (item.status === DbShipmentItemStatus.EXCEPTION) {
+        throw new ConflictException(
+          'This item is on hold with an exception and cannot be dispatched. Resolve the exception first.',
+        );
+      }
+      throw new ConflictException(
+        `This item's current status (${item.status}) is not eligible for dispatch. ` +
+          `It must be received at the destination warehouse first.`,
+      );
+    }
+
+    const warehouse = await this.prisma.warehouse.findFirst({ where: { id: dto.warehouseId, tenantId } });
+    if (!warehouse) {
+      throw new NotFoundException('Warehouse not found');
+    }
+
+    if (item.currentWarehouseId !== dto.warehouseId) {
+      throw new ConflictException(
+        "This item is not currently at the selected warehouse — dispatch must happen from the warehouse actually holding it.",
+      );
+    }
+
+    if (dto.driverUserId) {
+      const driver = await this.prisma.user.findFirst({ where: { id: dto.driverUserId, tenantId } });
+      if (!driver) {
+        throw new NotFoundException('Driver not found');
+      }
+    }
+
+    const event = await this.shipmentsService.createTrackingEvent(
+      tenantId,
+      actorUserId,
+      item.shipmentId,
+      {
+        eventType: TrackingEventType.OUT_FOR_DELIVERY,
+        shipmentItemId: item.id,
+        itemStatus: ShipmentItemStatus.OUT_FOR_DELIVERY,
+        warehouseId: dto.warehouseId,
+        notes: dto.notes ?? `Dispatched for delivery to ${dto.recipientName}`,
+        metadata: {
+          recipientName: dto.recipientName,
+          recipientPhone: dto.recipientPhone ?? null,
+          deliveryAddress: dto.deliveryAddress ?? null,
+          driverUserId: dto.driverUserId ?? null,
+          courierName: dto.courierName ?? null,
+          courierPhone: dto.courierPhone ?? null,
+          courierReference: dto.courierReference ?? null,
+        },
+      },
+      {
+        source: dto.scanned ? TrackingEventSource.BARCODE_SCAN : TrackingEventSource.MANUAL,
+        scanIdentifier: dto.scanIdentifier,
+      },
+    );
+
+    // Left the warehouse in a driver's/courier's custody — same
+    // "no longer physically at a warehouse" pointer-clearing pickupItem
+    // already does above; it must not keep showing up as this
+    // warehouse's inventory while it's out with a driver.
+    await this.prisma.shipmentItem.update({
+      where: { id: item.id },
+      data: { currentWarehouseId: null },
+    });
+
+    await this.prisma.pickupDeliveryRecord.create({
+      data: {
+        tenantId,
+        shipmentId: item.shipmentId,
+        shipmentItemId: item.id,
+        warehouseId: dto.warehouseId,
+        type: HandoffType.DISPATCH,
+        recipientName: dto.recipientName,
+        recipientPhone: dto.recipientPhone,
+        deliveryAddress: dto.deliveryAddress,
+        driverUserId: dto.driverUserId,
+        courierName: dto.courierName,
+        courierPhone: dto.courierPhone,
+        courierReference: dto.courierReference,
+        notes: dto.notes,
+        handledByUserId: actorUserId,
+        handledAt: event.occurredAt,
+        trackingEventId: event.id,
+      },
+    });
+
+    const dispatched = await this.prisma.shipmentItem.findUniqueOrThrow({
+      where: { id: item.id },
+      include: ITEM_DETAIL_INCLUDE,
+    });
+    return presentItem(dispatched);
+  }
+
+  /**
+   * Delivery/Driver Dispatch milestone. Confirms a successful delivery —
+   * OUT_FOR_DELIVERY -> DELIVERED, a terminal handoff exactly like
+   * pickupItem's PICKED_UP (see ITEM_TERMINAL_HANDOFF and
+   * maybeRollupShipmentCompletion below — no changes needed there, this
+   * status was already accounted for). currentWarehouseId stays null: a
+   * delivered item was never "at" a warehouse again, it went straight
+   * from a driver's custody to the recipient's.
+   *
+   * If the caller doesn't supply driverUserId/courierName, this looks up
+   * the item's most recent DISPATCH record and carries its driver/courier
+   * detail forward — staff shouldn't have to re-type who's delivering it
+   * a second time, but an explicit value here always wins (e.g. a
+   * different person actually completed the handoff than was originally
+   * dispatched).
+   */
+  async deliverItem(tenantId: string, actorUserId: string, itemId: string, dto: DeliverItemDto) {
+    const item = await this.prisma.shipmentItem.findFirst({
+      where: { id: itemId, tenantId },
+      include: { shipment: { select: { id: true, status: true } } },
+    });
+    if (!item) {
+      throw new NotFoundException('Item not found');
+    }
+    if (item.shipment.status === DbShipmentStatus.CANCELLED) {
+      throw new ConflictException('This shipment has been cancelled and cannot be delivered.');
+    }
+
+    if (item.status !== DbShipmentItemStatus.OUT_FOR_DELIVERY) {
+      if (item.status === DbShipmentItemStatus.DELIVERED) {
+        throw new ConflictException('This item has already been delivered.');
+      }
+      if (item.status === DbShipmentItemStatus.PICKED_UP) {
+        throw new ConflictException('This item was picked up by the customer and cannot also be delivered.');
+      }
+      throw new ConflictException(
+        `This item's current status (${item.status}) is not eligible for delivery confirmation. ` +
+          `It must be dispatched (out for delivery) first.`,
+      );
+    }
+
+    const warehouse = await this.prisma.warehouse.findFirst({ where: { id: dto.warehouseId, tenantId } });
+    if (!warehouse) {
+      throw new NotFoundException('Warehouse not found');
+    }
+
+    if (dto.driverUserId) {
+      const driver = await this.prisma.user.findFirst({ where: { id: dto.driverUserId, tenantId } });
+      if (!driver) {
+        throw new NotFoundException('Driver not found');
+      }
+    }
+
+    let driverUserId = dto.driverUserId;
+    let courierName = dto.courierName;
+    let courierPhone = dto.courierPhone;
+    let courierReference = dto.courierReference;
+    if (!driverUserId && !courierName) {
+      const lastDispatch = await this.prisma.pickupDeliveryRecord.findFirst({
+        where: { tenantId, shipmentItemId: item.id, type: HandoffType.DISPATCH },
+        orderBy: { handledAt: 'desc' },
+      });
+      driverUserId = lastDispatch?.driverUserId ?? undefined;
+      courierName = lastDispatch?.courierName ?? undefined;
+      courierPhone = lastDispatch?.courierPhone ?? undefined;
+      courierReference = lastDispatch?.courierReference ?? undefined;
+    }
+
+    const event = await this.shipmentsService.createTrackingEvent(
+      tenantId,
+      actorUserId,
+      item.shipmentId,
+      {
+        eventType: TrackingEventType.DELIVERED,
+        shipmentItemId: item.id,
+        itemStatus: ShipmentItemStatus.DELIVERED,
+        warehouseId: dto.warehouseId,
+        notes: dto.notes ?? `Delivered to ${dto.recipientName}`,
+        metadata: {
+          recipientName: dto.recipientName,
+          recipientPhone: dto.recipientPhone ?? null,
+          recipientIdReference: dto.recipientIdReference ?? null,
+          driverUserId: driverUserId ?? null,
+          courierName: courierName ?? null,
+        },
+      },
+      {
+        source: dto.scanned ? TrackingEventSource.BARCODE_SCAN : TrackingEventSource.MANUAL,
+        scanIdentifier: dto.scanIdentifier,
+      },
+    );
+
+    await this.prisma.pickupDeliveryRecord.create({
+      data: {
+        tenantId,
+        shipmentId: item.shipmentId,
+        shipmentItemId: item.id,
+        warehouseId: dto.warehouseId,
+        type: HandoffType.DELIVERY,
+        recipientName: dto.recipientName,
+        recipientPhone: dto.recipientPhone,
+        recipientIdReference: dto.recipientIdReference,
+        driverUserId,
+        courierName,
+        courierPhone,
+        courierReference,
+        notes: dto.notes,
+        handledByUserId: actorUserId,
+        handledAt: event.occurredAt,
+        trackingEventId: event.id,
+      },
+    });
+
+    await this.maybeRollupShipmentCompletion(tenantId, actorUserId, item.shipmentId);
+
+    const delivered = await this.prisma.shipmentItem.findUniqueOrThrow({
+      where: { id: item.id },
+      include: ITEM_DETAIL_INCLUDE,
+    });
+    return presentItem(delivered);
+  }
+
+  /**
+   * Delivery/Driver Dispatch milestone. Records a failed/incomplete
+   * delivery attempt once the physical package is back at a destination
+   * warehouse. Never DELIVERED — a failed attempt is never silently
+   * marked successful. Two outcomes, same `hasException` split
+   * destinationReceiveItem already uses:
+   *   - hasException false (default): retry-eligible.
+   *     OUT_FOR_DELIVERY -> RECEIVED_DESTINATION_WAREHOUSE, immediately
+   *     eligible for a fresh dispatch or a walk-in pickup — exactly the
+   *     same status the item had before it was ever dispatched.
+   *   - hasException true: needs staff review (refused permanently,
+   *     damaged, lost). OUT_FOR_DELIVERY -> EXCEPTION, same dead-end-
+   *     until-manually-resolved posture EXCEPTION already has everywhere
+   *     else in this app.
+   * Both outcomes assume the item is physically at dto.warehouseId (this
+   * action only makes sense once staff has it in hand) and restore
+   * currentWarehouseId accordingly — including the EXCEPTION outcome,
+   * since a damaged-but-present package should still show up in this
+   * warehouse's inventory for staff to act on, not vanish.
+   *
+   * Unlike pickupItem/dispatchItem, there is no "must match
+   * currentWarehouseId" check here — currentWarehouseId is null while
+   * OUT_FOR_DELIVERY (see dispatchItem), so there's nothing to compare
+   * dto.warehouseId against yet. Same posture destinationReceiveItem
+   * already has for a first-time arrival: staff attests physical
+   * presence at a specific warehouse, and that attestation is what sets
+   * currentWarehouseId, not a check against it.
+   *
+   * Uses TrackingEventType.RETURNED_TO_WAREHOUSE (not
+   * RECEIVED_DESTINATION_WAREHOUSE) for the retry-eligible outcome even
+   * though the resulting item status is the same value — the event type
+   * is what keeps history (and later customer-facing tracking) honest:
+   * this item was dispatched, didn't arrive, and came back, not that it
+   * was simply received once.
+   */
+  async returnItem(tenantId: string, actorUserId: string, itemId: string, dto: ReturnItemDto) {
+    const item = await this.prisma.shipmentItem.findFirst({
+      where: { id: itemId, tenantId },
+      include: { shipment: { select: { id: true, status: true } } },
+    });
+    if (!item) {
+      throw new NotFoundException('Item not found');
+    }
+    if (item.shipment.status === DbShipmentStatus.CANCELLED) {
+      throw new ConflictException('This shipment has been cancelled.');
+    }
+
+    if (item.status !== DbShipmentItemStatus.OUT_FOR_DELIVERY) {
+      if (item.status === DbShipmentItemStatus.DELIVERED) {
+        throw new ConflictException('This item has already been delivered and cannot be returned.');
+      }
+      throw new ConflictException(
+        `This item's current status (${item.status}) is not eligible to be returned. ` +
+          `It must be out for delivery first.`,
+      );
+    }
+
+    const warehouse = await this.prisma.warehouse.findFirst({ where: { id: dto.warehouseId, tenantId } });
+    if (!warehouse) {
+      throw new NotFoundException('Warehouse not found');
+    }
+
+    const isRetryEligible = !dto.hasException;
+    const newItemStatus = isRetryEligible ? ShipmentItemStatus.RECEIVED_DESTINATION_WAREHOUSE : ShipmentItemStatus.EXCEPTION;
+    const eventType = isRetryEligible ? TrackingEventType.RETURNED_TO_WAREHOUSE : TrackingEventType.EXCEPTION;
+    const defaultNotes = isRetryEligible
+      ? `Returned to ${warehouse.name} after a failed delivery attempt: ${dto.failureReason}`
+      : `Held at ${warehouse.name} after a failed delivery attempt: ${dto.failureReason}`;
+
+    const event = await this.shipmentsService.createTrackingEvent(
+      tenantId,
+      actorUserId,
+      item.shipmentId,
+      {
+        eventType,
+        shipmentItemId: item.id,
+        itemStatus: newItemStatus,
+        warehouseId: dto.warehouseId,
+        notes: dto.notes ?? defaultNotes,
+        metadata: {
+          failureReason: dto.failureReason,
+          hasException: !!dto.hasException,
+        },
+      },
+      {
+        source: dto.scanned ? TrackingEventSource.BARCODE_SCAN : TrackingEventSource.MANUAL,
+        scanIdentifier: dto.scanIdentifier,
+      },
+    );
+
+    // Physically back at this warehouse in both outcomes — see this
+    // method's own doc comment for why EXCEPTION is not excluded here.
+    await this.prisma.shipmentItem.update({
+      where: { id: item.id },
+      data: { currentWarehouseId: dto.warehouseId },
+    });
+
+    const returned = await this.prisma.shipmentItem.findUniqueOrThrow({
+      where: { id: item.id },
+      include: ITEM_DETAIL_INCLUDE,
+    });
+    return presentItem(returned);
+  }
+
+  /**
    * Advances a shipment to COMPLETED once every one of its applicable
    * items has reached a terminal handoff status (see ITEM_TERMINAL_HANDOFF
    * above) — mirrors ManifestsService.maybeRollupShipmentArrival exactly:
@@ -701,14 +1064,15 @@ export class WarehouseService {
    * blocking completion instead of being silently outvoted, matching
    * ContainersService.closeUnloading's posture on discrepancies.
    *
-   * Reuses eventType PICKED_UP (status carries the real news, COMPLETED)
-   * rather than adding a new TrackingEventType — same "eventType and
-   * status don't have to share a name" precedent already established by
-   * RECEIVED_AT_WAREHOUSE -> WAREHOUSE_RECEIVED and PROCESSED -> PROCESSING
-   * above. Once Delivery exists and a shipment can complete via a mix of
-   * picked-up and delivered items, this eventType choice should be
-   * revisited — it will still be technically correct (at least one item
-   * really was picked up) but may no longer be the most informative label.
+   * Delivery/Driver Dispatch milestone: now that DELIVERED items can
+   * trigger this (deliverItem calls this exact same method — no changes
+   * needed here beyond this comment), the shipment can complete via
+   * PICKED_UP alone, DELIVERED alone, or a mix. Uses its own dedicated
+   * TrackingEventType.COMPLETED rather than continuing to reuse PICKED_UP
+   * (as an earlier draft of this method did) — the previous choice
+   * predated this milestone and would have mislabeled a delivered-only
+   * or mixed completion as "picked up," which matters once these events
+   * feed customer-facing tracking/notifications.
    */
   private async maybeRollupShipmentCompletion(tenantId: string, actorUserId: string, shipmentId: string) {
     const ROLLUP_ELIGIBLE_STATUSES: DbShipmentStatus[] = [DbShipmentStatus.ARRIVED_DESTINATION];
@@ -738,7 +1102,7 @@ export class WarehouseService {
       actorUserId,
       shipmentId,
       {
-        eventType: TrackingEventType.PICKED_UP,
+        eventType: TrackingEventType.COMPLETED,
         status: ShipmentStatus.COMPLETED,
         notes: 'All applicable items reached a final handoff status',
       },

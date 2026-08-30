@@ -122,6 +122,13 @@ export enum TrackingEventType {
   OUT_FOR_DELIVERY = 'OUT_FOR_DELIVERY',
   DELIVERED = 'DELIVERED',
   PICKED_UP = 'PICKED_UP',
+  /// A failed/incomplete delivery attempt that came back to a destination
+  /// warehouse — see WarehouseService.returnItem in the API.
+  RETURNED_TO_WAREHOUSE = 'RETURNED_TO_WAREHOUSE',
+  /// Shipment-level: every applicable item reached a terminal successful
+  /// handoff (PICKED_UP and/or DELIVERED, any mix) — see the API's
+  /// WarehouseService.maybeRollupShipmentCompletion.
+  COMPLETED = 'COMPLETED',
   EXCEPTION = 'EXCEPTION',
   CANCELLED = 'CANCELLED',
   NOTE_ADDED = 'NOTE_ADDED',

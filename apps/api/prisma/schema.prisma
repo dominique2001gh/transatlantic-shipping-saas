@@ -198,6 +198,20 @@ enum TrackingEventType {
   OUT_FOR_DELIVERY
   DELIVERED
   PICKED_UP
+  /// A failed/incomplete delivery attempt that came back to a destination
+  /// warehouse and is eligible for a fresh dispatch or a walk-in pickup —
+  /// distinct from RECEIVED_DESTINATION_WAREHOUSE (the item's status after
+  /// this event is the same value, but this event type keeps the history
+  /// honest: it was dispatched, didn't arrive, and came back, not that it
+  /// was simply received once). See WarehouseService.returnItem.
+  RETURNED_TO_WAREHOUSE
+  /// Shipment-level: every applicable item reached a terminal successful
+  /// handoff (PICKED_UP and/or DELIVERED, any mix). See
+  /// WarehouseService.maybeRollupShipmentCompletion. Its own distinct
+  /// value rather than reusing PICKED_UP/DELIVERED — a shipment
+  /// completed via a mix of both, or via DELIVERED alone, must not read
+  /// to a customer as if it were specifically "picked up."
+  COMPLETED
   EXCEPTION
   CANCELLED
   NOTE_ADDED
@@ -235,14 +249,18 @@ enum ItemProcessingResult {
   HOLD
 }
 
-/// Distinguishes the two final-handoff paths PickupDeliveryRecord can
-/// represent. Milestone: Customer Pickup only implements PICKUP; DELIVERY
-/// is defined now (not implemented — no service/controller path creates
-/// one yet) so the later Delivery/Driver milestone reuses this same model
-/// and the same shipment-completion rollup instead of requiring a schema
-/// redesign or a second parallel table.
+/// Distinguishes the events PickupDeliveryRecord can represent.
+/// PICKUP and DELIVERY are the two final-handoff outcomes that feed
+/// WarehouseService.maybeRollupShipmentCompletion (see
+/// ITEM_TERMINAL_HANDOFF). DISPATCH (Delivery/Driver milestone) is
+/// deliberately not a final handoff — it's the courier-assignment record
+/// created when an item leaves the warehouse OUT_FOR_DELIVERY, kept as
+/// its own immutable row (never edited into a DELIVERY row later) so the
+/// original dispatch details survive even after multiple failed/retried
+/// attempts.
 enum HandoffType {
   PICKUP
+  DISPATCH
   DELIVERY
 }
 
@@ -792,12 +810,18 @@ model ItemInspection {
   @@map("item_inspections")
 }
 
-/// One final-handoff event for a single ShipmentItem — Customer Pickup
-/// (Milestone: Pickup) or, later, courier Delivery (schema-ready now, not
-/// yet implemented — see HandoffType). Append-only and immutable like
-/// ItemInspection: a correction is a new row, never an edit to an existing
-/// one, so the handoff record a recipient signed for/was verified against
-/// can never be silently changed after the fact.
+/// One structured delivery-lifecycle event for a single ShipmentItem:
+/// Customer Pickup (final handoff), or, for courier delivery, DISPATCH
+/// (item leaves the warehouse) followed later by its own separate
+/// DELIVERY row (final handoff) or a RETURNED_TO_WAREHOUSE TrackingEvent
+/// (see WarehouseService.returnItem — a failed/retried attempt does not
+/// get its own PickupDeliveryRecord, only DISPATCH and terminal outcomes
+/// do). Append-only and immutable like ItemInspection: a correction is a
+/// new row, never an edit to an existing one — a DISPATCH row is never
+/// later rewritten into a DELIVERY row, so the original dispatch details
+/// survive even across multiple failed/retried attempts, and the handoff
+/// record a recipient signed for/was verified against can never be
+/// silently changed after the fact.
 ///
 /// Deliberately does not yet have signature/photo columns. The plan (see
 /// the Document model's own comment) is a later, additive
@@ -822,10 +846,29 @@ model PickupDeliveryRecord {
   recipientIdReference String?
   notes                String?
 
-  /// Courier/driver for a DELIVERY record — always null for PICKUP.
-  /// Nullable and unused today; populated once the Delivery milestone's
-  /// dispatch step exists.
-  driverUserId String?
+  /// Point-in-time delivery-address snapshot, captured at DISPATCH —
+  /// same "free-text snapshot, not a live FK" rationale as
+  /// Shipment.originLocation/destinationLocation: an address the
+  /// customer changes later must never rewrite this record. Null for
+  /// PICKUP (no delivery address involved) and typically left unset on
+  /// the later DELIVERY confirmation row (implied unchanged from dispatch
+  /// unless the attempt failed, which is its own RETURNED_TO_WAREHOUSE
+  /// event, not a successful DELIVERY row).
+  deliveryAddress String?
+
+  /// Driver/courier identity. Two independent ways to record it, not a
+  /// single required field — this tenant may staff deliveries with a
+  /// logged-in employee (driverUserId), or with an independent driver /
+  /// third-party courier company that has no application account at all
+  /// (courierName/courierPhone/courierReference, free text). Service-layer
+  /// validation (not a DB constraint) requires at least one to be present
+  /// on a DISPATCH or DELIVERY record; both are always null on PICKUP.
+  driverUserId     String?
+  courierName      String?
+  courierPhone     String?
+  /// Free-text vehicle/company/tracking reference — e.g. plate number,
+  /// "DHL Ghana", a third-party waybill number. Optional, never validated.
+  courierReference String?
 
   handledByUserId String?
   handledAt       DateTime @default(now())
