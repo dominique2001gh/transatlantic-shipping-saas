@@ -46,6 +46,6 @@ export const siteConfig = {
   // Operational location on file, not necessarily a public-facing HQ
   // address — shown as a location, not billed as company headquarters.
   locations: [
-    { label: 'Origin Warehouse', city: 'Houston', region: 'TX', country: 'United States' },
+    { label: 'Origin Warehouse', city: 'Dallas-Fort Worth', region: 'TX', country: 'United States' },
   ] as SiteLocation[],
 };

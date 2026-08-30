@@ -131,20 +131,20 @@ async function main() {
   console.log(`  Warehouse staff: ${warehouseStaff.email}`);
 
   // --------------------------------------------------------------------
-  // Sample warehouse (origin, Texas)
+  // Sample warehouse (origin, Dallas–Fort Worth, Texas)
   // --------------------------------------------------------------------
   const warehouse = await prisma.warehouse.upsert({
     where: { tenantId_code: { tenantId: tenant.id, code: 'TX-01' } },
     update: {},
     create: {
       tenantId: tenant.id,
-      name: 'Houston Origin Warehouse',
+      name: 'DFW Origin Warehouse',
       code: 'TX-01',
       addressLine1: '4200 Freight Way',
-      city: 'Houston',
+      city: 'Dallas-Fort Worth',
       state: 'TX',
       country: 'United States',
-      postalCode: '77001',
+      postalCode: '75261',
       phone: '+1-555-010-0200',
       isOriginWarehouse: true,
       isDestinationWarehouse: false,
@@ -248,8 +248,8 @@ async function main() {
         shipmentMode: ShipmentMode.OCEAN_LCL,
         originCountry: 'United States',
         destinationCountry: 'Ghana',
-        originLocation: 'Houston, TX',
-        destinationLocation: 'Tema, Ghana',
+        originLocation: 'DFW, TX',
+        destinationLocation: 'Tema Harbour, Ghana',
         originWarehouseId: warehouse.id,
         status: ShipmentStatus.AWAITING_ITEMS,
         description: 'Household goods barrel + 1 box of electronics',
@@ -406,7 +406,7 @@ async function main() {
         shipmentMode: ShipmentMode.AIR,
         originCountry: 'United States',
         destinationCountry: 'Nigeria',
-        originLocation: 'Houston, TX',
+        originLocation: 'DFW, TX',
         destinationLocation: 'Lagos, Nigeria',
         originWarehouseId: warehouse.id,
         status: ShipmentStatus.WAREHOUSE_RECEIVED,
