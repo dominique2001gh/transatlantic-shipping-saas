@@ -153,3 +153,65 @@ export async function createUserInTenant(
   });
   return { id: user.id, email: user.email, password: TEST_PASSWORD };
 }
+
+export interface TestPortalCustomerFixture {
+  customerId: string;
+  user: { id: string; email: string; password: string };
+}
+
+/**
+ * Stage 2C: creates a Customer *with* a linked portal-login User (role
+ * CUSTOMER, Customer.userId set) — the "Customer #1 (with a portal login)"
+ * shape from apps/api/prisma/seed.ts, as an isolated e2e fixture rather
+ * than the real seeded tenant. Use this (not `createTestTenant`'s own
+ * customer, which has no linked user) whenever a test needs to log in as a
+ * customer.
+ */
+export async function createCustomerWithPortalUser(
+  prisma: PrismaClient,
+  tenantId: string,
+  label: string,
+): Promise<TestPortalCustomerFixture> {
+  const runId = randomUUID().slice(0, 8);
+  const email = `portal-${label.toLowerCase()}-${runId}@example.test`;
+  const passwordHash = await bcrypt.hash(TEST_PASSWORD, 10);
+
+  const user = await prisma.user.create({
+    data: {
+      tenantId,
+      email,
+      passwordHash,
+      firstName: 'E2E',
+      lastName: label,
+      role: UserRole.CUSTOMER,
+    },
+  });
+
+  const customer = await prisma.customer.create({
+    data: {
+      tenantId,
+      customerNumber: `E2E-PORTAL-${runId}`,
+      firstName: 'E2E',
+      lastName: label,
+      email,
+      userId: user.id,
+    },
+  });
+
+  return { customerId: customer.id, user: { id: user.id, email, password: TEST_PASSWORD } };
+}
+
+/**
+ * Stage 2C: a CUSTOMER-role User deliberately created with NO linked
+ * Customer record — the "should never happen given the schema, but fail
+ * closed if it does" edge case CustomerPortalService.getProfile and
+ * requireCustomerId() both guard against. Exists purely to drive that
+ * failure path in a test.
+ */
+export async function createOrphanedCustomerUser(
+  prisma: PrismaClient,
+  tenantId: string,
+  label: string,
+): Promise<{ id: string; email: string; password: string }> {
+  return createUserInTenant(prisma, tenantId, label, UserRole.CUSTOMER);
+}

@@ -6,7 +6,10 @@ import { ROLES_KEY } from '../decorators/roles.decorator';
 /**
  * Enforces @Roles(...) metadata. Runs after JwtAuthGuard, so req.user is
  * always populated by the time this executes. Routes with no @Roles()
- * metadata are allowed for any authenticated user.
+ * metadata are allowed for any authenticated user — mark those
+ * deliberately with @AnyAuthenticatedRole() (see that decorator) rather
+ * than leaving @Roles() off silently, so roles-guard-contract.e2e-spec.ts
+ * can tell "intentionally open" apart from "someone forgot @Roles()."
  */
 @Injectable()
 export class RolesGuard implements CanActivate {

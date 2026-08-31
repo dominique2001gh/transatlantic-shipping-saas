@@ -14,29 +14,59 @@ export class AuthService {
   ) {}
 
   async login(email: string, password: string): Promise<LoginResponseDto> {
-    const user = await this.prisma.user.findUnique({
-      where: { email: email.toLowerCase().trim() },
+    const normalizedEmail = email.toLowerCase().trim();
+
+    // email is unique per tenant, not globally (Stage 2C: the same person
+    // may hold independent customer-portal accounts at more than one
+    // tenant with the same email). The login form only collects
+    // email+password, so every account with this email is a candidate —
+    // whichever one's password matches (and whose tenant, if any, is
+    // active) is the account that gets logged into. In the overwhelmingly
+    // common case (one account per email) this is exactly one candidate,
+    // so behavior is unchanged from before.
+    const candidates = await this.prisma.user.findMany({
+      where: { email: normalizedEmail },
       include: { customer: { select: { id: true } } },
     });
 
-    // Same error for "no such user" and "wrong password" — don't leak
-    // which one it was.
-    if (!user || !user.isActive) {
-      throw new UnauthorizedException('Invalid email or password');
-    }
+    let tenantInactiveMatch: (typeof candidates)[number] | null = null;
 
-    const passwordMatches = await bcrypt.compare(password, user.passwordHash);
-    if (!passwordMatches) {
-      throw new UnauthorizedException('Invalid email or password');
-    }
+    for (const user of candidates) {
+      if (!user.isActive) continue;
 
-    if (user.tenantId) {
-      const tenant = await this.prisma.tenant.findUnique({ where: { id: user.tenantId } });
-      if (!tenant || !tenant.isActive) {
-        throw new UnauthorizedException('This account\'s organization is not active');
+      const passwordMatches = await bcrypt.compare(password, user.passwordHash);
+      if (!passwordMatches) continue;
+
+      if (user.tenantId) {
+        const tenant = await this.prisma.tenant.findUnique({ where: { id: user.tenantId } });
+        if (!tenant || !tenant.isActive) {
+          tenantInactiveMatch = user;
+          continue;
+        }
       }
+
+      return this.buildLoginResponse(user);
     }
 
+    // Same error for "no such user" and "wrong password" — don't leak
+    // which one it was. A tenant-inactive match (correct password, but the
+    // organization itself is deactivated) gets its own specific message,
+    // matching the pre-Stage-2C single-account behavior.
+    if (tenantInactiveMatch) {
+      throw new UnauthorizedException("This account's organization is not active");
+    }
+    throw new UnauthorizedException('Invalid email or password');
+  }
+
+  private async buildLoginResponse(user: {
+    id: string;
+    email: string;
+    firstName: string;
+    lastName: string;
+    role: string;
+    tenantId: string | null;
+    customer: { id: string } | null;
+  }): Promise<LoginResponseDto> {
     await this.prisma.user.update({
       where: { id: user.id },
       data: { lastLoginAt: new Date() },

@@ -421,7 +421,14 @@ model TenantSettings {
 model User {
   id           String    @id @default(cuid())
   tenantId     String?
-  email        String    @unique
+  // Not globally @unique: a CUSTOMER may hold independent portal accounts
+  // at more than one tenant with the same email address (Stage 2C). Unique
+  // only per tenant instead — see @@unique below. Accepted trade-off:
+  // PLATFORM_ADMIN rows have tenantId = null, and Postgres treats each NULL
+  // as distinct for uniqueness, so two platform admins could theoretically
+  // share an email post-change. Acceptable since platform admins are only
+  // ever created manually/via seed, never self-serve.
+  email        String
   passwordHash String
   firstName    String
   lastName     String
@@ -451,6 +458,7 @@ model User {
   manifestItemsAdded            ManifestItem[]         @relation("ManifestItemAddedBy")
   manifestItemsRemoved          ManifestItem[]         @relation("ManifestItemRemovedBy")
 
+  @@unique([tenantId, email])
   @@index([tenantId])
   @@map("users")
 }

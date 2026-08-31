@@ -1,6 +1,12 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import type { ShipmentStatus as DbShipmentStatus } from '@prisma/client';
-import type { PublicTrackingItemSummary, PublicTrackingMilestone, PublicTrackingResult } from '@transatlantic/shared';
+import type { Prisma, ShipmentStatus as DbShipmentStatus } from '@prisma/client';
+import type {
+  PortalShipmentDetail,
+  PortalShipmentSummary,
+  PublicTrackingItemSummary,
+  PublicTrackingMilestone,
+  PublicTrackingResult,
+} from '@transatlantic/shared';
 import { ITEM_STATUS_MILESTONES, SHIPMENT_STATUS_MILESTONES } from '@transatlantic/shared';
 import type { ShipmentItemType as SharedShipmentItemType } from '@transatlantic/shared';
 // The Prisma-generated ShipmentStatus/ShipmentItemStatus enums (imported
@@ -18,18 +24,20 @@ import type { ShipmentStatus as SharedShipmentStatus, ShipmentItemStatus as Shar
 import { ITEM_TERMINAL_HANDOFF } from '../warehouse/warehouse.service';
 import { PrismaService } from '../prisma/prisma.service';
 
+type ShipmentWithItems = Prisma.ShipmentGetPayload<{ include: { items: true } }>;
+
 /**
  * Stage 2A: the customer-safe projection consumed by the public tracking
- * lookup (and, later, the authenticated customer portal — same service,
- * same projection, a different, tenant/customer-scoped caller). Reads
- * only from the existing Shipment/ShipmentItem/TrackingEvent tables — no
- * parallel tracking model, no re-derivation of state. Every field this
- * returns is either copied verbatim from a small, deliberately-safe
- * allowlist (trackingNumber, originCountry, destinationCountry, itemCode,
- * itemType, item description, createdAt/occurredAt timestamps, a
- * warehouse's city/country) or produced by mapping an existing status/
- * eventType through the curated label tables in
- * packages/shared/tracking-milestones.ts. It never returns a raw
+ * lookup and (Stage 2C) the authenticated customer portal — same service,
+ * same projection (see `projectShipment`), a different, tenant/customer-
+ * scoped caller for each. Reads only from the existing Shipment/
+ * ShipmentItem/TrackingEvent tables — no parallel tracking model, no
+ * re-derivation of state. Every field this returns is either copied
+ * verbatim from a small, deliberately-safe allowlist (trackingNumber,
+ * originCountry, destinationCountry, itemCode, itemType, item description,
+ * createdAt/occurredAt timestamps, a warehouse's city/country) or produced
+ * by mapping an existing status/eventType through the curated label tables
+ * in packages/shared/tracking-milestones.ts. It never returns a raw
  * TrackingEvent row, its notes, its metadata, any user/staff identity, or
  * declaredValue.
  */
@@ -80,12 +88,95 @@ export class TrackingService {
       throw notFound();
     }
 
-    const timeline = await this.buildShipmentTimeline(tenant.id, shipment.id);
+    return this.projectShipment(tenant.id, shipment);
+  }
+
+  /**
+   * Stage 2C: the authenticated customer-portal equivalent of `lookupPublic`
+   * above — same projection (`projectShipment`), reached through JWT-based
+   * tenant+customer scoping instead of the tenantSlug+trackingNumber+
+   * lastName three-factor check. `tenantId`/`customerId` must come from the
+   * caller's verified JWT, never from a route param or body, and are
+   * included directly in the `where` clause alongside `id` — so a shipment
+   * that exists but belongs to a different customer (or a different
+   * tenant) is fetched by this query exactly as if it didn't exist, and
+   * produces the same 404 as a genuinely unknown id.
+   */
+  async getForCustomer(
+    tenantId: string,
+    customerId: string,
+    shipmentId: string,
+  ): Promise<PublicTrackingResult & Pick<PortalShipmentDetail, 'shipmentMode'>> {
+    const shipment = await this.prisma.shipment.findFirst({
+      where: { id: shipmentId, tenantId, customerId },
+      include: { items: { orderBy: { sequenceNumber: 'asc' } } },
+    });
+    if (!shipment) {
+      throw new NotFoundException('Shipment not found');
+    }
+
+    const projection = await this.projectShipment(tenantId, shipment);
+    // shipmentMode is added here, not inside projectShipment, so the
+    // public lookupPublic() response shape (which also calls
+    // projectShipment) is completely unaffected — this field is
+    // authenticated-portal-only, same reasoning as listForCustomer.
+    return { ...projection, shipmentMode: shipment.shipmentMode as unknown as PortalShipmentDetail['shipmentMode'] };
+  }
+
+  /**
+   * Stage 2C: GET /portal/shipments list view. A lighter summary per
+   * shipment than `getForCustomer`'s full detail — current milestone +
+   * item counts only, no per-item breakdown, no full timeline — built from
+   * the same SHIPMENT_STATUS_MILESTONES/ITEM_TERMINAL_HANDOFF the detail
+   * projection uses, just without the per-item/per-timeline TrackingEvent
+   * queries a list of many shipments doesn't need (one query total, not
+   * one-plus-per-item — deliberately light for this machine's 8 GB RAM).
+   * `overallMilestone.occurredAt` uses Shipment.updatedAt as a "last
+   * touched" proxy rather than re-deriving the exact triggering event, for
+   * the same reason.
+   */
+  async listForCustomer(tenantId: string, customerId: string): Promise<PortalShipmentSummary[]> {
+    const shipments = await this.prisma.shipment.findMany({
+      where: { tenantId, customerId },
+      include: { items: { select: { status: true } } },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return shipments.map((shipment) => {
+      const completedCount = shipment.items.filter((item) => ITEM_TERMINAL_HANDOFF.includes(item.status)).length;
+      const overallMilestone = SHIPMENT_STATUS_MILESTONES[shipment.status as unknown as SharedShipmentStatus];
+      return {
+        id: shipment.id,
+        trackingNumber: shipment.trackingNumber,
+        shipmentMode: shipment.shipmentMode as unknown as PortalShipmentSummary['shipmentMode'],
+        originCountry: shipment.originCountry,
+        destinationCountry: shipment.destinationCountry,
+        createdAt: shipment.createdAt.toISOString(),
+        overallMilestone: {
+          label: overallMilestone?.label ?? shipment.status,
+          occurredAt: shipment.updatedAt.toISOString(),
+        },
+        isCompleted: (shipment.status as unknown as DbShipmentStatus) === 'COMPLETED',
+        itemSummary: { total: shipment.items.length, completed: completedCount },
+      };
+    });
+  }
+
+  /**
+   * The actual customer-safe projection, factored out of `lookupPublic` so
+   * both it and `getForCustomer` share exactly one implementation — see
+   * this class's doc comment for what it allowlists/excludes. Callers are
+   * responsible for having already authorized access to `shipment` (tenant
+   * match, customer match, or the public three-factor check); this method
+   * itself does no authorization, only projection.
+   */
+  private async projectShipment(tenantId: string, shipment: ShipmentWithItems): Promise<PublicTrackingResult> {
+    const timeline = await this.buildShipmentTimeline(tenantId, shipment.id);
 
     const items: PublicTrackingItemSummary[] = await Promise.all(
       shipment.items.map(async (item) => {
         const lastEvent = await this.prisma.trackingEvent.findFirst({
-          where: { tenantId: tenant.id, shipmentItemId: item.id },
+          where: { tenantId, shipmentItemId: item.id },
           orderBy: { occurredAt: 'desc' },
           select: { occurredAt: true },
         });

@@ -13,5 +13,10 @@ import { TrackingService } from './tracking.service';
   imports: [ThrottlerModule.forRoot([{ name: 'default', ttl: 60_000, limit: 20 }])],
   controllers: [TrackingController],
   providers: [TrackingService],
+  // Exported so CustomerPortalModule can reuse the same projection
+  // (TrackingService.getForCustomer/listForCustomer) instead of
+  // duplicating tracking/milestone logic — see TrackingService's class
+  // doc comment.
+  exports: [TrackingService],
 })
 export class TrackingModule {}

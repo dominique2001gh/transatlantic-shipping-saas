@@ -478,3 +478,55 @@ export interface PublicTrackingResult {
   timeline: PublicTrackingMilestone[];
   items: PublicTrackingItemSummary[];
 }
+
+// ==========================================================================
+// STAGE 2C: AUTHENTICATED CUSTOMER PORTAL
+// ==========================================================================
+
+/** GET /portal/me — the logged-in customer's own profile. Deliberately thin: no addresses, no internal/staff-facing fields. */
+export interface PortalCustomerProfile {
+  customerNumber: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone: string | null;
+}
+
+/**
+ * One row in GET /portal/shipments. A lighter shape than
+ * PortalShipmentDetail/PublicTrackingResult on purpose — no item list, no
+ * full timeline — since a list view only needs to render current status per
+ * shipment, not re-fetch everything about each one.
+ */
+export interface PortalShipmentSummary {
+  id: string;
+  trackingNumber: string;
+  shipmentMode: ShipmentMode;
+  originCountry: string;
+  destinationCountry: string;
+  createdAt: string;
+  overallMilestone: {
+    label: string;
+    occurredAt: string | null;
+  };
+  isCompleted: boolean;
+  itemSummary: {
+    total: number;
+    completed: number;
+  };
+}
+
+/**
+ * GET /portal/shipments/:id — full detail for one of the caller's own
+ * shipments. Identical shape to PublicTrackingResult, because it's built by
+ * the exact same TrackingService projection (see
+ * TrackingService.getForCustomer) — just reached through JWT-based
+ * tenant+customer scoping instead of the public tenantSlug+trackingNumber+
+ * lastName lookup. `id` is additionally safe to expose here (unlike the
+ * public projection) because the caller has already authenticated as the
+ * owning customer.
+ */
+export interface PortalShipmentDetail extends PublicTrackingResult {
+  id: string;
+  shipmentMode: ShipmentMode;
+}

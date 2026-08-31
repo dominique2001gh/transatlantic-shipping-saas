@@ -37,3 +37,8 @@ export function formatDateTime(iso: string): string {
     timeStyle: 'short',
   });
 }
+
+/** Date-only variant of formatDateTime, for contexts (shipment lists/summaries) that don't need a time-of-day. */
+export function formatDate(iso: string): string {
+  return new Date(iso).toLocaleDateString(undefined, { dateStyle: 'medium' });
+}

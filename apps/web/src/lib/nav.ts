@@ -25,7 +25,6 @@ export const dashboardNavItems: NavItem[] = [
 export const portalNavItems: NavItem[] = [
   { label: 'Overview', href: '/portal' },
   { label: 'My Shipments', href: '/portal/shipments' },
-  { label: 'Track a Shipment', href: '/portal/track' },
   { label: 'Invoices', href: '/portal/invoices' },
   { label: 'Documents', href: '/portal/documents' },
   { label: 'Profile', href: '/portal/profile' },

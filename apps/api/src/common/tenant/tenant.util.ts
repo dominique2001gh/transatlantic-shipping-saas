@@ -32,3 +32,19 @@ export function requireTenantId(tenantId: string | null): string {
   }
   return tenantId;
 }
+
+/**
+ * Stage 2C: throws if a CUSTOMER-role user somehow has no linked
+ * Customer.id. Should never fire given the schema (a CUSTOMER account is
+ * only ever created with a Customer.userId link — see
+ * apps/api/prisma/seed.ts), but every customer-portal endpoint calls this
+ * before scoping a query, the same way every staff endpoint calls
+ * requireTenantId — fail closed rather than silently querying with an
+ * undefined customerId.
+ */
+export function requireCustomerId(customerId: string | null | undefined): string {
+  if (!customerId) {
+    throw new ForbiddenException('No customer context for this account');
+  }
+  return customerId;
+}

@@ -1,6 +1,7 @@
 import { Controller, ForbiddenException, Get } from '@nestjs/common';
 import type { AuthenticatedUser } from '@transatlantic/shared';
 import { STAFF_ROLES } from '@transatlantic/shared';
+import { AnyAuthenticatedRole } from '../common/decorators/any-authenticated-role.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { UsersService } from './users.service';
@@ -9,8 +10,9 @@ import { UsersService } from './users.service';
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
-  /** Returns the profile of whoever the access token belongs to. */
+  /** Returns the profile of whoever the access token belongs to — every role, including CUSTOMER. */
   @Get('me')
+  @AnyAuthenticatedRole()
   me(@CurrentUser() user: AuthenticatedUser): AuthenticatedUser {
     return user;
   }

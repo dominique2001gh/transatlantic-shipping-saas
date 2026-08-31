@@ -34,6 +34,24 @@ async function hashPassword(password: string): Promise<string> {
   return bcrypt.hash(password, 10);
 }
 
+/**
+ * User.email is unique per tenant, not globally (Stage 2C: the same email
+ * may hold independent portal accounts at more than one tenant), so a plain
+ * `upsert({ where: { email } })` no longer type-checks against a single
+ * scalar unique field. This does the same idempotent
+ * find-or-create every upsert call below relied on (all of them pass
+ * `update: {}`, i.e. leave an existing row untouched), keyed on the same
+ * (tenantId, email) pair that's now the real unique constraint.
+ */
+async function upsertUserByEmail(data: Parameters<typeof prisma.user.create>[0]['data'] & {
+  tenantId: string | null;
+  email: string;
+}) {
+  const existing = await prisma.user.findFirst({ where: { tenantId: data.tenantId, email: data.email } });
+  if (existing) return existing;
+  return prisma.user.create({ data });
+}
+
 async function main() {
   console.log('Seeding development data...');
 
@@ -70,63 +88,47 @@ async function main() {
   // --------------------------------------------------------------------
   // Staff users
   // --------------------------------------------------------------------
-  const platformAdmin = await prisma.user.upsert({
-    where: { email: 'platformadmin@ananse.dev' },
-    update: {},
-    create: {
-      email: 'platformadmin@ananse.dev',
-      passwordHash: await hashPassword(DEV_PASSWORD),
-      firstName: 'Ananse',
-      lastName: 'Admin',
-      role: UserRole.PLATFORM_ADMIN,
-      tenantId: null,
-      isActive: true,
-    },
+  const platformAdmin = await upsertUserByEmail({
+    email: 'platformadmin@ananse.dev',
+    passwordHash: await hashPassword(DEV_PASSWORD),
+    firstName: 'Ananse',
+    lastName: 'Admin',
+    role: UserRole.PLATFORM_ADMIN,
+    tenantId: null,
+    isActive: true,
   });
   console.log(`  Platform admin: ${platformAdmin.email}`);
 
-  const tenantAdmin = await prisma.user.upsert({
-    where: { email: 'admin@transatlantic.dev' },
-    update: {},
-    create: {
-      email: 'admin@transatlantic.dev',
-      passwordHash: await hashPassword(DEV_PASSWORD),
-      firstName: 'Akosua',
-      lastName: 'Mensah',
-      role: UserRole.TENANT_ADMIN,
-      tenantId: tenant.id,
-      isActive: true,
-    },
+  const tenantAdmin = await upsertUserByEmail({
+    email: 'admin@transatlantic.dev',
+    passwordHash: await hashPassword(DEV_PASSWORD),
+    firstName: 'Akosua',
+    lastName: 'Mensah',
+    role: UserRole.TENANT_ADMIN,
+    tenantId: tenant.id,
+    isActive: true,
   });
   console.log(`  Tenant admin: ${tenantAdmin.email}`);
 
-  const warehouseManager = await prisma.user.upsert({
-    where: { email: 'warehouse.manager@transatlantic.dev' },
-    update: {},
-    create: {
-      email: 'warehouse.manager@transatlantic.dev',
-      passwordHash: await hashPassword(DEV_PASSWORD),
-      firstName: 'Efua',
-      lastName: 'Asiedu',
-      role: UserRole.WAREHOUSE_MANAGER,
-      tenantId: tenant.id,
-      isActive: true,
-    },
+  const warehouseManager = await upsertUserByEmail({
+    email: 'warehouse.manager@transatlantic.dev',
+    passwordHash: await hashPassword(DEV_PASSWORD),
+    firstName: 'Efua',
+    lastName: 'Asiedu',
+    role: UserRole.WAREHOUSE_MANAGER,
+    tenantId: tenant.id,
+    isActive: true,
   });
   console.log(`  Warehouse manager: ${warehouseManager.email}`);
 
-  const warehouseStaff = await prisma.user.upsert({
-    where: { email: 'warehouse@transatlantic.dev' },
-    update: {},
-    create: {
-      email: 'warehouse@transatlantic.dev',
-      passwordHash: await hashPassword(DEV_PASSWORD),
-      firstName: 'Kwame',
-      lastName: 'Owusu',
-      role: UserRole.WAREHOUSE_STAFF,
-      tenantId: tenant.id,
-      isActive: true,
-    },
+  const warehouseStaff = await upsertUserByEmail({
+    email: 'warehouse@transatlantic.dev',
+    passwordHash: await hashPassword(DEV_PASSWORD),
+    firstName: 'Kwame',
+    lastName: 'Owusu',
+    role: UserRole.WAREHOUSE_STAFF,
+    tenantId: tenant.id,
+    isActive: true,
   });
   console.log(`  Warehouse staff: ${warehouseStaff.email}`);
 
@@ -178,18 +180,14 @@ async function main() {
   // one item received, one still awaiting drop-off. Demonstrates that
   // ShipmentItem.status and Shipment.status move independently.
   // --------------------------------------------------------------------
-  const customer1User = await prisma.user.upsert({
-    where: { email: 'customer@transatlantic.dev' },
-    update: {},
-    create: {
-      email: 'customer@transatlantic.dev',
-      passwordHash: await hashPassword(DEV_PASSWORD),
-      firstName: 'Ama',
-      lastName: 'Boateng',
-      role: UserRole.CUSTOMER,
-      tenantId: tenant.id,
-      isActive: true,
-    },
+  const customer1User = await upsertUserByEmail({
+    email: 'customer@transatlantic.dev',
+    passwordHash: await hashPassword(DEV_PASSWORD),
+    firstName: 'Ama',
+    lastName: 'Boateng',
+    role: UserRole.CUSTOMER,
+    tenantId: tenant.id,
+    isActive: true,
   });
 
   let customer1 = await prisma.customer.findFirst({

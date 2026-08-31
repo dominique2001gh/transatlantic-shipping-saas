@@ -1,6 +1,7 @@
 import { Body, Controller, ForbiddenException, Get, Param, Post } from '@nestjs/common';
 import type { AuthenticatedUser } from '@transatlantic/shared';
 import { UserRole } from '@transatlantic/shared';
+import { AnyAuthenticatedRole } from '../common/decorators/any-authenticated-role.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CreateTenantDto } from './dto/create-tenant.dto';
@@ -12,6 +13,7 @@ export class TenantsController {
 
   /** Any authenticated tenant staff/customer can see their own tenant's public profile. */
   @Get('me')
+  @AnyAuthenticatedRole()
   getOwnTenant(@CurrentUser() user: AuthenticatedUser) {
     if (!user.tenantId) {
       throw new ForbiddenException('No tenant context for this account');
