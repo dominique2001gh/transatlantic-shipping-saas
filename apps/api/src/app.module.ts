@@ -11,6 +11,7 @@ import { ManifestsModule } from './manifests/manifests.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ShipmentsModule } from './shipments/shipments.module';
 import { TenantsModule } from './tenants/tenants.module';
+import { TrackingModule } from './tracking/tracking.module';
 import { UsersModule } from './users/users.module';
 import { WarehouseModule } from './warehouse/warehouse.module';
 
@@ -27,6 +28,7 @@ import { WarehouseModule } from './warehouse/warehouse.module';
     ContainersModule,
     ManifestsModule,
     HealthModule,
+    TrackingModule,
   ],
   providers: [
     // Every route requires authentication by default; opt out with @Public().

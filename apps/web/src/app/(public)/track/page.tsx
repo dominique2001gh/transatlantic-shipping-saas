@@ -15,10 +15,10 @@ export default function TrackPage() {
       <PageHero
         kicker="Tracking"
         title="Track your shipment"
-        description="Enter your tracking number below to check the latest status."
+        description="Enter your tracking number and last name below to check the latest status."
       />
       <section className="py-20 lg:py-24">
-        <Container className="max-w-2xl">
+        <Container className="max-w-3xl">
           <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-card sm:p-10">
             <TrackingForm size="lg" />
             <div className="mt-8 border-t border-slate-100 pt-6">
@@ -31,6 +31,7 @@ export default function TrackPage() {
                   <code className="rounded bg-slate-100 px-1.5 py-0.5 text-xs">TAL-2026-000001</code>.
                 </li>
                 <li>You can find your tracking number on your shipment confirmation.</li>
+                <li>Enter the last name on the shipment exactly as we have it on file, to protect your privacy.</li>
                 <li>
                   Can&apos;t locate your tracking number? Contact us at{' '}
                   <a

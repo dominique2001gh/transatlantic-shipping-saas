@@ -75,8 +75,14 @@ const ITEM_PROCESSED_OR_LATER: DbShipmentItemStatus[] = [
  * alone) reaches COMPLETED the same way. This array was written during
  * Customer Pickup specifically so this Delivery milestone would not need
  * to touch the rollup itself — confirmed true, only this comment changed.
+ *
+ * Exported (Stage 2A) so TrackingService can compute the same "how many
+ * items reached a final handoff" count for the public tracking
+ * projection's itemSummary — reusing this exact array, not a second
+ * hand-maintained copy of it, keeps the two "senses of complete" (the
+ * real rollup vs. the customer-facing summary) impossible to drift apart.
  */
-const ITEM_TERMINAL_HANDOFF: DbShipmentItemStatus[] = [DbShipmentItemStatus.PICKED_UP, DbShipmentItemStatus.DELIVERED];
+export const ITEM_TERMINAL_HANDOFF: DbShipmentItemStatus[] = [DbShipmentItemStatus.PICKED_UP, DbShipmentItemStatus.DELIVERED];
 
 /**
  * Shared shape for every endpoint that resolves to a full ShipmentItem

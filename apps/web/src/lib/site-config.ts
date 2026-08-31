@@ -32,6 +32,16 @@ export interface SiteLocation {
 }
 
 export const siteConfig = {
+  /**
+   * Stage 2A's public tracking API (GET /tracking/public) is tenant-scoped
+   * and deliberately has no domain-based tenant resolution yet — every
+   * caller must supply an explicit tenantSlug, and this deployment's own
+   * value belongs here, not hard-coded inline in lib/tracking.ts, for the
+   * same reason the rest of this file exists: swap this object (or load
+   * it dynamically) once a real per-tenant public-site story exists, and
+   * every caller updates without edits elsewhere.
+   */
+  tenantSlug: 'transatlantic',
   companyName: 'Trans Atlantic Logistics Solutions',
   shortName: 'Trans Atlantic',
   initials: 'TA',

@@ -424,3 +424,57 @@ export interface ManifestDetail {
   items: ManifestItemSummary[];
   summary: ManifestContentsSummary;
 }
+
+// ==========================================================================
+// STAGE 2A: CUSTOMER/PUBLIC TRACKING
+// ==========================================================================
+
+/** One entry in a shipment's curated, customer-facing milestone timeline. */
+export interface PublicTrackingMilestone {
+  label: string;
+  occurredAt: string;
+  /** City/country only — never a warehouse's internal name/code/id. */
+  location: string | null;
+}
+
+/** One item's current stage, within a resolved shipment lookup — never independently searchable in V1 (see PublicTrackingLookupResult). */
+export interface PublicTrackingItemSummary {
+  itemCode: string;
+  itemType: ShipmentItemType;
+  description: string | null;
+  milestone: {
+    label: string;
+    occurredAt: string | null;
+  };
+}
+
+/**
+ * The complete customer-safe projection returned by the public tracking
+ * lookup. Deliberately excludes: database ids (other than the public
+ * tracking number/item code, which are themselves the lookup keys),
+ * customer/staff identity, declared value, raw TrackingEvent notes/
+ * metadata, and any EXCEPTION detail — see WarehouseController's
+ * TrackingController equivalent (apps/api/src/tracking) for the
+ * enforcement, and packages/shared/tracking-milestones.ts for the label
+ * mapping this is built from.
+ */
+export interface PublicTrackingResult {
+  trackingNumber: string;
+  originCountry: string;
+  destinationCountry: string;
+  createdAt: string;
+  /** The shipment's current stage — read directly from the existing, unmodified Shipment.status rollup, never re-derived here. */
+  overallMilestone: {
+    label: string;
+    occurredAt: string | null;
+  };
+  isCompleted: boolean;
+  /** "X of Y items reached a final handoff" — present even when 1, so multi- and single-item shipments share one shape. */
+  itemSummary: {
+    total: number;
+    completed: number;
+  };
+  /** Shipment-level milestone history, chronological, deduplicated by label. */
+  timeline: PublicTrackingMilestone[];
+  items: PublicTrackingItemSummary[];
+}
