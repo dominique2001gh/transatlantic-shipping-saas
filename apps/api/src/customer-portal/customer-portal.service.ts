@@ -1,5 +1,13 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import type { PortalCustomerProfile, PortalShipmentDetail, PortalShipmentSummary } from '@transatlantic/shared';
+import type {
+  InvoiceSummary,
+  PortalCustomerProfile,
+  PortalInvoiceDetail,
+  PortalShipmentDetail,
+  PortalShipmentSummary,
+} from '@transatlantic/shared';
+import { InvoicesService } from '../invoices/invoices.service';
+import { PaymentsService } from '../payments/payments.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { TrackingService } from '../tracking/tracking.service';
 
@@ -13,13 +21,17 @@ import { TrackingService } from '../tracking/tracking.service';
  * extended one level further for per-customer ownership. Shipment
  * projection logic is never duplicated here — it's delegated to
  * TrackingService, the single owner of the Stage 2A customer-safe
- * projection (see TrackingService's class doc comment).
+ * projection (see TrackingService's class doc comment). Stage 3E's invoice
+ * viewing follows the exact same delegation principle, to InvoicesService/
+ * PaymentsService instead.
  */
 @Injectable()
 export class CustomerPortalService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly trackingService: TrackingService,
+    private readonly invoicesService: InvoicesService,
+    private readonly paymentsService: PaymentsService,
   ) {}
 
   async getProfile(tenantId: string, customerId: string): Promise<PortalCustomerProfile> {
@@ -46,5 +58,24 @@ export class CustomerPortalService {
     // that lookup already succeeded for exactly this id.
     const detail = await this.trackingService.getForCustomer(tenantId, customerId, shipmentId);
     return { ...detail, id: shipmentId };
+  }
+
+  listInvoices(tenantId: string, customerId: string): Promise<InvoiceSummary[]> {
+    return this.invoicesService.findAllForCustomer(tenantId, customerId);
+  }
+
+  /**
+   * InvoicesService.findByIdForCustomer is the actual authorization gate
+   * here — scoped by tenantId + customerId + "not DRAFT", 404 on any
+   * mismatch. It's only safe to call paymentsService.listForInvoice
+   * (which only checks tenantId, not customerId) afterward because that
+   * gate has already thrown if this invoice isn't confirmed to belong to
+   * this customer — the ordering below is the actual security boundary,
+   * not an incidental detail.
+   */
+  async getInvoice(tenantId: string, customerId: string, invoiceId: string): Promise<PortalInvoiceDetail> {
+    const invoice = await this.invoicesService.findByIdForCustomer(tenantId, customerId, invoiceId);
+    const payments = await this.paymentsService.listForInvoice(tenantId, invoiceId);
+    return { ...invoice, payments };
   }
 }

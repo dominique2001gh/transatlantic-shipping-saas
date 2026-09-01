@@ -146,7 +146,45 @@ export class InvoicesService {
     return this.findById(tenantId, invoiceId);
   }
 
-  /** DRAFT -> SENT, stamping issuedAt. This is the transition that will make an invoice visible to the customer portal in a later stage — a DRAFT invoice is a staff-only working copy. */
+  /**
+   * Stage 3E: GET /portal/invoices — the customer's own issued invoices
+   * only. `status: { not: DRAFT }` is the visibility rule: a DRAFT invoice
+   * is a staff-only working copy and must never reach a customer, even
+   * indirectly. Everything past DRAFT (SENT, PARTIALLY_PAID, PAID,
+   * OVERDUE, VOID) stays visible — a voided invoice still shows, just
+   * with a VOID status, rather than silently disappearing.
+   */
+  async findAllForCustomer(tenantId: string, customerId: string): Promise<InvoiceSummary[]> {
+    const invoices = await this.prisma.invoice.findMany({
+      where: { tenantId, customerId, status: { not: InvoiceStatus.DRAFT } },
+      include: DISPLAY_INCLUDE,
+      orderBy: { createdAt: 'desc' },
+    });
+    return invoices.map((invoice) => this.toSummary(invoice));
+  }
+
+  /**
+   * Stage 3E: GET /portal/invoices/:id. Scoped by tenantId AND customerId
+   * AND "not DRAFT" in one query — a DRAFT invoice, another customer's
+   * invoice, or another tenant's invoice are all indistinguishable from a
+   * nonexistent id, all producing this same 404 (see
+   * customer-portal-invoices.e2e-spec.ts for the byte-identical-404
+   * proof). Returns InvoiceDetail only — CustomerPortalService is
+   * responsible for attaching `payments` (see its own doc comment for why
+   * that composition lives there instead of here).
+   */
+  async findByIdForCustomer(tenantId: string, customerId: string, id: string): Promise<InvoiceDetail> {
+    const invoice = await this.prisma.invoice.findFirst({
+      where: { id, tenantId, customerId, status: { not: InvoiceStatus.DRAFT } },
+      include: { ...DISPLAY_INCLUDE, items: { orderBy: { createdAt: 'asc' } } },
+    });
+    if (!invoice) {
+      throw new NotFoundException('Invoice not found');
+    }
+    return this.toDetail(invoice);
+  }
+
+  /** DRAFT -> SENT, stamping issuedAt. This is the transition that makes an invoice visible to the customer portal (Stage 3E) — a DRAFT invoice is a staff-only working copy. */
   async issue(tenantId: string, id: string): Promise<InvoiceDetail> {
     const invoice = await this.prisma.invoice.findFirst({ where: { id, tenantId } });
     if (!invoice) {

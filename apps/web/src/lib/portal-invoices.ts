@@ -1,0 +1,26 @@
+import type { InvoiceSummary, PortalInvoiceDetail } from '@transatlantic/shared';
+import { apiFetch } from './api';
+import { getStoredToken } from './auth';
+
+function authToken(): string {
+  const token = getStoredToken();
+  if (!token) throw new Error('Not authenticated');
+  return token;
+}
+
+/**
+ * Stage 3E: typed client for the Customer Portal's invoice-viewing API
+ * (/portal/invoices*). Every response here is already scoped server-side
+ * to the caller's own tenant + Customer record, and already excludes
+ * DRAFT invoices (see CustomerPortalService/InvoicesService.
+ * findAllForCustomer/findByIdForCustomer) — this file does no filtering
+ * of its own and must never be treated as a security boundary, exactly
+ * like lib/portal.ts's existing shipment functions.
+ */
+export function getPortalInvoices(): Promise<InvoiceSummary[]> {
+  return apiFetch<InvoiceSummary[]>('/portal/invoices', { token: authToken() });
+}
+
+export function getPortalInvoiceDetail(id: string): Promise<PortalInvoiceDetail> {
+  return apiFetch<PortalInvoiceDetail>(`/portal/invoices/${encodeURIComponent(id)}`, { token: authToken() });
+}

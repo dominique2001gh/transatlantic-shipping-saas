@@ -44,4 +44,19 @@ export class CustomerPortalController {
       id,
     );
   }
+
+  /** Stage 3E: only ever the caller's own issued invoices — see InvoicesService.findAllForCustomer/findByIdForCustomer for the DRAFT-exclusion + ownership rules. */
+  @Get('invoices')
+  invoices(@CurrentUser() user: AuthenticatedUser) {
+    return this.customerPortalService.listInvoices(requireTenantId(user.tenantId), requireCustomerId(user.customerId));
+  }
+
+  @Get('invoices/:id')
+  invoiceDetail(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+    return this.customerPortalService.getInvoice(
+      requireTenantId(user.tenantId),
+      requireCustomerId(user.customerId),
+      id,
+    );
+  }
 }

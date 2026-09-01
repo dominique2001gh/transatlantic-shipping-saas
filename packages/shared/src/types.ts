@@ -627,3 +627,22 @@ export interface PaymentListItem extends PaymentSummary {
   invoiceNumber: string;
   customerName: string;
 }
+
+// ==========================================================================
+// STAGE 3E: CUSTOMER PORTAL INVOICE VIEWING
+// ==========================================================================
+
+/**
+ * GET /portal/invoices/:id — identical to the staff InvoiceDetail (there is
+ * nothing staff-only in an invoice's own fields — no internal notes, no
+ * other customer's data, no staff identity — unlike the Stage 2A/2C
+ * shipment-tracking projection, which does strip staff-only detail) plus
+ * the payments already recorded against it, so the customer can see their
+ * own payment history without a second request. Only ever returned for an
+ * invoice that has actually been issued (never DRAFT) and belongs to the
+ * caller's own tenant + Customer record — see
+ * InvoicesService.findByIdForCustomer.
+ */
+export interface PortalInvoiceDetail extends InvoiceDetail {
+  payments: PaymentSummary[];
+}
