@@ -15,9 +15,15 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     return <LoadingScreen />;
   }
 
+  // UX only, not a security boundary (matches useRequireAuth's own
+  // posture) — hides nav items whose action a role can't actually use, so
+  // e.g. a warehouse-only user never sees "Invoices"/"Payments" only to
+  // hit a 403. The API's @Roles() guard is what actually enforces access.
+  const visibleNavItems = dashboardNavItems.filter((item) => !item.roles || item.roles.includes(user.role));
+
   return (
     <AppShell
-      items={dashboardNavItems}
+      items={visibleNavItems}
       sidebarEyebrow="Staff Console"
       sidebarTitle={tenantName ?? 'Loading…'}
       tenantLabel={tenantName ?? 'Loading organization…'}

@@ -3,8 +3,11 @@ import type {
   ContainerStatus,
   ContainerType,
   DimensionUnit,
+  InvoiceStatus,
   ItemProcessingResult,
   ManifestStatus,
+  PaymentMethod,
+  PaymentStatus,
   ShipmentItemCondition,
   ShipmentItemStatus,
   ShipmentItemType,
@@ -529,4 +532,98 @@ export interface PortalShipmentSummary {
 export interface PortalShipmentDetail extends PublicTrackingResult {
   id: string;
   shipmentMode: ShipmentMode;
+}
+
+// ==========================================================================
+// STAGE 3A: STAFF INVOICE MANAGEMENT
+// ==========================================================================
+
+/**
+ * Every monetary field below is a fixed 2-decimal-place STRING (e.g.
+ * "1234.50"), never a number — see apps/api/src/common/money/money.util.ts.
+ * Prisma's Decimal serializes to JSON as a variable-precision string by
+ * default (toJSON() => toString(), e.g. "1234.5"); the API normalizes
+ * every value to exactly 2 decimals before it reaches this shape. Treat
+ * these as display-ready strings, not numbers to compute with — all
+ * financial arithmetic (subtotal/tax/total/balance) is done server-side
+ * with Prisma.Decimal, never floating-point.
+ */
+export interface InvoiceItemSummary {
+  id: string;
+  description: string;
+  quantity: number;
+  unitPrice: string;
+  amount: string;
+}
+
+export interface InvoiceSummary {
+  id: string;
+  tenantId: string;
+  customerId: string;
+  /** Display-only, joined from Customer — never authoritative for authorization. */
+  customerName: string;
+  /** Nullable at the schema level for future non-shipment invoices (credits/adjustments) — required by the API for every invoice created in Stage 3A. */
+  shipmentId: string | null;
+  /** Display-only, joined from Shipment — null only if shipmentId itself is null. */
+  shipmentTrackingNumber: string | null;
+  invoiceNumber: string;
+  status: InvoiceStatus;
+  subtotal: string;
+  tax: string;
+  total: string;
+  amountPaid: string;
+  /** total - amountPaid, computed server-side so the frontend never re-derives it from two decimal strings. */
+  balanceDue: string;
+  currency: string;
+  dueDate: string | null;
+  issuedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** GET /invoices/:id (staff) — full detail including line items. */
+export interface InvoiceDetail extends InvoiceSummary {
+  items: InvoiceItemSummary[];
+}
+
+// ==========================================================================
+// STAGE 3B: MANUAL PAYMENT RECORDING
+// ==========================================================================
+
+/**
+ * A manually-recorded payment against one invoice (GET/POST
+ * /invoices/:invoiceId/payments). `customerId` and `currency` are always
+ * derived server-side from the parent invoice — never accepted as request
+ * input — so a payment can never be attributed to the wrong customer or
+ * carry a mismatched currency. Payments are append-only in Stage 3B: no
+ * edit/delete endpoint exists. `amount` follows the same fixed
+ * 2-decimal-place string convention as every other money field (see
+ * InvoiceSummary's doc comment / apps/api/src/common/money/money.util.ts).
+ */
+export interface PaymentSummary {
+  id: string;
+  tenantId: string;
+  invoiceId: string;
+  customerId: string;
+  amount: string;
+  currency: string;
+  method: PaymentMethod;
+  status: PaymentStatus;
+  referenceNumber: string | null;
+  notes: string | null;
+  paidAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * Stage 3D: GET /payments (staff, tenant-wide) — the same fields as
+ * PaymentSummary plus a couple of display-only fields so the staff
+ * payments list doesn't need a separate lookup per row to show which
+ * invoice/customer each payment belongs to. Nothing new is exposed beyond
+ * what a staff user could already reach via the invoice itself.
+ */
+export interface PaymentListItem extends PaymentSummary {
+  invoiceNumber: string;
+  customerName: string;
 }

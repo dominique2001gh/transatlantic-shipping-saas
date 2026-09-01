@@ -8,6 +8,7 @@ import { CustomersModule } from './customers/customers.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
 import { HealthModule } from './health/health.module';
+import { InvoicesModule } from './invoices/invoices.module';
 import { ManifestsModule } from './manifests/manifests.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ShipmentsModule } from './shipments/shipments.module';
@@ -31,6 +32,7 @@ import { WarehouseModule } from './warehouse/warehouse.module';
     HealthModule,
     TrackingModule,
     CustomerPortalModule,
+    InvoicesModule,
   ],
   providers: [
     // Every route requires authentication by default; opt out with @Public().

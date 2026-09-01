@@ -57,5 +57,22 @@ export const DASHBOARD_ROLES: UserRole[] = [
 /** Roles allowed to sign in to the platform admin console (/platform). */
 export const PLATFORM_ROLES: UserRole[] = [UserRole.PLATFORM_ADMIN];
 
+/**
+ * Stage 3A/3D: roles that may manage invoices and record payments —
+ * financial/customer-account documents, not warehouse-floor work.
+ * Warehouse-only operational roles (WAREHOUSE_MANAGER, WAREHOUSE_STAFF,
+ * DRIVER, DESTINATION_AGENT) are deliberately excluded, unlike
+ * DASHBOARD_ROLES above. Single source of truth for both the backend
+ * guard (InvoicesController) and the frontend UI (nav visibility) — the
+ * frontend use is a UX convenience only; the backend's own @Roles() check
+ * is what actually enforces this.
+ */
+export const INVOICE_MANAGE_ROLES: UserRole[] = [
+  UserRole.TENANT_OWNER,
+  UserRole.TENANT_ADMIN,
+  UserRole.ACCOUNTANT,
+  UserRole.CUSTOMER_SERVICE,
+];
+
 /** Roles allowed to sign in to the customer portal (/portal). */
 export const PORTAL_ROLES: UserRole[] = [UserRole.CUSTOMER];

@@ -1303,6 +1303,8 @@ model Payment {
   method          PaymentMethod
   status          PaymentStatus @default(PENDING)
   referenceNumber String?
+  /// Stage 3B: optional staff-entered note on a manually-recorded payment (e.g. "confirmed via bank statement"). Never edited after creation — payments are append-only, like TrackingEvent.
+  notes           String?
   paidAt          DateTime?
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
