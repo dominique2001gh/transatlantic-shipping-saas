@@ -252,6 +252,12 @@ export enum PaymentStatus {
   REFUNDED = 'REFUNDED',
 }
 
+/** Stage 3F: MANUAL (staff-recorded, Stage 3B) vs ONLINE (customer self-service via a payment provider, Stage 3F). */
+export enum PaymentSource {
+  MANUAL = 'MANUAL',
+  ONLINE = 'ONLINE',
+}
+
 export enum DocumentType {
   BILL_OF_LADING = 'BILL_OF_LADING',
   INVOICE = 'INVOICE',

@@ -298,6 +298,12 @@ enum PaymentStatus {
   REFUNDED
 }
 
+/// Stage 3F: MANUAL (staff-recorded, Stage 3B) vs ONLINE (customer self-service via a payment provider, Stage 3F) — see Payment.source's own doc comment.
+enum PaymentSource {
+  MANUAL
+  ONLINE
+}
+
 enum DocumentType {
   BILL_OF_LADING
   INVOICE
@@ -1302,6 +1308,12 @@ model Payment {
   currency        String
   method          PaymentMethod
   status          PaymentStatus @default(PENDING)
+  /// Stage 3F: MANUAL (staff-recorded, Stage 3B) or ONLINE (customer self-service via a payment provider). Defaults to MANUAL so every pre-Stage-3F payment row is correctly classified without a backfill. This is the only field that disambiguates the two flows — `method` alone can't, since CARD is a legitimate value for both (a staff member manually logging a card payment taken over the phone vs. Stripe Checkout).
+  source          PaymentSource @default(MANUAL)
+  /// Stage 3F: the payment provider that processed an ONLINE payment, e.g. "STRIPE". Always null for MANUAL payments.
+  provider          String?
+  /// Stage 3F: the provider's own identifier for this payment (Stripe Checkout Session id) — never a secret, just a reconciliation handle. @unique doubles as the idempotency key a webhook lookup uses: at most one Payment row can ever exist per provider session, so a redelivered webhook event finds the same row instead of creating a duplicate.
+  providerReference String?       @unique
   referenceNumber String?
   /// Stage 3B: optional staff-entered note on a manually-recorded payment (e.g. "confirmed via bank statement"). Never edited after creation — payments are append-only, like TrackingEvent.
   notes           String?

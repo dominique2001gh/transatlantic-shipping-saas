@@ -1,4 +1,4 @@
-import type { InvoiceSummary, PortalInvoiceDetail } from '@transatlantic/shared';
+import type { CreateCheckoutSessionResponse, InvoiceSummary, PortalInvoiceDetail } from '@transatlantic/shared';
 import { apiFetch } from './api';
 import { getStoredToken } from './auth';
 
@@ -23,4 +23,18 @@ export function getPortalInvoices(): Promise<InvoiceSummary[]> {
 
 export function getPortalInvoiceDetail(id: string): Promise<PortalInvoiceDetail> {
   return apiFetch<PortalInvoiceDetail>(`/portal/invoices/${encodeURIComponent(id)}`, { token: authToken() });
+}
+
+/**
+ * Stage 3F: starts a Stripe-hosted Checkout for this invoice's current
+ * balance. The only thing the caller should do with the result is
+ * redirect the browser to `url` — no card data, no Stripe.js, ever
+ * touches this app's frontend. Same ownership scoping as every other
+ * portal-invoices function here (server-side, not this file's concern).
+ */
+export function createPortalInvoiceCheckoutSession(id: string): Promise<CreateCheckoutSessionResponse> {
+  return apiFetch<CreateCheckoutSessionResponse>(`/portal/invoices/${encodeURIComponent(id)}/checkout-session`, {
+    method: 'POST',
+    token: authToken(),
+  });
 }

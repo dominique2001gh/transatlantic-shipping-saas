@@ -7,6 +7,7 @@ import type {
   ItemProcessingResult,
   ManifestStatus,
   PaymentMethod,
+  PaymentSource,
   PaymentStatus,
   ShipmentItemCondition,
   ShipmentItemStatus,
@@ -609,6 +610,10 @@ export interface PaymentSummary {
   currency: string;
   method: PaymentMethod;
   status: PaymentStatus;
+  /** Stage 3F: MANUAL (staff-recorded) or ONLINE (customer self-service via a payment provider). */
+  source: PaymentSource;
+  /** Stage 3F: the payment provider that processed an ONLINE payment (e.g. "STRIPE"); always null for MANUAL. Never the provider's session/reference id — that's an internal reconciliation handle, deliberately never serialized to any API response, staff or customer. */
+  provider: string | null;
   referenceNumber: string | null;
   notes: string | null;
   paidAt: string | null;
@@ -645,4 +650,19 @@ export interface PaymentListItem extends PaymentSummary {
  */
 export interface PortalInvoiceDetail extends InvoiceDetail {
   payments: PaymentSummary[];
+}
+
+// ==========================================================================
+// STAGE 3F: CUSTOMER SELF-SERVICE ONLINE PAYMENTS
+// ==========================================================================
+
+/**
+ * POST /portal/invoices/:id/checkout-session — the only field the
+ * frontend needs. `url` is Stripe's own hosted Checkout page; the
+ * frontend does nothing but redirect the browser to it
+ * (`window.location.href = url`) — no card data, no Stripe.js, no
+ * publishable key ever touches this app's frontend.
+ */
+export interface CreateCheckoutSessionResponse {
+  url: string;
 }

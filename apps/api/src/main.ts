@@ -5,7 +5,13 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  // rawBody: true preserves the exact request bytes on req.rawBody
+  // alongside Nest's normal JSON-parsed req.body for every route — needed
+  // by /webhooks/stripe (Stage 3F) to verify Stripe's signature, which is
+  // computed over the exact bytes Stripe sent, not a reserialized JSON
+  // object. Every other route is unaffected; this only adds a buffer
+  // Nest wouldn't otherwise retain.
+  const app = await NestFactory.create(AppModule, { rawBody: true });
   const config = app.get(ConfigService);
 
   app.useGlobalPipes(

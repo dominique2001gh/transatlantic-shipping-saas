@@ -1,4 +1,4 @@
-import { Controller, Get, Param } from '@nestjs/common';
+import { Controller, Get, Param, Post } from '@nestjs/common';
 import type { AuthenticatedUser } from '@transatlantic/shared';
 import { UserRole } from '@transatlantic/shared';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -54,6 +54,21 @@ export class CustomerPortalController {
   @Get('invoices/:id')
   invoiceDetail(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
     return this.customerPortalService.getInvoice(
+      requireTenantId(user.tenantId),
+      requireCustomerId(user.customerId),
+      id,
+    );
+  }
+
+  /**
+   * Stage 3F: starts a Stripe-hosted Checkout for this invoice's current
+   * balance. Ownership/DRAFT-exclusion is enforced by
+   * InvoicesService.findByIdForCustomer exactly as it is for every other
+   * portal invoice route — see CustomerPortalService.createCheckoutSession.
+   */
+  @Post('invoices/:id/checkout-session')
+  checkoutSession(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+    return this.customerPortalService.createCheckoutSession(
       requireTenantId(user.tenantId),
       requireCustomerId(user.customerId),
       id,

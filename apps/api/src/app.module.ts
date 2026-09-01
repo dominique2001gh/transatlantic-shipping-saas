@@ -16,6 +16,7 @@ import { TenantsModule } from './tenants/tenants.module';
 import { TrackingModule } from './tracking/tracking.module';
 import { UsersModule } from './users/users.module';
 import { WarehouseModule } from './warehouse/warehouse.module';
+import { WebhooksModule } from './webhooks/webhooks.module';
 
 @Module({
   imports: [
@@ -33,6 +34,7 @@ import { WarehouseModule } from './warehouse/warehouse.module';
     TrackingModule,
     CustomerPortalModule,
     InvoicesModule,
+    WebhooksModule,
   ],
   providers: [
     // Every route requires authentication by default; opt out with @Public().

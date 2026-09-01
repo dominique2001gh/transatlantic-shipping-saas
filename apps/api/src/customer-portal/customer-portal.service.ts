@@ -1,5 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import type {
+  CreateCheckoutSessionResponse,
   InvoiceSummary,
   PortalCustomerProfile,
   PortalInvoiceDetail,
@@ -32,6 +34,7 @@ export class CustomerPortalService {
     private readonly trackingService: TrackingService,
     private readonly invoicesService: InvoicesService,
     private readonly paymentsService: PaymentsService,
+    private readonly config: ConfigService,
   ) {}
 
   async getProfile(tenantId: string, customerId: string): Promise<PortalCustomerProfile> {
@@ -77,5 +80,34 @@ export class CustomerPortalService {
     const invoice = await this.invoicesService.findByIdForCustomer(tenantId, customerId, invoiceId);
     const payments = await this.paymentsService.listForInvoice(tenantId, invoiceId);
     return { ...invoice, payments };
+  }
+
+  /**
+   * Stage 3F: same ownership gate as getInvoice above —
+   * InvoicesService.findByIdForCustomer is what actually confirms this
+   * invoice belongs to this customer's own tenant + Customer record and
+   * has been issued (not DRAFT); only once that's thrown or succeeded is
+   * it safe to hand `invoice.id` to PaymentsService.createOnlineCheckoutSession,
+   * which re-scopes by tenantId itself (the same defense-in-depth
+   * discipline recordPayment already follows) but does not re-check
+   * customerId — this call ordering is what makes that safe, exactly as
+   * documented on getInvoice.
+   *
+   * success/cancel URLs point back at this exact invoice's detail page —
+   * WEB_APP_URL defaults to the local dev web app so this works out of
+   * the box without extra .env setup; override it for any other
+   * environment.
+   */
+  async createCheckoutSession(
+    tenantId: string,
+    customerId: string,
+    invoiceId: string,
+  ): Promise<CreateCheckoutSessionResponse> {
+    const invoice = await this.invoicesService.findByIdForCustomer(tenantId, customerId, invoiceId);
+    const webAppUrl = this.config.get<string>('WEB_APP_URL', 'http://localhost:3000');
+    return this.paymentsService.createOnlineCheckoutSession(tenantId, invoice.id, {
+      successUrl: `${webAppUrl}/portal/invoices/${invoice.id}?payment=success`,
+      cancelUrl: `${webAppUrl}/portal/invoices/${invoice.id}?payment=cancelled`,
+    });
   }
 }

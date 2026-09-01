@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import type { InvoiceDetail, PaymentSummary } from '@transatlantic/shared';
-import { InvoiceStatus, PaymentMethod } from '@transatlantic/shared';
+import { InvoiceStatus, PAYABLE_INVOICE_STATUSES, PaymentMethod, PaymentSource, PaymentStatus } from '@transatlantic/shared';
 import { StatusBadge } from '@/components/dashboard/StatusBadge';
 import { SelectInput, TextArea, TextInput } from '@/components/forms/FormField';
 import { Button } from '@/components/ui/Button';
@@ -23,8 +23,16 @@ const MANUAL_PAYMENT_METHODS = [
   PaymentMethod.OTHER,
 ];
 
-/** Invoice statuses that can still accept a payment — mirrors PaymentsService's PAYABLE_STATUSES exactly, but this is purely a UI convenience; the backend is the real authority (see recordPayment's own error handling below). */
-const PAYABLE_STATUSES = new Set<InvoiceStatus>([InvoiceStatus.SENT, InvoiceStatus.PARTIALLY_PAID, InvoiceStatus.OVERDUE]);
+/** Invoice statuses that can still accept a payment — built from the shared PAYABLE_INVOICE_STATUSES constant (Stage 3F) so this can never drift from PaymentsService's own PAYABLE_STATUSES; this is still purely a UI convenience, the backend is the real authority (see recordPayment's own error handling below). */
+const PAYABLE_STATUSES = new Set<InvoiceStatus>(PAYABLE_INVOICE_STATUSES);
+
+/** Stage 3F: how a payment's Source column reads for staff — an online payment still mid-checkout is worth flagging explicitly rather than looking identical to a completed one. */
+function paymentSourceLabel(payment: PaymentSummary): string {
+  if (payment.source !== PaymentSource.ONLINE) {
+    return 'Recorded by staff';
+  }
+  return payment.status === PaymentStatus.COMPLETED ? 'Online' : `Online — ${humanizeEnumValue(payment.status)}`;
+}
 
 function Detail({ label, value }: { label: string; value: string }) {
   return (
@@ -173,6 +181,7 @@ export default function InvoiceDetailPage() {
                 <th className="px-4 py-3 font-medium">Date</th>
                 <th className="px-4 py-3 font-medium">Amount</th>
                 <th className="px-4 py-3 font-medium">Method</th>
+                <th className="px-4 py-3 font-medium">Source</th>
                 <th className="px-4 py-3 font-medium">Reference</th>
                 <th className="px-4 py-3 font-medium">Note</th>
               </tr>
@@ -185,13 +194,14 @@ export default function InvoiceDetailPage() {
                     {formatCurrency(payment.amount, payment.currency)}
                   </td>
                   <td className="px-4 py-3 text-slate-500">{humanizeEnumValue(payment.method)}</td>
+                  <td className="px-4 py-3 text-slate-500">{paymentSourceLabel(payment)}</td>
                   <td className="px-4 py-3 text-slate-500">{payment.referenceNumber ?? '—'}</td>
                   <td className="px-4 py-3 text-slate-500">{payment.notes ?? '—'}</td>
                 </tr>
               ))}
               {payments && payments.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-4 py-6 text-center text-sm text-slate-500">
+                  <td colSpan={6} className="px-4 py-6 text-center text-sm text-slate-500">
                     No payments recorded yet.
                   </td>
                 </tr>

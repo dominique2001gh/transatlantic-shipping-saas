@@ -1,4 +1,4 @@
-import { UserRole } from './enums';
+import { InvoiceStatus, UserRole } from './enums';
 
 /**
  * Fallback prefixes used only when a tenant has not configured its own
@@ -76,3 +76,19 @@ export const INVOICE_MANAGE_ROLES: UserRole[] = [
 
 /** Roles allowed to sign in to the customer portal (/portal). */
 export const PORTAL_ROLES: UserRole[] = [UserRole.CUSTOMER];
+
+/**
+ * Stage 3B/3F: invoice statuses that can still legitimately receive a
+ * payment — DRAFT (never issued), PAID, and VOID are all excluded, each
+ * for its own reason (see PaymentsService.recordPayment's own error
+ * messages for the backend's authoritative version of this same rule).
+ * Single source of truth for the backend's manual-payment guard, the
+ * backend's online-checkout guard, and the frontend's "Pay Now"/"Record
+ * Payment" button visibility — the frontend use is a UX convenience only;
+ * the backend's own checks are what actually enforce this.
+ */
+export const PAYABLE_INVOICE_STATUSES: InvoiceStatus[] = [
+  InvoiceStatus.SENT,
+  InvoiceStatus.PARTIALLY_PAID,
+  InvoiceStatus.OVERDUE,
+];

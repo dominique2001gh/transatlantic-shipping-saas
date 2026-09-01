@@ -41,3 +41,19 @@ export function assertWithinMoneyRange(value: Prisma.Decimal, fieldLabel: string
     throw new BadRequestException(`${fieldLabel} is too large`);
   }
 }
+
+/**
+ * Stage 3F: converts a Decimal(12,2) money value to the integer minor-unit
+ * amount Stripe's API requires (e.g. $12.50 -> 1250 cents). Every money
+ * column in this schema is fixed at 2 decimal places, so this is always a
+ * flat *100 conversion — no currency-specific exponent table is needed
+ * (this app doesn't yet support zero-decimal currencies like JPY; adding
+ * one would require extending this, not just passing a different
+ * currency string). Multiplying then calling `.toNumber()` is safe here
+ * specifically because the result is always a whole number — decimal.js
+ * performs the multiplication with exact precision (no float arithmetic
+ * happens until this final, lossless conversion to a JS integer).
+ */
+export function toStripeAmount(value: Prisma.Decimal): number {
+  return value.times(100).toNumber();
+}
