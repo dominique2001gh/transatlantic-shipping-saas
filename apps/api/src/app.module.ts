@@ -5,12 +5,14 @@ import { AuthModule } from './auth/auth.module';
 import { ContainersModule } from './containers/containers.module';
 import { CustomerPortalModule } from './customer-portal/customer-portal.module';
 import { CustomersModule } from './customers/customers.module';
+import { DisruptionsModule } from './disruptions/disruptions.module';
 import { DocumentsModule } from './documents/documents.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
 import { HealthModule } from './health/health.module';
 import { InvoicesModule } from './invoices/invoices.module';
 import { ManifestsModule } from './manifests/manifests.module';
+import { NotificationsModule } from './notifications/notifications.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ShipmentsModule } from './shipments/shipments.module';
 import { TenantsModule } from './tenants/tenants.module';
@@ -37,6 +39,8 @@ import { WebhooksModule } from './webhooks/webhooks.module';
     InvoicesModule,
     WebhooksModule,
     DocumentsModule,
+    NotificationsModule,
+    DisruptionsModule,
   ],
   providers: [
     // Every route requires authentication by default; opt out with @Public().

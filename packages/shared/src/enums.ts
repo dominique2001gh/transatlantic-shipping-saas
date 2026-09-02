@@ -284,6 +284,25 @@ export enum NotificationStatus {
   READ = 'READ',
 }
 
+/** Stage 3H: what kind of business occurrence produced a NotificationEvent. */
+export enum NotificationEventType {
+  SHIPMENT_STATUS_CHANGED = 'SHIPMENT_STATUS_CHANGED',
+  DOCUMENT_VISIBLE = 'DOCUMENT_VISIBLE',
+  INVOICE_ISSUED = 'INVOICE_ISSUED',
+  PAYMENT_RECEIVED = 'PAYMENT_RECEIVED',
+  CONTAINER_DISRUPTED = 'CONTAINER_DISRUPTED',
+  STAFF_ANNOUNCEMENT = 'STAFF_ANNOUNCEMENT',
+}
+
+/** Stage 3H: the kind of operational disruption staff are reporting on a container/manifest. */
+export enum DisruptionType {
+  DELAYED = 'DELAYED',
+  HELD = 'HELD',
+  INSPECTED = 'INSPECTED',
+  IMPOUNDED = 'IMPOUNDED',
+  OTHER = 'OTHER',
+}
+
 export enum AddressType {
   BILLING = 'BILLING',
   SHIPPING = 'SHIPPING',

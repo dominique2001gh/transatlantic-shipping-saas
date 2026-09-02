@@ -3,6 +3,7 @@ import { formatItemCode } from '@transatlantic/shared';
 import type { Prisma } from '@prisma/client';
 import { ShipmentStatus, TrackingEventSource, TrackingEventType } from '@prisma/client';
 import { generateTrackingNumber } from '../common/numbering/numbering.util';
+import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateShipmentDto } from './dto/create-shipment.dto';
 import { CreateTrackingEventDto } from './dto/create-tracking-event.dto';
@@ -29,7 +30,10 @@ const SYSTEM_ONLY_EVENT_TYPES = new Set<TrackingEventType>([
 
 @Injectable()
 export class ShipmentsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notificationsService: NotificationsService,
+  ) {}
 
   async findAll(tenantId: string, filters: { customerId?: string; status?: ShipmentStatus }) {
     const shipments = await this.prisma.shipment.findMany({
@@ -302,6 +306,16 @@ export class ShipmentsService {
 
       return created;
     });
+
+    // Stage 3H: fired after the transaction commits, outside it — a
+    // notification-pipeline failure must never roll back a tracking event
+    // that has otherwise already succeeded. Awaited (not fire-and-forget)
+    // so callers/tests observe a consistent state once this method
+    // resolves; safe to await because NotificationsService's fire*
+    // methods never throw (every one catches its own errors internally).
+    if (dto.status) {
+      await this.notificationsService.fireShipmentStatusChanged(tenantId, shipmentId, dto.status);
+    }
 
     return event;
   }

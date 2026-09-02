@@ -3,10 +3,14 @@ import type {
   ContainerStatus,
   ContainerType,
   DimensionUnit,
+  DisruptionType,
   DocumentType,
   InvoiceStatus,
   ItemProcessingResult,
   ManifestStatus,
+  NotificationChannel,
+  NotificationEventType,
+  NotificationStatus,
   PaymentMethod,
   PaymentSource,
   PaymentStatus,
@@ -724,4 +728,105 @@ export interface PortalDocumentSummary {
   fileSizeBytes: number | null;
   description: string | null;
   createdAt: string;
+}
+
+// ==========================================================================
+// STAGE 3H: NOTIFICATIONS & CUSTOMER MESSAGES
+// ==========================================================================
+
+/**
+ * GET /notifications (staff, tenant-wide delivery/event history) — one row
+ * per (customer, channel) delivery attempt, exactly what got fanned out
+ * from a NotificationEvent. Never used by the portal — see
+ * PortalNotificationSummary for the deliberately-stripped customer shape.
+ */
+export interface NotificationSummary {
+  id: string;
+  tenantId: string;
+  eventId: string | null;
+  eventType: NotificationEventType | null;
+  customerId: string | null;
+  customerName: string | null;
+  channel: NotificationChannel;
+  status: NotificationStatus;
+  title: string;
+  body: string;
+  providerMessageId: string | null;
+  errorMessage: string | null;
+  sentAt: string | null;
+  readAt: string | null;
+  createdAt: string;
+}
+
+/**
+ * GET /portal/notifications (customer) — no tenantId/customerId (redundant,
+ * already scoped), no provider tracking fields (internal delivery
+ * mechanics, not the customer's business), same minimal-projection
+ * principle PortalDocumentSummary/PortalShipmentSummary already follow.
+ * At most one of shipmentId/invoiceId/documentId is set, resolved
+ * server-side from the originating NotificationEvent — the frontend can
+ * use it to link the notification to the relevant page without
+ * re-deriving anything.
+ */
+export interface PortalNotificationSummary {
+  id: string;
+  channel: NotificationChannel;
+  title: string;
+  body: string;
+  readAt: string | null;
+  createdAt: string;
+  shipmentId: string | null;
+  invoiceId: string | null;
+  documentId: string | null;
+}
+
+/**
+ * A staff-reported container/manifest disruption — the anchor for the
+ * bulk customer-notification flow (see AffectedCustomerPreviewItem/
+ * DisruptionPreviewResponse below for the preview staff sees before
+ * confirming). Exactly one of containerId/manifestId is set.
+ */
+export interface OperationalExceptionSummary {
+  id: string;
+  tenantId: string;
+  containerId: string | null;
+  containerNumber: string | null;
+  manifestId: string | null;
+  manifestNumber: string | null;
+  type: DisruptionType;
+  message: string;
+  createdByUserId: string | null;
+  createdByName: string | null;
+  resolvedAt: string | null;
+  createdAt: string;
+  /** How many distinct customers were fanned out to when this was created. */
+  notifiedCustomerCount: number;
+}
+
+/**
+ * One row of the "who will be notified" preview staff see before
+ * confirming a bulk disruption message — computed by resolving
+ * Container/Manifest -> ContainerItem/ManifestItem -> ShipmentItem ->
+ * Shipment -> Customer, deduplicated. The three willNotifyBy* flags
+ * reflect that customer's own channel preferences (Customer.notifyByEmail/
+ * notifyBySms/notifyByWhatsapp) — staff can see up front that, say, a
+ * customer who never opted into SMS won't get one, rather than assuming a
+ * blast reaches everyone the same way.
+ */
+export interface AffectedCustomerPreviewItem {
+  customerId: string;
+  customerName: string;
+  shipmentTrackingNumbers: string[];
+  willNotifyByEmail: boolean;
+  willNotifyBySms: boolean;
+  willNotifyByWhatsapp: boolean;
+}
+
+export interface DisruptionPreviewResponse {
+  affectedCustomers: AffectedCustomerPreviewItem[];
+}
+
+/** GET /portal/notifications/unread-count — wrapped in an object rather than a bare number, the more robust shape for a JSON API response. */
+export interface UnreadNotificationCountResponse {
+  count: number;
 }

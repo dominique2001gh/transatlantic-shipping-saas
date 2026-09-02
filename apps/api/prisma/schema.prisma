@@ -330,6 +330,28 @@ enum NotificationStatus {
   READ
 }
 
+/// Stage 3H: what kind of business occurrence produced a NotificationEvent.
+/// One value per distinct trigger source in this codebase — see
+/// NotificationsService's own doc comment for exactly where each is fired.
+enum NotificationEventType {
+  SHIPMENT_STATUS_CHANGED
+  DOCUMENT_VISIBLE
+  INVOICE_ISSUED
+  PAYMENT_RECEIVED
+  CONTAINER_DISRUPTED
+  STAFF_ANNOUNCEMENT
+}
+
+/// Stage 3H: the kind of operational disruption staff are reporting on a
+/// container/manifest — drives the bulk customer-notification flow.
+enum DisruptionType {
+  DELAYED
+  HELD
+  INSPECTED
+  IMPOUNDED
+  OTHER
+}
+
 enum AddressType {
   BILLING
   SHIPPING
@@ -385,6 +407,8 @@ model Tenant {
   payments              Payment[]
   documents             Document[]
   notifications         Notification[]
+  notificationEvents    NotificationEvent[]
+  operationalExceptions OperationalException[]
 
   @@map("tenants")
 }
@@ -465,6 +489,8 @@ model User {
   manifestItemsAdded            ManifestItem[]         @relation("ManifestItemAddedBy")
   manifestItemsRemoved          ManifestItem[]         @relation("ManifestItemRemovedBy")
   documentsUploaded             Document[]             @relation("DocumentUploader") // Stage 3G
+  operationalExceptionsCreated  OperationalException[] // Stage 3H
+  notificationEventsTriggered   NotificationEvent[]    // Stage 3H
 
   @@unique([tenantId, email])
   @@index([tenantId])
@@ -482,6 +508,20 @@ model Customer {
   email          String
   phone          String?
   userId         String?  @unique
+  /// Stage 3H: per-channel notification opt-in. Email defaults on (matches
+  /// how every business in this domain already communicates); SMS and
+  /// WhatsApp default OFF — both are opt-in by design (WhatsApp Business
+  /// Platform policy requires demonstrable opt-in for business-initiated
+  /// messages outside a customer-started session; SMS carries a real cost
+  /// per message and the same "ask, don't assume" posture applies).
+  notifyByEmail    Boolean @default(true)
+  notifyBySms      Boolean @default(false)
+  notifyByWhatsapp Boolean @default(false)
+  /// E.164-formatted (e.g. "+233201234567") — deliberately separate from
+  /// the general `phone` field above, since a WhatsApp send target must be
+  /// the specific number the customer opted in with, not just "whatever
+  /// phone number happens to be on file."
+  whatsappPhone    String?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
@@ -659,6 +699,7 @@ model Shipment {
   quotes                Quote[]
   invoices              Invoice[]
   documents             Document[]
+  notificationEvents    NotificationEvent[]
 
   @@unique([tenantId, trackingNumber])
   @@index([tenantId])
@@ -982,6 +1023,7 @@ model Container {
   manifest               Manifest?       @relation(fields: [manifestId], references: [id], onDelete: SetNull)
   loadingFinalizedByUser User?           @relation(fields: [loadingFinalizedByUserId], references: [id], onDelete: SetNull)
   items                  ContainerItem[]
+  operationalExceptions  OperationalException[]
 
   @@unique([tenantId, containerNumber])
   @@index([tenantId])
@@ -1114,6 +1156,7 @@ model Manifest {
   containers      Container[]
   /// Items assigned directly to this manifest with no container (air path).
   items           ManifestItem[]
+  operationalExceptions OperationalException[]
 
   @@unique([tenantId, manifestNumber])
   @@index([tenantId])
@@ -1275,6 +1318,7 @@ model Invoice {
   shipment Shipment?     @relation(fields: [shipmentId], references: [id], onDelete: SetNull)
   items    InvoiceItem[]
   payments Payment[]
+  notificationEvents NotificationEvent[]
 
   @@unique([tenantId, invoiceNumber])
   @@index([tenantId])
@@ -1326,6 +1370,7 @@ model Payment {
   tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   invoice  Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
   customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  notificationEvents NotificationEvent[]
 
   @@index([tenantId])
   @@index([invoiceId])
@@ -1368,6 +1413,7 @@ model Document {
   customer       Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
   shipment       Shipment? @relation(fields: [shipmentId], references: [id], onDelete: SetNull)
   uploadedByUser User?     @relation("DocumentUploader", fields: [uploadedByUserId], references: [id], onDelete: SetNull)
+  notificationEvents NotificationEvent[]
 
   @@index([tenantId])
   @@index([shipmentId])
@@ -1375,24 +1421,104 @@ model Document {
   @@map("documents")
 }
 
-model Notification {
-  id         String              @id @default(cuid())
-  tenantId   String
-  userId     String?
-  customerId String?
-  channel    NotificationChannel @default(IN_APP)
-  status     NotificationStatus  @default(PENDING)
-  title      String
-  body       String
-  sentAt     DateTime?
-  readAt     DateTime?
-  createdAt  DateTime            @default(now())
-  updatedAt  DateTime            @updatedAt
+/// Stage 3H: a staff-reported operational disruption on a container or
+/// manifest (delayed/held/inspected/impounded/other) — the anchor record
+/// for the bulk customer-notification flow. `message` is the staff-written,
+/// customer-safe explanation that gets sent verbatim to every affected
+/// customer; exactly one of containerId/manifestId is ever set.
+model OperationalException {
+  id              String         @id @default(cuid())
+  tenantId        String
+  containerId     String?
+  manifestId      String?
+  type            DisruptionType
+  message         String
+  createdByUserId String?
+  resolvedAt      DateTime?
+  createdAt       DateTime       @default(now())
 
+  tenant          Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  container       Container?         @relation(fields: [containerId], references: [id], onDelete: Cascade)
+  manifest        Manifest?          @relation(fields: [manifestId], references: [id], onDelete: Cascade)
+  createdByUser   User?              @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
+  notificationEvents NotificationEvent[]
+
+  @@index([tenantId])
+  @@index([containerId])
+  @@index([manifestId])
+  @@map("operational_exceptions")
+}
+
+/// Stage 3H: one row per distinct business occurrence that was evaluated
+/// for notification-worthiness — the "did this happen yet" record.
+/// `dedupeKey` (unique per tenant) is what stops the same underlying
+/// occurrence (e.g. a status correction re-recording the same status)
+/// from firing customer notifications twice; see NotificationsService.
+/// Exactly one of shipmentId/documentId/invoiceId/paymentId/
+/// operationalExceptionId is set, matching `eventType`. Deliberately NOT
+/// per-recipient — a single event fans out into N Notification rows (one
+/// per affected customer per enabled channel), all linked back here via
+/// Notification.eventId.
+model NotificationEvent {
+  id            String                @id @default(cuid())
+  tenantId      String
+  eventType     NotificationEventType
+  shipmentId    String?
+  documentId    String?
+  invoiceId     String?
+  paymentId     String?
+  operationalExceptionId String?
+  dedupeKey     String?
+  /// Internal/staff-facing summary, e.g. "TAL-2026-000001 reached READY_FOR_PICKUP" — never shown to a customer directly (each Notification row has its own customer-safe title/body).
+  title         String
+  /// Null for system-derived events (status rollups, payment recorded);
+  /// set to the acting staff member for STAFF_ANNOUNCEMENT/CONTAINER_DISRUPTED.
+  triggeredByUserId String?
+  createdAt     DateTime              @default(now())
+
+  tenant                Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  shipment              Shipment?              @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+  document              Document?              @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  invoice               Invoice?               @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  payment               Payment?               @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  operationalException  OperationalException?  @relation(fields: [operationalExceptionId], references: [id], onDelete: Cascade)
+  triggeredByUser       User?                  @relation(fields: [triggeredByUserId], references: [id], onDelete: SetNull)
+  notifications         Notification[]
+
+  @@unique([tenantId, dedupeKey])
+  @@index([tenantId])
+  @@map("notification_events")
+}
+
+model Notification {
+  id                String              @id @default(cuid())
+  tenantId          String
+  eventId           String?
+  userId            String?
+  customerId        String?
+  channel           NotificationChannel @default(IN_APP)
+  status            NotificationStatus  @default(PENDING)
+  title             String
+  body              String
+  /// Stage 3H: the outbound provider's own message id (email provider
+  /// message id, Twilio SID, WhatsApp message id) — set once actually
+  /// dispatched; always null for IN_APP (nothing to dispatch) and for a
+  /// console/no-op provider result.
+  providerMessageId String?
+  /// Stage 3H: populated when status is FAILED — why the send failed.
+  errorMessage      String?
+  sentAt            DateTime?
+  readAt            DateTime?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+
+  event    NotificationEvent? @relation(fields: [eventId], references: [id], onDelete: SetNull)
   tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   user     User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
   customer Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
 
   @@index([tenantId])
+  @@index([customerId])
+  @@index([eventId])
   @@map("notifications")
 }

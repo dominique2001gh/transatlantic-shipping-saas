@@ -109,3 +109,19 @@ export const DOCUMENT_MANAGE_ROLES: UserRole[] = [
   UserRole.CUSTOMER_SERVICE,
   UserRole.DESTINATION_AGENT,
 ];
+
+/**
+ * Stage 3H: roles that may view notification/delivery history and compose
+ * staff-authored bulk container/manifest disruption messages — the same
+ * operational + front-office mix as DOCUMENT_MANAGE_ROLES (this is
+ * customer communication about shipments, not warehouse-floor scanning).
+ * No broader read-only tier exists — VIEW_ROLES equals this list, same
+ * pattern as invoices/documents.
+ */
+export const NOTIFICATION_MANAGE_ROLES: UserRole[] = [
+  UserRole.TENANT_OWNER,
+  UserRole.TENANT_ADMIN,
+  UserRole.WAREHOUSE_MANAGER,
+  UserRole.CUSTOMER_SERVICE,
+  UserRole.DESTINATION_AGENT,
+];

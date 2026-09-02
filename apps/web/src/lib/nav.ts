@@ -1,5 +1,5 @@
 import type { UserRole } from '@transatlantic/shared';
-import { DOCUMENT_MANAGE_ROLES, INVOICE_MANAGE_ROLES } from '@transatlantic/shared';
+import { DOCUMENT_MANAGE_ROLES, INVOICE_MANAGE_ROLES, NOTIFICATION_MANAGE_ROLES } from '@transatlantic/shared';
 
 export interface NavItem {
   label: string;
@@ -24,7 +24,7 @@ export const dashboardNavItems: NavItem[] = [
   { label: 'Documents', href: '/dashboard/documents', roles: DOCUMENT_MANAGE_ROLES },
   { label: 'Tracking', href: '/dashboard/tracking' },
   { label: 'Reports', href: '/dashboard/reports' },
-  { label: 'Messages', href: '/dashboard/messages' },
+  { label: 'Messages', href: '/dashboard/messages', roles: NOTIFICATION_MANAGE_ROLES },
   { label: 'Settings', href: '/dashboard/settings' },
 ];
 
@@ -33,6 +33,7 @@ export const portalNavItems: NavItem[] = [
   { label: 'My Shipments', href: '/portal/shipments' },
   { label: 'Invoices', href: '/portal/invoices' },
   { label: 'Documents', href: '/portal/documents' },
+  { label: 'Notifications', href: '/portal/notifications' },
   { label: 'Profile', href: '/portal/profile' },
 ];
 

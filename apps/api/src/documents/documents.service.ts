@@ -1,6 +1,7 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import type { DocumentSummary, PortalDocumentSummary } from '@transatlantic/shared';
+import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { STORAGE_PROVIDER, type DownloadTarget, type StorageProvider } from '../storage/storage.provider';
 import { CreateDocumentDto } from './dto/create-document.dto';
@@ -45,6 +46,7 @@ export class DocumentsService {
   constructor(
     private readonly prisma: PrismaService,
     @Inject(STORAGE_PROVIDER) private readonly storage: StorageProvider,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   /** Attaches a document to a shipment — customerId is always the shipment's own, derived server-side, never client-supplied, so a document can never end up attributed to a shipment/customer pair that don't actually belong together. */
@@ -122,6 +124,16 @@ export class DocumentsService {
       },
       include: DISPLAY_INCLUDE,
     });
+
+    // Stage 3H: only the false -> true transition is notification-worthy —
+    // going the other way (or PATCHing type/description on an
+    // already-visible document) must never re-notify. See
+    // ShipmentsService.createTrackingEvent's identical comment on why
+    // this is awaited and can't fail the update itself.
+    if (!existing.visibleToCustomer && updated.visibleToCustomer) {
+      await this.notificationsService.fireDocumentVisible(tenantId, id);
+    }
+
     return this.toSummary(updated);
   }
 

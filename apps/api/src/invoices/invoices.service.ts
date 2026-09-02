@@ -3,6 +3,7 @@ import { InvoiceStatus, Prisma } from '@prisma/client';
 import type { InvoiceDetail, InvoiceItemSummary, InvoiceSummary } from '@transatlantic/shared';
 import { assertWithinMoneyRange, formatMoney } from '../common/money/money.util';
 import { generateInvoiceNumber } from '../common/numbering/numbering.util';
+import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateInvoiceDto } from './dto/create-invoice.dto';
 
@@ -31,7 +32,10 @@ type InvoiceWithItems = Prisma.InvoiceGetPayload<{ include: typeof DISPLAY_INCLU
  */
 @Injectable()
 export class InvoicesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notificationsService: NotificationsService,
+  ) {}
 
   async findAll(
     tenantId: string,
@@ -198,6 +202,11 @@ export class InvoicesService {
       where: { id },
       data: { status: InvoiceStatus.SENT, issuedAt: new Date() },
     });
+
+    // Stage 3H: fired after the update commits — see
+    // ShipmentsService.createTrackingEvent's identical comment on why this
+    // is awaited (not fire-and-forget) and can't fail this operation.
+    await this.notificationsService.fireInvoiceIssued(tenantId, id);
 
     return this.findById(tenantId, id);
   }

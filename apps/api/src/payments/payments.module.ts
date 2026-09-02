@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { NotificationsModule } from '../notifications/notifications.module';
 import { StripeModule } from '../stripe/stripe.module';
 import { PaymentsController } from './payments.controller';
 import { PaymentsService } from './payments.service';
@@ -16,7 +17,7 @@ import { PaymentsService } from './payments.service';
  * directly for its own, separate need (verifying webhook signatures).
  */
 @Module({
-  imports: [StripeModule],
+  imports: [StripeModule, NotificationsModule],
   controllers: [PaymentsController],
   providers: [PaymentsService],
   exports: [PaymentsService],

@@ -3,6 +3,7 @@ import { InvoiceStatus, PaymentMethod, PaymentSource, PaymentStatus, Prisma } fr
 import { PAYABLE_INVOICE_STATUSES } from '@transatlantic/shared';
 import type { CreateCheckoutSessionResponse, PaymentListItem, PaymentSummary } from '@transatlantic/shared';
 import { formatMoney, toStripeAmount } from '../common/money/money.util';
+import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { StripeService } from '../stripe/stripe.service';
 import { CreatePaymentDto } from './dto/create-payment.dto';
@@ -47,6 +48,7 @@ export class PaymentsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly stripeService: StripeService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   /**
@@ -157,6 +159,10 @@ export class PaymentsService {
 
       return created;
     });
+
+    // Stage 3H: see ShipmentsService.createTrackingEvent's identical
+    // comment on why this is awaited and can't fail the payment recording.
+    await this.notificationsService.firePaymentReceived(tenantId, payment.id);
 
     return this.toSummary(payment);
   }
@@ -306,6 +312,12 @@ export class PaymentsService {
       });
       return updatedPayment;
     });
+
+    // Stage 3H: only reached on an actual PENDING -> COMPLETED transition
+    // (the early returns above cover the already-completed/unknown/
+    // unexpected-status cases) — see ShipmentsService.createTrackingEvent's
+    // identical comment on awaiting this safely.
+    await this.notificationsService.firePaymentReceived(completed.tenantId, completed.id);
 
     return this.toSummary(completed);
   }

@@ -102,4 +102,36 @@ export class CustomerPortalController {
     );
     sendDownload(res, fileName, mimeType, target);
   }
+
+  /**
+   * Stage 3H: only ever the caller's own IN_APP notifications — see
+   * NotificationsService.findAllForCustomer, which scopes by
+   * tenantId + customerId + channel: IN_APP directly (EMAIL/SMS/WHATSAPP
+   * rows are outbound-delivery bookkeeping, never shown here).
+   */
+  @Get('notifications')
+  notifications(@CurrentUser() user: AuthenticatedUser) {
+    return this.customerPortalService.listNotifications(
+      requireTenantId(user.tenantId),
+      requireCustomerId(user.customerId),
+    );
+  }
+
+  @Get('notifications/unread-count')
+  async unreadNotificationCount(@CurrentUser() user: AuthenticatedUser) {
+    const count = await this.customerPortalService.unreadNotificationCount(
+      requireTenantId(user.tenantId),
+      requireCustomerId(user.customerId),
+    );
+    return { count };
+  }
+
+  @Post('notifications/:id/read')
+  markNotificationRead(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+    return this.customerPortalService.markNotificationRead(
+      requireTenantId(user.tenantId),
+      requireCustomerId(user.customerId),
+      id,
+    );
+  }
 }

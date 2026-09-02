@@ -1,13 +1,14 @@
 import { Module } from '@nestjs/common';
 import { DocumentsModule } from '../documents/documents.module';
 import { InvoicesModule } from '../invoices/invoices.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 import { PaymentsModule } from '../payments/payments.module';
 import { TrackingModule } from '../tracking/tracking.module';
 import { CustomerPortalController } from './customer-portal.controller';
 import { CustomerPortalService } from './customer-portal.service';
 
 @Module({
-  imports: [TrackingModule, InvoicesModule, PaymentsModule, DocumentsModule],
+  imports: [TrackingModule, InvoicesModule, PaymentsModule, DocumentsModule, NotificationsModule],
   controllers: [CustomerPortalController],
   providers: [CustomerPortalService],
 })

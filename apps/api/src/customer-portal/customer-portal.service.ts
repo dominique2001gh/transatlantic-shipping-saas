@@ -6,11 +6,13 @@ import type {
   PortalCustomerProfile,
   PortalDocumentSummary,
   PortalInvoiceDetail,
+  PortalNotificationSummary,
   PortalShipmentDetail,
   PortalShipmentSummary,
 } from '@transatlantic/shared';
 import { DocumentsService } from '../documents/documents.service';
 import { InvoicesService } from '../invoices/invoices.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { PaymentsService } from '../payments/payments.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { TrackingService } from '../tracking/tracking.service';
@@ -37,6 +39,7 @@ export class CustomerPortalService {
     private readonly invoicesService: InvoicesService,
     private readonly paymentsService: PaymentsService,
     private readonly documentsService: DocumentsService,
+    private readonly notificationsService: NotificationsService,
     private readonly config: ConfigService,
   ) {}
 
@@ -126,5 +129,18 @@ export class CustomerPortalService {
   /** DocumentsService.getDownloadTargetForCustomer re-runs the full tenantId+customerId+visibleToCustomer ownership check itself before resolving any file bytes — see its own doc comment. */
   downloadDocument(tenantId: string, customerId: string, id: string) {
     return this.documentsService.getDownloadTargetForCustomer(tenantId, customerId, id);
+  }
+
+  /** Stage 3H: NotificationsService.findAllForCustomer already scopes by tenantId + customerId + channel: IN_APP — nothing to add here. */
+  listNotifications(tenantId: string, customerId: string): Promise<PortalNotificationSummary[]> {
+    return this.notificationsService.findAllForCustomer(tenantId, customerId);
+  }
+
+  unreadNotificationCount(tenantId: string, customerId: string): Promise<number> {
+    return this.notificationsService.unreadCountForCustomer(tenantId, customerId);
+  }
+
+  markNotificationRead(tenantId: string, customerId: string, id: string): Promise<PortalNotificationSummary> {
+    return this.notificationsService.markRead(tenantId, customerId, id);
   }
 }
