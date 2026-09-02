@@ -1,9 +1,11 @@
-import { Controller, Get, Param, Post } from '@nestjs/common';
+import { Controller, Get, Param, Post, Res } from '@nestjs/common';
 import type { AuthenticatedUser } from '@transatlantic/shared';
 import { UserRole } from '@transatlantic/shared';
+import type { Response } from 'express';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { requireCustomerId, requireTenantId } from '../common/tenant/tenant.util';
+import { sendDownload } from '../documents/documents.controller';
 import { CustomerPortalService } from './customer-portal.service';
 
 /**
@@ -73,5 +75,31 @@ export class CustomerPortalController {
       requireCustomerId(user.customerId),
       id,
     );
+  }
+
+  /** Stage 3G: only ever the caller's own customer-visible documents — see DocumentsService.findAllForCustomer/findByIdForCustomer for the visibility + ownership rules. */
+  @Get('documents')
+  documents(@CurrentUser() user: AuthenticatedUser) {
+    return this.customerPortalService.listDocuments(requireTenantId(user.tenantId), requireCustomerId(user.customerId));
+  }
+
+  @Get('documents/:id')
+  documentDetail(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+    return this.customerPortalService.getDocument(
+      requireTenantId(user.tenantId),
+      requireCustomerId(user.customerId),
+      id,
+    );
+  }
+
+  /** Ownership/visibility is enforced by DocumentsService.getDownloadTargetForCustomer before any file bytes are resolved — see its own doc comment for why that ordering is the actual security boundary. */
+  @Get('documents/:id/download')
+  async documentDownload(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Res() res: Response) {
+    const { fileName, mimeType, target } = await this.customerPortalService.downloadDocument(
+      requireTenantId(user.tenantId),
+      requireCustomerId(user.customerId),
+      id,
+    );
+    sendDownload(res, fileName, mimeType, target);
   }
 }

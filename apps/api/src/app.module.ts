@@ -5,6 +5,7 @@ import { AuthModule } from './auth/auth.module';
 import { ContainersModule } from './containers/containers.module';
 import { CustomerPortalModule } from './customer-portal/customer-portal.module';
 import { CustomersModule } from './customers/customers.module';
+import { DocumentsModule } from './documents/documents.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
 import { HealthModule } from './health/health.module';
@@ -35,6 +36,7 @@ import { WebhooksModule } from './webhooks/webhooks.module';
     CustomerPortalModule,
     InvoicesModule,
     WebhooksModule,
+    DocumentsModule,
   ],
   providers: [
     // Every route requires authentication by default; opt out with @Public().

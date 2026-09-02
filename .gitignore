@@ -18,6 +18,11 @@ out/
 # Prisma
 apps/api/prisma/migrations/dev/
 
+# Stage 3G: local document storage (dev-only StorageProvider) — never
+# committed, and never served as static files (see LocalStorageProvider's
+# own doc comment for why).
+apps/api/storage/
+
 # Logs
 *.log
 npm-debug.log*

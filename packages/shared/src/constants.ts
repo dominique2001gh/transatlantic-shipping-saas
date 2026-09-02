@@ -92,3 +92,20 @@ export const PAYABLE_INVOICE_STATUSES: InvoiceStatus[] = [
   InvoiceStatus.PARTIALLY_PAID,
   InvoiceStatus.OVERDUE,
 ];
+
+/**
+ * Stage 3G: roles that may upload/edit documents and control their
+ * customer-visibility. Operational roles that actually produce these
+ * documents (BOLs, customs forms, packing lists) — not the full
+ * DASHBOARD_ROLES list, and deliberately not WAREHOUSE_STAFF/DRIVER,
+ * matching the same "staff status alone must never imply access" stance
+ * INVOICE_MANAGE_ROLES already documents. No broader read-only tier
+ * exists — VIEW_ROLES equals this list, same as invoices.
+ */
+export const DOCUMENT_MANAGE_ROLES: UserRole[] = [
+  UserRole.TENANT_OWNER,
+  UserRole.TENANT_ADMIN,
+  UserRole.WAREHOUSE_MANAGER,
+  UserRole.CUSTOMER_SERVICE,
+  UserRole.DESTINATION_AGENT,
+];

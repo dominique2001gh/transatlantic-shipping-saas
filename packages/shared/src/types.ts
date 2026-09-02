@@ -3,6 +3,7 @@ import type {
   ContainerStatus,
   ContainerType,
   DimensionUnit,
+  DocumentType,
   InvoiceStatus,
   ItemProcessingResult,
   ManifestStatus,
@@ -665,4 +666,62 @@ export interface PortalInvoiceDetail extends InvoiceDetail {
  */
 export interface CreateCheckoutSessionResponse {
   url: string;
+}
+
+// ==========================================================================
+// STAGE 3G: DOCUMENTS
+// ==========================================================================
+
+/**
+ * GET /documents, GET /documents/:id (staff). Never includes the
+ * underlying storage key/URL — see apps/api's Document model doc comment
+ * and DocumentsService.toSummary; downloads only ever happen through
+ * GET /documents/:id/download, which resolves the file after its own
+ * ownership check, not from a URL handed to the client in this shape.
+ */
+export interface DocumentSummary {
+  id: string;
+  tenantId: string;
+  customerId: string | null;
+  /** Display-only, joined from Customer — null only if customerId itself is null. */
+  customerName: string | null;
+  shipmentId: string | null;
+  /** Display-only, joined from Shipment — null only if shipmentId itself is null. */
+  shipmentTrackingNumber: string | null;
+  type: DocumentType;
+  fileName: string;
+  mimeType: string | null;
+  fileSizeBytes: number | null;
+  description: string | null;
+  visibleToCustomer: boolean;
+  uploadedByUserId: string | null;
+  /** Display-only, joined from User — null if uploadedByUserId is null (e.g. the uploading user was later removed). */
+  uploadedByName: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * GET /portal/documents, GET /portal/documents/:id (customer) — a
+ * deliberately stripped-down projection, the same "customer-safe
+ * projection that never carries staff-only detail" principle the Stage
+ * 2A/2C shipment-tracking projection already establishes (see
+ * TrackingService's own doc comment) rather than DocumentSummary reused
+ * as-is: no tenantId/customerId (redundant — this list is already scoped
+ * to the caller), no uploadedByUserId/uploadedByName (internal staff
+ * identity, not the customer's business), no visibleToCustomer (every row
+ * here is, by construction, always true). Every document here is
+ * guaranteed customer-visible server-side — see
+ * DocumentsService.findAllForCustomer/findByIdForCustomer.
+ */
+export interface PortalDocumentSummary {
+  id: string;
+  shipmentId: string | null;
+  shipmentTrackingNumber: string | null;
+  type: DocumentType;
+  fileName: string;
+  mimeType: string | null;
+  fileSizeBytes: number | null;
+  description: string | null;
+  createdAt: string;
 }

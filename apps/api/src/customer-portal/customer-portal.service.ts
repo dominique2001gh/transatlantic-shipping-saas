@@ -4,10 +4,12 @@ import type {
   CreateCheckoutSessionResponse,
   InvoiceSummary,
   PortalCustomerProfile,
+  PortalDocumentSummary,
   PortalInvoiceDetail,
   PortalShipmentDetail,
   PortalShipmentSummary,
 } from '@transatlantic/shared';
+import { DocumentsService } from '../documents/documents.service';
 import { InvoicesService } from '../invoices/invoices.service';
 import { PaymentsService } from '../payments/payments.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -34,6 +36,7 @@ export class CustomerPortalService {
     private readonly trackingService: TrackingService,
     private readonly invoicesService: InvoicesService,
     private readonly paymentsService: PaymentsService,
+    private readonly documentsService: DocumentsService,
     private readonly config: ConfigService,
   ) {}
 
@@ -109,5 +112,19 @@ export class CustomerPortalService {
       successUrl: `${webAppUrl}/portal/invoices/${invoice.id}?payment=success`,
       cancelUrl: `${webAppUrl}/portal/invoices/${invoice.id}?payment=cancelled`,
     });
+  }
+
+  /** Stage 3G: DocumentsService.findAllForCustomer already scopes by tenantId + customerId + visibleToCustomer:true — nothing to add here. */
+  listDocuments(tenantId: string, customerId: string): Promise<PortalDocumentSummary[]> {
+    return this.documentsService.findAllForCustomer(tenantId, customerId);
+  }
+
+  getDocument(tenantId: string, customerId: string, id: string): Promise<PortalDocumentSummary> {
+    return this.documentsService.findByIdForCustomer(tenantId, customerId, id);
+  }
+
+  /** DocumentsService.getDownloadTargetForCustomer re-runs the full tenantId+customerId+visibleToCustomer ownership check itself before resolving any file bytes — see its own doc comment. */
+  downloadDocument(tenantId: string, customerId: string, id: string) {
+    return this.documentsService.getDownloadTargetForCustomer(tenantId, customerId, id);
   }
 }

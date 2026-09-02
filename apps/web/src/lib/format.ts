@@ -71,3 +71,17 @@ export function formatCurrency(amount: string, currency: string): string {
     return `${currency} ${amount}`;
   }
 }
+
+/** Stage 3G: bytes -> "1.2 MB"-style display for document file sizes. */
+export function formatFileSize(bytes: number | null): string {
+  if (bytes === null || Number.isNaN(bytes)) return '—';
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ['KB', 'MB', 'GB'];
+  let value = bytes / 1024;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+  return `${value.toFixed(1)} ${units[unitIndex]}`;
+}

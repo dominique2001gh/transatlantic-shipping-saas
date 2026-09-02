@@ -1,5 +1,5 @@
 import type { UserRole } from '@transatlantic/shared';
-import { INVOICE_MANAGE_ROLES } from '@transatlantic/shared';
+import { DOCUMENT_MANAGE_ROLES, INVOICE_MANAGE_ROLES } from '@transatlantic/shared';
 
 export interface NavItem {
   label: string;
@@ -21,6 +21,7 @@ export const dashboardNavItems: NavItem[] = [
   { label: 'Manifests', href: '/dashboard/manifests' },
   { label: 'Invoices', href: '/dashboard/invoices', roles: INVOICE_MANAGE_ROLES },
   { label: 'Payments', href: '/dashboard/payments', roles: INVOICE_MANAGE_ROLES },
+  { label: 'Documents', href: '/dashboard/documents', roles: DOCUMENT_MANAGE_ROLES },
   { label: 'Tracking', href: '/dashboard/tracking' },
   { label: 'Reports', href: '/dashboard/reports' },
   { label: 'Messages', href: '/dashboard/messages' },
