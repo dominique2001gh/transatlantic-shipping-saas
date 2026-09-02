@@ -830,3 +830,61 @@ export interface DisruptionPreviewResponse {
 export interface UnreadNotificationCountResponse {
   count: number;
 }
+
+// ==========================================================================
+// STAGE 3I: CUSTOMER PROFILE, NOTIFICATION PREFERENCES, PASSWORD CHANGE
+// ==========================================================================
+
+/**
+ * PATCH /portal/me — all fields optional (partial update). Deliberately
+ * excludes `email` and `customerNumber`: email is kept read-only in this
+ * stage (a real email-change flow needs its own verification/
+ * re-authentication design, deferred rather than shipped unsafely), and
+ * customerNumber is system/staff-assigned, never customer-editable.
+ */
+export interface UpdatePortalProfileRequest {
+  firstName?: string;
+  lastName?: string;
+  phone?: string;
+}
+
+/**
+ * GET/PATCH /portal/me/notification-preferences. Mirrors the four
+ * Stage 3H opt-in columns on Customer exactly — `notifyByEmail` /
+ * `notifyBySms` / `notifyByWhatsapp` / `whatsappPhone` — which
+ * NotificationsService.notifyCustomer already reads on every send, so a
+ * preference update here takes effect on the very next notification fired,
+ * with no cache or backfill involved. Deliberately no `notifyInApp` field:
+ * IN_APP has no opt-out anywhere in the system (see notifyCustomer's own
+ * doc comment) — critical operational in-app notification history is never
+ * something a preference toggle can hide. Deliberately no "preferred
+ * channel" field either: dispatch fires every enabled channel in parallel,
+ * not a single preferred one, so a field nothing reads would be decorative.
+ */
+export interface PortalNotificationPreferences {
+  notifyByEmail: boolean;
+  notifyBySms: boolean;
+  notifyByWhatsapp: boolean;
+  /** E.164-formatted (e.g. "+233201234567"). Null unless the customer has set one. */
+  whatsappPhone: string | null;
+}
+
+/** All fields optional (partial update) — same shape as PortalNotificationPreferences minus the "always present" guarantee. */
+export interface UpdatePortalNotificationPreferencesRequest {
+  notifyByEmail?: boolean;
+  notifyBySms?: boolean;
+  notifyByWhatsapp?: boolean;
+  whatsappPhone?: string | null;
+}
+
+/**
+ * PATCH /users/me/password — role-agnostic (any authenticated User, not
+ * just CUSTOMER), since password belongs to the login-capable User
+ * account, not to Customer. currentPassword is required and
+ * bcrypt-verified server-side before newPassword is accepted; the
+ * response never echoes back either value.
+ */
+export interface ChangePasswordRequest {
+  currentPassword: string;
+  newPassword: string;
+}

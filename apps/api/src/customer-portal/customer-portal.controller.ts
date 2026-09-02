@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Post, Res } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Res } from '@nestjs/common';
 import type { AuthenticatedUser } from '@transatlantic/shared';
 import { UserRole } from '@transatlantic/shared';
 import type { Response } from 'express';
@@ -7,6 +7,8 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { requireCustomerId, requireTenantId } from '../common/tenant/tenant.util';
 import { sendDownload } from '../documents/documents.controller';
 import { CustomerPortalService } from './customer-portal.service';
+import { UpdateNotificationPreferencesDto } from './dto/update-notification-preferences.dto';
+import { UpdatePortalProfileDto } from './dto/update-portal-profile.dto';
 
 /**
  * Stage 2C: the authenticated customer-portal surface. `@Roles(CUSTOMER)`
@@ -28,6 +30,35 @@ export class CustomerPortalController {
   @Get('me')
   me(@CurrentUser() user: AuthenticatedUser) {
     return this.customerPortalService.getProfile(requireTenantId(user.tenantId), requireCustomerId(user.customerId));
+  }
+
+  /** Stage 3I: partial update of the caller's own profile — see UpdatePortalProfileDto for exactly which fields are writable and why. */
+  @Patch('me')
+  updateProfile(@CurrentUser() user: AuthenticatedUser, @Body() dto: UpdatePortalProfileDto) {
+    return this.customerPortalService.updateProfile(
+      requireTenantId(user.tenantId),
+      requireCustomerId(user.customerId),
+      dto,
+    );
+  }
+
+  /** Stage 3I: the caller's own notification channel preferences — see CustomerPortalService.getNotificationPreferences. */
+  @Get('me/notification-preferences')
+  notificationPreferences(@CurrentUser() user: AuthenticatedUser) {
+    return this.customerPortalService.getNotificationPreferences(
+      requireTenantId(user.tenantId),
+      requireCustomerId(user.customerId),
+    );
+  }
+
+  /** Stage 3I: partial update — see CustomerPortalService.updateNotificationPreferences for the merged-state validation and Stage 3H integration notes. */
+  @Patch('me/notification-preferences')
+  updateNotificationPreferences(@CurrentUser() user: AuthenticatedUser, @Body() dto: UpdateNotificationPreferencesDto) {
+    return this.customerPortalService.updateNotificationPreferences(
+      requireTenantId(user.tenantId),
+      requireCustomerId(user.customerId),
+      dto,
+    );
   }
 
   @Get('shipments')

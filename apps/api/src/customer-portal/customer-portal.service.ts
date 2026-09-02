@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type {
   CreateCheckoutSessionResponse,
@@ -6,6 +6,7 @@ import type {
   PortalCustomerProfile,
   PortalDocumentSummary,
   PortalInvoiceDetail,
+  PortalNotificationPreferences,
   PortalNotificationSummary,
   PortalShipmentDetail,
   PortalShipmentSummary,
@@ -16,6 +17,8 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { PaymentsService } from '../payments/payments.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { TrackingService } from '../tracking/tracking.service';
+import { UpdateNotificationPreferencesDto } from './dto/update-notification-preferences.dto';
+import { UpdatePortalProfileDto } from './dto/update-portal-profile.dto';
 
 /**
  * Stage 2C: service layer behind CustomerPortalController. Every method
@@ -55,6 +58,86 @@ export class CustomerPortalService {
       throw new NotFoundException('Customer profile not found');
     }
     return customer;
+  }
+
+  /**
+   * Stage 3I: partial update of the caller's own profile.
+   * `customerId`/`tenantId` are the controller's JWT-sourced values, not a
+   * route param — there is no `:id` on this endpoint, so there is no ID
+   * to tamper with. `findFirst` first (rather than updating blind) so a
+   * theoretically-orphaned/cross-tenant state fails closed with the same
+   * 404 every other ownership check in this module uses, instead of
+   * `update` throwing a raw Prisma "record not found" error. Only
+   * firstName/lastName/phone are ever writable here — see
+   * UpdatePortalProfileDto for why email/customerNumber are excluded.
+   */
+  async updateProfile(tenantId: string, customerId: string, dto: UpdatePortalProfileDto): Promise<PortalCustomerProfile> {
+    const existing = await this.prisma.customer.findFirst({ where: { id: customerId, tenantId }, select: { id: true } });
+    if (!existing) {
+      throw new NotFoundException('Customer profile not found');
+    }
+    return this.prisma.customer.update({
+      where: { id: customerId },
+      data: dto,
+      select: { customerNumber: true, firstName: true, lastName: true, email: true, phone: true },
+    });
+  }
+
+  /** Stage 3I: read-side of the notification preferences below — same shape, same tenantId+customerId scoping. */
+  async getNotificationPreferences(tenantId: string, customerId: string): Promise<PortalNotificationPreferences> {
+    const customer = await this.prisma.customer.findFirst({
+      where: { id: customerId, tenantId },
+      select: { notifyByEmail: true, notifyBySms: true, notifyByWhatsapp: true, whatsappPhone: true },
+    });
+    if (!customer) {
+      throw new NotFoundException('Customer profile not found');
+    }
+    return customer;
+  }
+
+  /**
+   * Stage 3I: partial update of the four Stage 3H opt-in columns on
+   * Customer that NotificationsService.notifyCustomer already reads on
+   * every send — no new schema, no change to dispatch logic, no
+   * retroactive effect on any Notification/NotificationEvent row already
+   * written (those are historical records of what was sent under the
+   * preferences in force at the time, and are never touched here).
+   * IN_APP is deliberately not settable — it has no opt-out anywhere in
+   * this system, so critical operational in-app notification history is
+   * never something this endpoint can suppress.
+   *
+   * Validates the *resulting merged* state, not the DTO in isolation:
+   * enabling notifyByWhatsapp in a request that doesn't also set
+   * whatsappPhone must still succeed if a number is already on file from
+   * an earlier update (or fail if neither ever will be), so the "WhatsApp
+   * needs a number" invariant has to be checked against what the row will
+   * actually look like after this write, not against the request body
+   * alone.
+   */
+  async updateNotificationPreferences(
+    tenantId: string,
+    customerId: string,
+    dto: UpdateNotificationPreferencesDto,
+  ): Promise<PortalNotificationPreferences> {
+    const existing = await this.prisma.customer.findFirst({
+      where: { id: customerId, tenantId },
+      select: { notifyByEmail: true, notifyBySms: true, notifyByWhatsapp: true, whatsappPhone: true },
+    });
+    if (!existing) {
+      throw new NotFoundException('Customer profile not found');
+    }
+
+    const resultingWhatsappEnabled = dto.notifyByWhatsapp ?? existing.notifyByWhatsapp;
+    const resultingWhatsappPhone = dto.whatsappPhone !== undefined ? dto.whatsappPhone : existing.whatsappPhone;
+    if (resultingWhatsappEnabled && !resultingWhatsappPhone) {
+      throw new BadRequestException('A WhatsApp number is required to enable WhatsApp notifications.');
+    }
+
+    return this.prisma.customer.update({
+      where: { id: customerId },
+      data: dto,
+      select: { notifyByEmail: true, notifyBySms: true, notifyByWhatsapp: true, whatsappPhone: true },
+    });
   }
 
   listShipments(tenantId: string, customerId: string): Promise<PortalShipmentSummary[]> {
