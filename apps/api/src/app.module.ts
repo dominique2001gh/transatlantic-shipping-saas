@@ -12,6 +12,7 @@ import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
 import { HealthModule } from './health/health.module';
 import { InvoicesModule } from './invoices/invoices.module';
+import { LeadsModule } from './leads/leads.module';
 import { ManifestsModule } from './manifests/manifests.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { PrismaModule } from './prisma/prisma.module';
@@ -43,6 +44,7 @@ import { WebhooksModule } from './webhooks/webhooks.module';
     NotificationsModule,
     DisruptionsModule,
     AnalyticsModule,
+    LeadsModule,
   ],
   providers: [
     // Every route requires authentication by default; opt out with @Public().

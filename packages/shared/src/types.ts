@@ -21,6 +21,8 @@ import type {
   ShipmentStatus,
   TrackingEventSource,
   TrackingEventType,
+  WebsiteLeadStatus,
+  WebsiteLeadType,
   WeightUnit,
 } from './enums';
 import { UserRole } from './enums';
@@ -887,6 +889,65 @@ export interface UpdatePortalNotificationPreferencesRequest {
 export interface ChangePasswordRequest {
   currentPassword: string;
   newPassword: string;
+}
+
+// ==========================================================================
+// WEBSITE LAUNCH: PUBLIC LEAD CAPTURE
+// ==========================================================================
+
+/** QUOTE_REQUEST-only structured shipment details — see WebsiteLead's own doc comment for why this is a flexible bag rather than dedicated columns. Every field optional: a visitor may leave any of these blank. */
+export interface WebsiteLeadQuoteDetails {
+  originCountry?: string;
+  originCity?: string;
+  destinationCountry?: string;
+  destinationCity?: string;
+  shipmentMode?: ShipmentMode;
+  itemType?: ShipmentItemType;
+  approximateWeight?: string;
+  length?: string;
+  width?: string;
+  height?: string;
+}
+
+/**
+ * POST /public/leads — submitted by the marketing site's Contact or
+ * Request-a-Quote form. `tenantSlug` identifies which tenant's site this
+ * came from (same pattern GET /tracking/public already uses — there is
+ * no authenticated session to derive it from). `quoteDetails` is only
+ * meaningful when `type` is QUOTE_REQUEST; always omitted/ignored for
+ * CONTACT.
+ */
+export interface CreateWebsiteLeadRequest {
+  tenantSlug: string;
+  type: WebsiteLeadType;
+  firstName: string;
+  lastName?: string;
+  email: string;
+  phone?: string;
+  subject?: string;
+  message?: string;
+  quoteDetails?: WebsiteLeadQuoteDetails;
+}
+
+/** GET /leads (staff), PATCH /leads/:id/status response. */
+export interface WebsiteLeadSummary {
+  id: string;
+  type: WebsiteLeadType;
+  status: WebsiteLeadStatus;
+  firstName: string;
+  lastName: string | null;
+  email: string;
+  phone: string | null;
+  subject: string | null;
+  message: string | null;
+  quoteDetails: WebsiteLeadQuoteDetails | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** PATCH /leads/:id/status (staff). */
+export interface UpdateWebsiteLeadStatusRequest {
+  status: WebsiteLeadStatus;
 }
 
 // ==========================================================================

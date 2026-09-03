@@ -360,6 +360,26 @@ enum AddressType {
   OTHER
 }
 
+/// Website Launch: which public marketing-site form a WebsiteLead came
+/// from — the two forms collect different fields (see WebsiteLead's own
+/// doc comment), so every consumer needs to know which shape to expect.
+enum WebsiteLeadType {
+  QUOTE_REQUEST
+  CONTACT
+}
+
+/// Website Launch: simple staff-managed triage state for a WebsiteLead.
+/// Deliberately just enough to track "has anyone looked at this yet" —
+/// converting a lead into a real Customer/Quote/Invoice is always a
+/// manual staff action through the existing Customers/Quotes flows, never
+/// automatic, so there is no CONVERTED value here to keep in sync with
+/// anything.
+enum WebsiteLeadStatus {
+  NEW
+  CONTACTED
+  CLOSED
+}
+
 // ==========================================================================
 // PLATFORM / TENANT
 // ==========================================================================
@@ -409,6 +429,7 @@ model Tenant {
   notifications         Notification[]
   notificationEvents    NotificationEvent[]
   operationalExceptions OperationalException[]
+  websiteLeads          WebsiteLead[]
 
   @@map("tenants")
 }
@@ -1540,4 +1561,52 @@ model Notification {
   @@index([customerId])
   @@index([eventId])
   @@map("notifications")
+}
+
+// ==========================================================================
+// WEBSITE LAUNCH: PUBLIC LEAD CAPTURE
+// ==========================================================================
+
+/// Website Launch: a public, unauthenticated lead captured from the
+/// marketing site's Contact or Request-a-Quote forms — deliberately NOT
+/// the same thing as Quote (which requires an existing Customer record).
+/// A visitor filling out either form isn't a customer yet; staff review
+/// leads here and manually create a real Customer/Quote through the
+/// existing flows if/when one converts — this table never auto-creates
+/// either, and carries no FK to them.
+model WebsiteLead {
+  id       String            @id @default(cuid())
+  tenantId String
+  type     WebsiteLeadType
+  status   WebsiteLeadStatus @default(NEW)
+
+  firstName String
+  lastName  String?
+  email     String
+  phone     String?
+
+  /// CONTACT only — the subject line from the contact form. Always null for QUOTE_REQUEST.
+  subject String?
+  /// CONTACT: the free-text message. QUOTE_REQUEST: the shipment description/additional notes, if the visitor provided any.
+  message String?
+
+  /// QUOTE_REQUEST-only structured shipment details (origin/destination,
+  /// mode, item type, dimensions, weight) — kept as a flexible JSON bag
+  /// rather than ~10 dedicated nullable columns, the same "event-specific
+  /// structured data without a new column per event type" pattern
+  /// TrackingEvent.metadata already establishes in this schema. Always
+  /// null for CONTACT leads. Never validated/parsed back into a
+  /// structured Shipment — purely a staff-readable record of what the
+  /// visitor typed.
+  quoteDetails Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([tenantId, status])
+  @@index([tenantId, createdAt])
+  @@map("website_leads")
 }

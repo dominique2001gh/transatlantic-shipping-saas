@@ -148,3 +148,19 @@ export const ANALYTICS_ROLES: UserRole[] = [
   UserRole.TENANT_ADMIN,
   UserRole.WAREHOUSE_MANAGER,
 ];
+
+/**
+ * Website Launch: roles that may view and triage public website leads
+ * (Contact/Request-a-Quote form submissions) — the same front-office +
+ * operational mix as NOTIFICATION_MANAGE_ROLES, since handling an
+ * inbound lead is exactly that kind of work, not warehouse-floor
+ * scanning. No broader read-only tier exists — VIEW_ROLES equals this
+ * list, same pattern as invoices/documents/notifications.
+ */
+export const LEAD_MANAGE_ROLES: UserRole[] = [
+  UserRole.TENANT_OWNER,
+  UserRole.TENANT_ADMIN,
+  UserRole.WAREHOUSE_MANAGER,
+  UserRole.CUSTOMER_SERVICE,
+  UserRole.DESTINATION_AGENT,
+];

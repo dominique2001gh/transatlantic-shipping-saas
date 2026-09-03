@@ -310,3 +310,16 @@ export enum AddressType {
   ORIGIN = 'ORIGIN',
   OTHER = 'OTHER',
 }
+
+/** Website Launch: which public marketing-site form a WebsiteLead came from. */
+export enum WebsiteLeadType {
+  QUOTE_REQUEST = 'QUOTE_REQUEST',
+  CONTACT = 'CONTACT',
+}
+
+/** Website Launch: simple staff-managed triage state for a WebsiteLead. */
+export enum WebsiteLeadStatus {
+  NEW = 'NEW',
+  CONTACTED = 'CONTACTED',
+  CLOSED = 'CLOSED',
+}
