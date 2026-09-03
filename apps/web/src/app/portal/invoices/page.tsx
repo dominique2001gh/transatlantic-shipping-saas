@@ -73,11 +73,11 @@ export default function PortalInvoicesPage() {
               <thead className="border-b border-slate-200 bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
                 <tr>
                   <th className="px-4 py-3 font-medium">Invoice #</th>
-                  <th className="px-4 py-3 font-medium">Shipment</th>
-                  <th className="px-4 py-3 font-medium">Invoice Date</th>
-                  <th className="px-4 py-3 font-medium">Due Date</th>
-                  <th className="px-4 py-3 font-medium">Total</th>
-                  <th className="px-4 py-3 font-medium">Paid</th>
+                  <th className="hidden px-4 py-3 font-medium sm:table-cell">Shipment</th>
+                  <th className="hidden px-4 py-3 font-medium md:table-cell">Invoice Date</th>
+                  <th className="hidden px-4 py-3 font-medium md:table-cell">Due Date</th>
+                  <th className="hidden px-4 py-3 font-medium sm:table-cell">Total</th>
+                  <th className="hidden px-4 py-3 font-medium md:table-cell">Paid</th>
                   <th className="px-4 py-3 font-medium">Balance</th>
                   <th className="px-4 py-3 font-medium">Status</th>
                 </tr>
@@ -90,15 +90,17 @@ export default function PortalInvoicesPage() {
                         {invoice.invoiceNumber}
                       </Link>
                     </td>
-                    <td className="px-4 py-3 font-mono text-xs text-slate-500">
+                    <td className="hidden px-4 py-3 font-mono text-xs text-slate-500 sm:table-cell">
                       {invoice.shipmentTrackingNumber ?? '—'}
                     </td>
-                    <td className="px-4 py-3 text-slate-500">{formatDate(invoice.createdAt)}</td>
-                    <td className="px-4 py-3 text-slate-500">
+                    <td className="hidden px-4 py-3 text-slate-500 md:table-cell">{formatDate(invoice.createdAt)}</td>
+                    <td className="hidden px-4 py-3 text-slate-500 md:table-cell">
                       {invoice.dueDate ? formatDate(invoice.dueDate) : '—'}
                     </td>
-                    <td className="px-4 py-3 text-slate-900">{formatCurrency(invoice.total, invoice.currency)}</td>
-                    <td className="px-4 py-3 text-slate-500">
+                    <td className="hidden px-4 py-3 text-slate-900 sm:table-cell">
+                      {formatCurrency(invoice.total, invoice.currency)}
+                    </td>
+                    <td className="hidden px-4 py-3 text-slate-500 md:table-cell">
                       {formatCurrency(invoice.amountPaid, invoice.currency)}
                     </td>
                     <td className="px-4 py-3 font-medium text-slate-900">

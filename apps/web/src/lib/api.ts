@@ -54,7 +54,7 @@ export async function apiFetch<T>(
     // authenticated but not permitted) is intentionally never handled
     // here: it stays a normal, visible authorization error.
     if (response.status === 401 && token) {
-      logout();
+      logout('expired');
     }
 
     throw new ApiError(message, response.status);

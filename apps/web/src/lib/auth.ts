@@ -56,14 +56,26 @@ let loggingOut = false;
  * Guarded against redirect loops: a no-op once already on /login, and
  * idempotent if called more than once (e.g. several in-flight requests
  * all 401 together).
+ *
+ * Stage 3J: `reason: 'expired'` is passed only by apiFetch's own 401
+ * handler (a token-bearing request was rejected by JwtAuthGuard — see
+ * that call site's own comment for exactly what that does and doesn't
+ * cover) so the login page can show a specific, honest "your session
+ * expired" message instead of a silent bounce. A user-initiated "Log
+ * out" click (AppTopbar) passes no reason and the login page shows
+ * nothing extra — clicking logout is not a surprise, an expired-session
+ * redirect is. The reason is only ever this one generic label, never
+ * anything about *why* the token was rejected (expired vs. malformed vs.
+ * deactivated account/tenant) — that distinction is not the customer's
+ * business and isn't leaked here either.
  */
-export function logout(): void {
+export function logout(reason?: 'expired'): void {
   if (loggingOut) return;
   if (typeof window === 'undefined') return;
   if (window.location.pathname === '/login') return;
   loggingOut = true;
   clearSession();
-  window.location.href = '/login';
+  window.location.href = reason ? `/login?reason=${reason}` : '/login';
 }
 
 /** Where to send a user immediately after login, based on their role. */

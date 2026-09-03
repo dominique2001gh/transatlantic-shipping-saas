@@ -1,40 +1,82 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import type { PortalCustomerProfile, PortalShipmentSummary } from '@transatlantic/shared';
-import { IconArrowRight, IconBox, IconCheckCircle, IconMapPin, IconShip } from '@/components/icons';
+import type { InvoiceSummary, PortalCustomerProfile, PortalNotificationSummary, PortalShipmentSummary } from '@transatlantic/shared';
+import { PAYABLE_INVOICE_STATUSES } from '@transatlantic/shared';
+import Link from 'next/link';
+import {
+  IconArrowRight,
+  IconBox,
+  IconCheckCircle,
+  IconClock,
+  IconHeadset,
+  IconMapPin,
+  IconShip,
+} from '@/components/icons';
 import { PortalShipmentRow } from '@/components/portal/PortalShipmentRow';
 import { Card } from '@/components/ui/Card';
 import { LinkButton } from '@/components/ui/Button';
+import { formatCurrency, formatDateTime } from '@/lib/format';
+import { getPortalInvoices } from '@/lib/portal-invoices';
+import { getPortalNotifications } from '@/lib/portal-notifications';
 import { getPortalProfile, listPortalShipments } from '@/lib/portal';
 import { bucketForShipment, isActiveShipment } from '@/lib/portal-shipment-status';
 
 const RECENT_SHIPMENT_COUNT = 3;
+const RECENT_NOTIFICATION_COUNT = 3;
 
 /**
- * Customer dashboard. Deliberately an *overview*, not a second copy of the
- * shipment list: summary tiles + a short recent-shipments slice, with a
- * clear link out to the full list at /portal/shipments. Every number here
- * is derived client-side from GET /portal/shipments — already scoped
- * server-side to this customer's own shipments (see
- * CustomerPortalService) — this page does no filtering that matters for
- * security, only for what's shown where.
+ * Sums balanceDue (a fixed 2-decimal string, see money.util.ts) per
+ * currency across every invoice that's actually payable — never blindly
+ * summed across invoices regardless of currency, since two invoices on
+ * the same account could in principle be issued in different currencies.
+ * Returns one formatted string per currency present, e.g.
+ * ["$1,234.50", "GH₵500.00"], so the dashboard tile is always honest even
+ * in that edge case, rather than silently mixing currencies into one
+ * meaningless number.
+ */
+function outstandingBalanceByCurrency(invoices: InvoiceSummary[]): { currency: string; formatted: string }[] {
+  const totals = new Map<string, number>();
+  for (const invoice of invoices) {
+    if (!PAYABLE_INVOICE_STATUSES.includes(invoice.status)) continue;
+    const amount = Number.parseFloat(invoice.balanceDue);
+    if (!Number.isFinite(amount) || amount <= 0) continue;
+    totals.set(invoice.currency, (totals.get(invoice.currency) ?? 0) + amount);
+  }
+  return Array.from(totals.entries()).map(([currency, total]) => ({
+    currency,
+    formatted: formatCurrency(total.toFixed(2), currency),
+  }));
+}
+
+/**
+ * Customer dashboard. Deliberately an *overview*, not a second copy of any
+ * list page — summary tiles + short recent slices, with clear links out to
+ * the full lists. Every number here is derived client-side from
+ * GET /portal/shipments, GET /portal/invoices, and GET /portal/notifications
+ * — all three already scoped server-side to this customer's own account
+ * (see CustomerPortalService) — this page does no filtering that matters
+ * for security, only for what's shown where.
  */
 export default function PortalOverviewPage() {
   const [profile, setProfile] = useState<PortalCustomerProfile | null>(null);
   const [shipments, setShipments] = useState<PortalShipmentSummary[] | null>(null);
+  const [invoices, setInvoices] = useState<InvoiceSummary[] | null>(null);
+  const [notifications, setNotifications] = useState<PortalNotificationSummary[] | null>(null);
   const [error, setError] = useState(false);
 
   useEffect(() => {
-    Promise.all([getPortalProfile(), listPortalShipments()])
-      .then(([profileResult, shipmentsResult]) => {
+    Promise.all([getPortalProfile(), listPortalShipments(), getPortalInvoices(), getPortalNotifications()])
+      .then(([profileResult, shipmentsResult, invoicesResult, notificationsResult]) => {
         setProfile(profileResult);
         setShipments(shipmentsResult);
+        setInvoices(invoicesResult);
+        setNotifications(notificationsResult);
       })
       .catch(() => setError(true));
   }, []);
 
-  const loading = !error && (!profile || !shipments);
+  const loading = !error && (!profile || !shipments || !invoices || !notifications);
 
   if (error) {
     return (
@@ -63,16 +105,49 @@ export default function PortalOverviewPage() {
   }
 
   const allShipments = shipments!;
+  const allInvoices = invoices!;
+  const allNotifications = notifications!;
+
   const activeCount = allShipments.filter(isActiveShipment).length;
   const inTransitCount = allShipments.filter((s) => bucketForShipment(s) === 'inTransit').length;
   const arrivedOrReadyCount = allShipments.filter((s) => bucketForShipment(s) === 'arrivedOrReady').length;
   const completedCount = allShipments.filter((s) => bucketForShipment(s) === 'completed').length;
   const recentShipments = allShipments.slice(0, RECENT_SHIPMENT_COUNT);
 
+  const unpaidInvoices = allInvoices.filter((i) => PAYABLE_INVOICE_STATUSES.includes(i.status));
+  const outstandingBalances = outstandingBalanceByCurrency(allInvoices);
+  const hasOutstandingBalance = outstandingBalances.length > 0;
+  // Deep-link straight to the one invoice that needs attention; only fall
+  // back to the list page when there's more than one, so this never has to
+  // guess which one the customer means.
+  const payNowHref =
+    unpaidInvoices.length === 1 ? `/portal/invoices/${unpaidInvoices[0].id}` : '/portal/invoices';
+
+  const recentNotifications = allNotifications.slice(0, RECENT_NOTIFICATION_COUNT);
+
   return (
     <div>
       <h1 className="text-2xl font-semibold text-slate-900">Welcome back, {profile!.firstName}</h1>
-      <p className="mt-1 text-sm text-slate-500">Here&apos;s a quick look at your shipments.</p>
+      <p className="mt-1 text-sm text-slate-500">Here&apos;s a quick look at your account.</p>
+
+      {/* Quick actions — always available, regardless of whether there's any data yet. */}
+      <div className="mt-4 flex flex-wrap gap-2">
+        {hasOutstandingBalance && (
+          <LinkButton href={payNowHref} size="sm">
+            Pay outstanding invoice
+          </LinkButton>
+        )}
+        <LinkButton href="/portal/documents" variant="secondary" size="sm">
+          View documents
+        </LinkButton>
+        <LinkButton href="/portal/profile" variant="secondary" size="sm">
+          Update profile
+        </LinkButton>
+        <LinkButton href="/contact" variant="ghost" size="sm">
+          <IconHeadset className="h-4 w-4" />
+          Contact support
+        </LinkButton>
+      </div>
 
       {allShipments.length === 0 ? (
         <Card className="mt-6 flex flex-col items-center gap-2 py-12 text-center">
@@ -133,6 +208,74 @@ export default function PortalOverviewPage() {
             </div>
           </Card>
         </>
+      )}
+
+      {/* Invoices + notifications — shown once there's at least something on the account to summarize, so a brand-new customer with no shipments isn't shown two more empty cards. */}
+      {allShipments.length > 0 && (
+        <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <Card>
+            <div className="flex items-center justify-between">
+              <h2 className="text-base font-semibold text-slate-900">Invoices</h2>
+              <LinkButton href="/portal/invoices" variant="ghost" size="sm">
+                View all
+                <IconArrowRight className="h-4 w-4" />
+              </LinkButton>
+            </div>
+            {allInvoices.length === 0 ? (
+              <p className="mt-3 text-sm text-slate-500">No invoices yet.</p>
+            ) : hasOutstandingBalance ? (
+              <div className="mt-3">
+                <div className="flex items-center gap-2 text-amber-700">
+                  <IconClock className="h-4 w-4 shrink-0" />
+                  <p className="text-sm font-medium">
+                    {unpaidInvoices.length} invoice{unpaidInvoices.length === 1 ? '' : 's'} need
+                    {unpaidInvoices.length === 1 ? 's' : ''} payment
+                  </p>
+                </div>
+                <p className="mt-2 text-2xl font-semibold text-slate-900">
+                  {outstandingBalances.map((b) => b.formatted).join(' + ')}
+                </p>
+                <p className="mt-0.5 text-xs text-slate-500">Outstanding balance</p>
+              </div>
+            ) : (
+              <div className="mt-3 flex items-center gap-2 text-emerald-700">
+                <IconCheckCircle className="h-4 w-4 shrink-0" />
+                <p className="text-sm font-medium">All invoices paid — nothing due.</p>
+              </div>
+            )}
+          </Card>
+
+          <Card className="p-0">
+            <div className="flex items-center justify-between px-6 pt-6">
+              <h2 className="text-base font-semibold text-slate-900">Recent notifications</h2>
+              <LinkButton href="/portal/notifications" variant="ghost" size="sm">
+                View all
+                <IconArrowRight className="h-4 w-4" />
+              </LinkButton>
+            </div>
+            {recentNotifications.length === 0 ? (
+              <p className="px-6 pb-6 pt-3 text-sm text-slate-500">No notifications yet.</p>
+            ) : (
+              <ul className="mt-3 divide-y divide-slate-100 px-4 pb-2 sm:px-6">
+                {recentNotifications.map((notification) => (
+                  <li key={notification.id} className="py-3">
+                    <Link href="/portal/notifications" className="block hover:opacity-80">
+                      <div className="flex items-start gap-2">
+                        {!notification.readAt && (
+                          <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-primary-600" aria-label="Unread" />
+                        )}
+                        <div className={notification.readAt ? 'pl-4' : ''}>
+                          <p className="text-sm font-medium text-slate-900">{notification.title}</p>
+                          <p className="mt-0.5 text-xs text-slate-400">{formatDateTime(notification.createdAt)}</p>
+                        </div>
+                      </div>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
+        </div>
       )}
     </div>
   );
