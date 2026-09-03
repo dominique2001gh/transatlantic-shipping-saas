@@ -211,6 +211,33 @@ export class InvoicesService {
     return this.findById(tenantId, id);
   }
 
+  /**
+   * Stage 5: InvoiceStatus.OVERDUE is a real enum value that nothing in
+   * this codebase ever writes to the database (confirmed by inspection —
+   * no write path exists anywhere) — every invoice past its due date
+   * silently stays SENT/PARTIALLY_PAID forever unless something computes
+   * this live. Stage 4's analytics already used exactly this logic for
+   * outstanding-invoice aging; this applies it for the first time to the
+   * actual invoice status every staff and customer view displays.
+   *
+   * Deliberately read-only — never writes this back to the database. No
+   * consumer anywhere in this codebase branches on the raw stored status
+   * column for anything other than display and payment-eligibility
+   * (PAYABLE_INVOICE_STATUSES already includes OVERDUE, so "Pay Now"
+   * gating is correct either way), so a live computation at the one
+   * chokepoint every read path already funnels through (toSummary) fully
+   * resolves the bug without adding a new write path, transaction, or
+   * race-condition surface to what has always been a pure projection
+   * method.
+   */
+  private computeEffectiveStatus(invoice: { status: InvoiceStatus; dueDate: Date | null }): InvoiceStatus {
+    const overdueEligible = invoice.status === InvoiceStatus.SENT || invoice.status === InvoiceStatus.PARTIALLY_PAID;
+    if (overdueEligible && invoice.dueDate && invoice.dueDate.getTime() < Date.now()) {
+      return InvoiceStatus.OVERDUE;
+    }
+    return invoice.status;
+  }
+
   private toSummary(invoice: InvoiceWithDisplayFields): InvoiceSummary {
     return {
       id: invoice.id,
@@ -220,7 +247,7 @@ export class InvoicesService {
       shipmentId: invoice.shipmentId,
       shipmentTrackingNumber: invoice.shipment?.trackingNumber ?? null,
       invoiceNumber: invoice.invoiceNumber,
-      status: invoice.status as unknown as InvoiceSummary['status'],
+      status: this.computeEffectiveStatus(invoice) as unknown as InvoiceSummary['status'],
       subtotal: formatMoney(invoice.subtotal),
       tax: formatMoney(invoice.tax),
       total: formatMoney(invoice.total),
