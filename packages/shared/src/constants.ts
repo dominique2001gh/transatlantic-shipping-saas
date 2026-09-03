@@ -125,3 +125,26 @@ export const NOTIFICATION_MANAGE_ROLES: UserRole[] = [
   UserRole.CUSTOMER_SERVICE,
   UserRole.DESTINATION_AGENT,
 ];
+
+/**
+ * Stage 4: roles that may view the Owner/Manager Analytics dashboard
+ * (/dashboard/reports and every GET /analytics/* endpoint except
+ * /analytics/overview, which stays open to all DASHBOARD_ROLES — see
+ * AnalyticsController's own doc comment). Deliberately narrower than
+ * every other *_MANAGE_ROLES list in this file: this is full-tenant
+ * financial visibility (revenue, payments, outstanding invoices) plus
+ * cross-warehouse operational visibility, not a single feature area.
+ * WAREHOUSE_STAFF/DRIVER/DESTINATION_AGENT/CUSTOMER_SERVICE/ACCOUNTANT
+ * are deliberately excluded — "staff status alone must never imply
+ * access" (same stance INVOICE_MANAGE_ROLES documents), and this
+ * business asked specifically for Owner/Admin/Manager, not a broader
+ * front-office or single-department tier. WAREHOUSE_MANAGER is the only
+ * role in this schema literally named "Manager" and is included with
+ * full access (including financials) per explicit instruction, not
+ * scoped to warehouse-only data.
+ */
+export const ANALYTICS_ROLES: UserRole[] = [
+  UserRole.TENANT_OWNER,
+  UserRole.TENANT_ADMIN,
+  UserRole.WAREHOUSE_MANAGER,
+];

@@ -888,3 +888,208 @@ export interface ChangePasswordRequest {
   currentPassword: string;
   newPassword: string;
 }
+
+// ==========================================================================
+// STAGE 4: OWNER/MANAGER ANALYTICS
+// ==========================================================================
+
+/**
+ * Shared query shape for every GET /analytics/* endpoint except
+ * /analytics/overview. `from`/`to` are ISO dates (YYYY-MM-DD), inclusive
+ * on both ends; both optional — AnalyticsService defaults to the last 30
+ * days server-side when omitted (see its own doc comment). `shipmentMode`
+ * and `warehouseId` are optional secondary filters applied wherever they
+ * meaningfully apply to that endpoint's data (silently ignored where they
+ * don't, e.g. warehouseId on /analytics/customers).
+ */
+export interface AnalyticsDateRangeQuery {
+  from?: string;
+  to?: string;
+  shipmentMode?: ShipmentMode;
+  warehouseId?: string;
+}
+
+/**
+ * One money figure in one currency. Every revenue/balance figure in this
+ * stage is an array of these, grouped by currency — never a single summed
+ * number — because two invoices on the same tenant could in principle be
+ * issued in different currencies (see CustomerPortalService's own
+ * identical caution from Stage 3J). An empty array means zero activity in
+ * range, not zero dollars in some default currency.
+ */
+export interface CurrencyAmount {
+  currency: string;
+  amount: string;
+}
+
+/** GET /analytics/overview — the 4 Dashboard Overview tiles. Open to all DASHBOARD_ROLES (no financial figures here at all — see AnalyticsController's own doc comment for why this one endpoint is deliberately not ANALYTICS_ROLES-gated). */
+export interface AnalyticsOverviewResponse {
+  activeShipments: number;
+  totalCustomers: number;
+  openInvoices: number;
+  containersInTransit: number;
+}
+
+/**
+ * GET /analytics/alerts — the "needs attention now" strip at the top of
+ * the Reports page. Deliberately NOT scoped by the page's date-range
+ * filter — an overdue invoice from three months ago still needs
+ * attention today regardless of what window the owner happens to be
+ * looking at, so this always reflects current real state.
+ */
+export interface AnalyticsAlertsResponse {
+  overdueInvoices: { count: number; amounts: CurrencyAmount[] };
+  /** Unresolved OperationalException rows older than staleThresholdDays. */
+  staleExceptions: { count: number; staleThresholdDays: number };
+}
+
+export interface RevenueTrendPoint {
+  /** ISO date (YYYY-MM-DD), the bucket start. */
+  date: string;
+  amounts: CurrencyAmount[];
+}
+
+export interface RevenueByMethod {
+  method: PaymentMethod;
+  amounts: CurrencyAmount[];
+}
+
+export interface RevenueBySource {
+  source: PaymentSource;
+  amounts: CurrencyAmount[];
+}
+
+/** One aging bucket for outstanding invoices, computed live from dueDate — never from InvoiceStatus.OVERDUE, which nothing in this codebase ever sets (see AnalyticsService's own doc comment). */
+export interface OutstandingAgingBucket {
+  bucket: 'current' | '1-30' | '31-60' | '61-90' | '90+';
+  count: number;
+  amounts: CurrencyAmount[];
+}
+
+export interface AnalyticsRevenueResponse {
+  totalRevenue: CurrencyAmount[];
+  outstandingBalance: CurrencyAmount[];
+  avgInvoiceValue: CurrencyAmount[];
+  revenueTrend: RevenueTrendPoint[];
+  revenueByMethod: RevenueByMethod[];
+  revenueBySource: RevenueBySource[];
+  outstandingAging: OutstandingAgingBucket[];
+}
+
+export interface ShipmentVolumeTrendPoint {
+  date: string;
+  count: number;
+}
+
+export interface ShipmentModeMix {
+  mode: ShipmentMode;
+  count: number;
+}
+
+export interface WarehouseThroughput {
+  warehouseId: string;
+  warehouseName: string;
+  received: number;
+  processed: number;
+  dispatched: number;
+  /** Null when there isn't at least one full receive->next-milestone pair in range to average. */
+  avgTimeInWarehouseHours: number | null;
+}
+
+export interface ContainerStatusBreakdown {
+  status: ContainerStatus;
+  count: number;
+}
+
+/**
+ * Item-count-based loading level — deliberately NOT a percentage of
+ * volumetric/weight capacity. Container has no capacity field and
+ * ShipmentItem dimensions are optional/frequently unfilled (see the
+ * Stage 4 plan's own finding); a true utilization % would be a guess
+ * dressed up as a number. This is an honest count instead.
+ */
+export interface ContainerLoadingLevel {
+  containerId: string;
+  containerNumber: string;
+  containerType: ContainerType;
+  status: ContainerStatus;
+  itemsLoaded: number;
+}
+
+export interface AnalyticsOperationsResponse {
+  totalShipments: number;
+  activeShipments: number;
+  completedShipments: number;
+  cancelledShipments: number;
+  shipmentVolumeTrend: ShipmentVolumeTrendPoint[];
+  shipmentModeMix: ShipmentModeMix[];
+  warehouseThroughput: WarehouseThroughput[];
+  containerStatusBreakdown: ContainerStatusBreakdown[];
+  containerLoadingLevels: ContainerLoadingLevel[];
+}
+
+export interface DestinationPerformance {
+  originCountry: string;
+  destinationCountry: string;
+  shipmentCount: number;
+  revenue: CurrencyAmount[];
+}
+
+/**
+ * Actual-vs-estimated transit time for one named Route. `routeId: null`
+ * ("Unassigned Route") groups every shipment with no route assigned —
+ * shown honestly alongside the named routes rather than silently
+ * excluded, since routeId is optional and only ever set when staff
+ * manually pick one (see the Stage 4 plan's own finding on this gap).
+ */
+export interface RoutePerformance {
+  routeId: string | null;
+  routeName: string | null;
+  shipmentCount: number;
+  avgActualTransitDays: number | null;
+  estimatedTransitDays: number | null;
+}
+
+export interface AnalyticsDestinationsResponse {
+  topDestinations: DestinationPerformance[];
+  /** 0-100. Null if there were no delivery/pickup attempts in range to compute a rate from. */
+  deliverySuccessRate: number | null;
+  avgTransitDays: number | null;
+  transitTimeTrend: { date: string; avgDays: number | null }[];
+  routePerformance: RoutePerformance[];
+}
+
+export interface CustomerGrowthPoint {
+  date: string;
+  newCustomers: number;
+  cumulativeCustomers: number;
+}
+
+export interface TopCustomer {
+  customerId: string;
+  customerName: string;
+  customerNumber: string;
+  revenue: CurrencyAmount[];
+  shipmentCount: number;
+}
+
+export interface AnalyticsCustomersResponse {
+  newCustomers: number;
+  activeCustomers: number;
+  dormantCustomers: number;
+  growthTrend: CustomerGrowthPoint[];
+  topCustomers: TopCustomer[];
+}
+
+export interface ExceptionsByType {
+  type: DisruptionType;
+  open: number;
+  resolved: number;
+}
+
+export interface AnalyticsExceptionsResponse {
+  openExceptions: number;
+  /** Null if nothing in range has ever been resolved to average. */
+  avgResolutionHours: number | null;
+  exceptionsByType: ExceptionsByType[];
+}

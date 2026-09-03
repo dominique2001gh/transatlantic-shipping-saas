@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
+import { AnalyticsModule } from './analytics/analytics.module';
 import { AuthModule } from './auth/auth.module';
 import { ContainersModule } from './containers/containers.module';
 import { CustomerPortalModule } from './customer-portal/customer-portal.module';
@@ -41,6 +42,7 @@ import { WebhooksModule } from './webhooks/webhooks.module';
     DocumentsModule,
     NotificationsModule,
     DisruptionsModule,
+    AnalyticsModule,
   ],
   providers: [
     // Every route requires authentication by default; opt out with @Public().

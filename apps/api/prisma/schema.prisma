@@ -537,6 +537,8 @@ model Customer {
 
   @@unique([tenantId, customerNumber])
   @@index([tenantId])
+  /// Stage 4: customer-growth-over-time analytics group by tenantId+createdAt.
+  @@index([tenantId, createdAt])
   @@map("customers")
 }
 
@@ -705,6 +707,8 @@ model Shipment {
   @@index([tenantId])
   @@index([customerId])
   @@index([status])
+  /// Stage 4: shipment-volume-trend analytics group by tenantId+createdAt.
+  @@index([tenantId, createdAt])
   @@map("shipments")
 }
 
@@ -1323,6 +1327,13 @@ model Invoice {
   @@unique([tenantId, invoiceNumber])
   @@index([tenantId])
   @@index([customerId])
+  /// Stage 4: outstanding/aging analytics filter by tenantId+status (never
+  /// InvoiceStatus.OVERDUE, which nothing in this codebase ever sets — see
+  /// AnalyticsService's own doc comment — but SENT/PARTIALLY_PAID lookups
+  /// still benefit).
+  @@index([tenantId, status])
+  /// Stage 4: aging-bucket analytics filter/sort by tenantId+dueDate.
+  @@index([tenantId, dueDate])
   @@map("invoices")
 }
 
@@ -1374,6 +1385,11 @@ model Payment {
 
   @@index([tenantId])
   @@index([invoiceId])
+  /// Stage 4: revenue-collected analytics filter by tenantId+status
+  /// (COMPLETED only) and group/sort by paidAt for trend charts.
+  @@index([tenantId, status, paidAt])
+  /// Stage 4: top-customers-by-revenue analytics group by tenantId+customerId.
+  @@index([tenantId, customerId])
   @@map("payments")
 }
 
@@ -1446,6 +1462,9 @@ model OperationalException {
   @@index([tenantId])
   @@index([containerId])
   @@index([manifestId])
+  /// Stage 4: exceptions-by-period / open-vs-resolved analytics group by
+  /// tenantId+createdAt.
+  @@index([tenantId, createdAt])
   @@map("operational_exceptions")
 }
 
