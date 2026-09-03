@@ -16,6 +16,7 @@
     "build:shared": "pnpm --filter=./packages/shared build",
     "build:web": "pnpm --filter=./apps/web build",
     "build:api": "pnpm --filter=./apps/api build",
+    "start": "node scripts/railway-start.js",
     "lint": "pnpm --filter=./apps/* --filter=./packages/* lint",
     "typecheck": "pnpm --filter=./apps/* --filter=./packages/* typecheck",
     "format": "prettier --write .",
