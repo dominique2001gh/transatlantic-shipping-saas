@@ -276,3 +276,40 @@ export function IconGlobe(props: IconProps) {
     </IconBase>
   );
 }
+
+export function IconFacebook(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <path d="M14 8.5h2.5V5h-2.5A4 4 0 0 0 10 9v2H7.5v3.5H10V21h3.5v-6.5H16l.5-3.5h-3V9a.5.5 0 0 1 .5-.5z" />
+    </IconBase>
+  );
+}
+
+export function IconLinkedIn(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <rect x="3" y="3" width="18" height="18" rx="2" />
+      <path d="M7.5 10v7M7.5 7.2v.01" />
+      <path d="M11.5 17v-4a2.3 2.3 0 0 1 4.5 0v4M11.5 10v7" />
+    </IconBase>
+  );
+}
+
+export function IconWhatsApp(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <path d="M4 20l1.3-3.9A7.9 7.9 0 1 1 8.4 19L4 20z" />
+      <path d="M8.7 8.7c0 3.6 2.9 6.5 6.5 6.5.7 0 1-.6.7-1.2l-.6-1.1a.8.8 0 0 0-.9-.4l-1 .3a5 5 0 0 1-3.3-3.3l.3-1a.8.8 0 0 0-.4-.9L8.9 7.3c-.6-.3-1.2 0-1.2.7v.7z" />
+    </IconBase>
+  );
+}
+
+export function IconInstagram(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <rect x="3" y="3" width="18" height="18" rx="5" />
+      <circle cx="12" cy="12" r="4" />
+      <path d="M17 7v.01" />
+    </IconBase>
+  );
+}

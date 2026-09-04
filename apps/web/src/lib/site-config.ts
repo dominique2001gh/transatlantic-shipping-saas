@@ -26,6 +26,21 @@ export interface SiteLocation {
   country: string;
 }
 
+/**
+ * Real social profile URLs, once they exist. Every field is `null` today
+ * — Trans Atlantic has no confirmed social accounts configured in this
+ * project yet. TopInfoBar renders a non-navigating placeholder icon for
+ * any platform still `null`, rather than link to a guessed/fabricated
+ * URL. Fill these in here (the single source of truth) once the real
+ * profiles are confirmed — no component changes needed.
+ */
+export interface SiteSocialLinks {
+  facebook: string | null;
+  linkedin: string | null;
+  whatsapp: string | null;
+  instagram: string | null;
+}
+
 export const siteConfig = {
   /**
    * Stage 2A's public tracking API (GET /tracking/public) is tenant-scoped
@@ -53,4 +68,10 @@ export const siteConfig = {
   locations: [
     { label: 'Origin Warehouse', city: 'Dallas-Fort Worth', region: 'TX', country: 'United States' },
   ] as SiteLocation[],
+  socialLinks: {
+    facebook: null,
+    linkedin: null,
+    whatsapp: null,
+    instagram: null,
+  } as SiteSocialLinks,
 };

@@ -2,37 +2,23 @@ import { IconWarehouse } from '@/components/icons';
 import { CargoTypesGrid } from '@/components/marketing/CargoTypesGrid';
 import { CTASection } from '@/components/marketing/CTASection';
 import { Hero } from '@/components/marketing/Hero';
+import { HomeServiceHighlights } from '@/components/marketing/HomeServiceHighlights';
 import { PhotoPlaceholder } from '@/components/marketing/PhotoPlaceholder';
 import { ProcessTimeline } from '@/components/marketing/ProcessTimeline';
-import { ServiceCard } from '@/components/marketing/ServiceCard';
 import { ValuePropsGrid } from '@/components/marketing/ValuePropsGrid';
 import { LinkButton } from '@/components/ui/Button';
 import { Container } from '@/components/ui/Container';
 import { SectionHeading } from '@/components/ui/SectionHeading';
 import { TrackingForm } from '@/components/forms/TrackingForm';
 import { homeProcessSteps } from '@/lib/process-data';
-import { services } from '@/lib/services-data';
 
 export default function HomePage() {
   return (
     <>
       <Hero />
 
-      {/* Services */}
-      <section className="py-20 lg:py-24">
-        <Container>
-          <SectionHeading
-            eyebrow="What we move"
-            title="Freight services built around your cargo"
-            description="Choose the right service for what you're shipping — or combine them as part of one shipment."
-          />
-          <div className="mt-12 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
-            {services.map((service) => (
-              <ServiceCard key={service.slug} service={service} />
-            ))}
-          </div>
-        </Container>
-      </section>
+      {/* Approved homepage redesign: overlapping service cards + trust strip, immediately below the hero */}
+      <HomeServiceHighlights />
 
       {/* Why Trans Atlantic */}
       <section className="border-t border-slate-200 bg-slate-50 py-20 lg:py-24">
