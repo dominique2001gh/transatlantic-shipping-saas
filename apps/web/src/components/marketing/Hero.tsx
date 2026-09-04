@@ -1,7 +1,6 @@
-import { IconShip } from '@/components/icons';
+import Image from 'next/image';
 import { Container } from '@/components/ui/Container';
 import { LinkButton } from '@/components/ui/Button';
-import { PhotoPlaceholder } from '@/components/marketing/PhotoPlaceholder';
 
 export function Hero() {
   return (
@@ -46,13 +45,16 @@ export function Hero() {
           </div>
 
           <div className="hidden animate-fade-in lg:block" style={{ animationDelay: '150ms' }}>
-            <PhotoPlaceholder
-              icon={IconShip}
-              label="Container ship at sea"
-              tone="teal"
-              aspect="aspect-[5/4]"
-              className="ring-1 ring-white/10"
-            />
+            <div className="relative aspect-[5/4] overflow-hidden rounded-2xl shadow-xl ring-1 ring-white/10">
+              <Image
+                src="/hero-container-ship.png"
+                alt="Container ship loaded with cargo at sea"
+                fill
+                priority
+                sizes="(min-width: 1024px) 50vw, 100vw"
+                className="object-cover object-center"
+              />
+            </div>
           </div>
         </div>
       </Container>
