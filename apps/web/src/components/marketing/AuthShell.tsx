@@ -1,3 +1,4 @@
+import Image from 'next/image';
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { IconShip } from '@/components/icons';
@@ -23,9 +24,13 @@ export function AuthShell({ children }: { children: ReactNode }) {
           }}
         />
         <Link href="/" className="relative flex items-center gap-2.5 text-white">
-          <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/10 text-sm font-bold">
-            {siteConfig.initials}
-          </span>
+          <Image
+            src="/trans-atlantic-logo.png"
+            alt="Trans Atlantic Logistics Solutions logo"
+            width={36}
+            height={36}
+            className="h-9 w-9 shrink-0 object-contain"
+          />
           <span className="font-display text-base font-semibold">{siteConfig.shortName}</span>
         </Link>
         <div className="relative">
@@ -45,9 +50,13 @@ export function AuthShell({ children }: { children: ReactNode }) {
       <div className="flex flex-col justify-center px-6 py-16 sm:px-12 lg:px-16">
         <div className="mx-auto w-full max-w-sm">
           <Link href="/" className="mb-8 flex items-center gap-2.5 lg:hidden">
-            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary-700 text-sm font-bold text-white">
-              {siteConfig.initials}
-            </span>
+            <Image
+              src="/trans-atlantic-logo.png"
+              alt="Trans Atlantic Logistics Solutions logo"
+              width={36}
+              height={36}
+              className="h-9 w-9 shrink-0 object-contain"
+            />
             <span className="font-display text-base font-semibold text-slate-900">{siteConfig.shortName}</span>
           </Link>
           {children}

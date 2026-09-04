@@ -1,3 +1,4 @@
+import Image from 'next/image';
 import Link from 'next/link';
 import { IconMail, IconMapPin, IconPhone } from '@/components/icons';
 import { Container } from '@/components/ui/Container';
@@ -64,9 +65,13 @@ export function PublicFooter() {
         <div className="grid grid-cols-1 gap-10 sm:grid-cols-2 lg:grid-cols-5">
           <div className="sm:col-span-2 lg:col-span-1">
             <Link href="/" className="flex items-center gap-2.5">
-              <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/10 text-sm font-bold text-white">
-                {siteConfig.initials}
-              </span>
+              <Image
+                src="/trans-atlantic-logo.png"
+                alt="Trans Atlantic Logistics Solutions logo"
+                width={36}
+                height={36}
+                className="h-9 w-9 shrink-0 object-contain"
+              />
               <span className="font-display text-base font-semibold text-white">{siteConfig.shortName}</span>
             </Link>
             <p className="mt-4 max-w-xs text-sm leading-relaxed text-primary-300">{siteConfig.description}</p>

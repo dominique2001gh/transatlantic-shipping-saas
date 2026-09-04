@@ -71,7 +71,7 @@ export const siteConfig = {
   socialLinks: {
     facebook: null,
     linkedin: null,
-    whatsapp: null,
+    whatsapp: 'https://wa.me/12144937745',
     instagram: null,
   } as SiteSocialLinks,
 };

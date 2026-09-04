@@ -85,7 +85,7 @@ export const services: ServiceContent[] = [
       'Consolidation support to help manage shipping costs',
     ],
     photo: {
-      src: '/service-ocean-freight.jpg',
+      src: '/service-ocean-freight.png',
       alt: 'Container terminal gantry crane at a seaport at dusk',
     },
   },
@@ -129,6 +129,10 @@ export const services: ServiceContent[] = [
       'Shipment visibility throughout transit',
       'A practical complement to ocean freight for mixed shipping needs',
     ],
+    photo: {
+      src: '/service-air-freight.png',
+      alt: 'Ground crew loading unit load device cargo pallets into the nose of a freighter aircraft at sunrise',
+    },
   },
   {
     slug: 'lcl',
@@ -218,6 +222,10 @@ export const services: ServiceContent[] = [
       'Shipment status visibility from drop-off to arrival',
       'Works alongside our other freight services for mixed shipping needs',
     ],
+    photo: {
+      src: '/service-roro.png',
+      alt: 'Vehicles driving off the stern ramp of a RoRo vessel onto the dock at a port',
+    },
   },
   {
     slug: 'warehousing',

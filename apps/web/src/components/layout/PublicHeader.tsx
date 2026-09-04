@@ -1,5 +1,6 @@
 'use client';
 
+import Image from 'next/image';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
@@ -79,9 +80,14 @@ export function PublicHeader() {
       <div className="border-b border-slate-200 bg-white">
         <Container className="flex items-center justify-between gap-6 py-4">
           <Link href="/" className="flex shrink-0 items-center gap-3">
-            <span className="flex h-14 w-14 items-center justify-center rounded-xl bg-primary-700 text-xl font-bold text-white">
-              {siteConfig.initials}
-            </span>
+            <Image
+              src="/trans-atlantic-logo.png"
+              alt="Trans Atlantic Logistics Solutions logo"
+              width={56}
+              height={56}
+              priority
+              className="h-14 w-14 shrink-0 object-contain"
+            />
             <span className="flex flex-col">
               <span className="font-display text-lg font-bold leading-tight text-slate-900 sm:text-xl">
                 {siteConfig.shortName}
