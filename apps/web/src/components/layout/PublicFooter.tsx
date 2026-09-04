@@ -20,10 +20,10 @@ const companyLinks: FooterLink[] = [
   { label: 'Contact', href: '/contact' },
 ];
 
-const accountLinks: FooterLink[] = [
-  { label: 'Customer Login', href: '/login' },
-  { label: 'Create Account', href: '/register' },
-];
+// Self-service registration is intentionally disabled for launch (no
+// working /register flow yet), so the footer only links to Customer
+// Login — no "Create Account" link until self-service sign-up ships.
+const accountLinks: FooterLink[] = [{ label: 'Customer Login', href: '/login' }];
 
 function FooterGroup({
   title,
@@ -104,8 +104,13 @@ export function PublicFooter() {
           <FooterGroup title="Account" links={accountLinks} />
         </div>
 
-        <div className="mt-12 border-t border-white/10 pt-6 text-xs text-primary-400">
-          &copy; {new Date().getFullYear()} {siteConfig.companyName}. All rights reserved.
+        <div className="mt-12 flex flex-wrap items-center justify-between gap-x-6 gap-y-2 border-t border-white/10 pt-6 text-xs text-primary-400">
+          <span>
+            &copy; {new Date().getFullYear()} {siteConfig.companyName}. All rights reserved.
+          </span>
+          <Link href="/credits" className="hover:text-white">
+            Photo Credits
+          </Link>
         </div>
       </Container>
     </footer>

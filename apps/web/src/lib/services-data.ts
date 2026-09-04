@@ -7,6 +7,11 @@ export interface ServiceStep {
   description: string;
 }
 
+export interface ServicePhoto {
+  src: string;
+  alt: string;
+}
+
 export interface ServiceContent {
   slug: string;
   name: string;
@@ -19,6 +24,13 @@ export interface ServiceContent {
   useCases: string[];
   howItWorks: ServiceStep[];
   benefits: string[];
+  /**
+   * Real photography for the "Common use cases" section. Optional — when
+   * omitted, ServiceDetailPage falls back to PhotoPlaceholder so services
+   * still awaiting photography (currently air-freight, roro) stay clearly
+   * marked rather than silently reusing another service's image.
+   */
+  photo?: ServicePhoto;
 }
 
 /**
@@ -72,6 +84,10 @@ export const services: ServiceContent[] = [
       'Shipment status visibility from warehouse to destination',
       'Consolidation support to help manage shipping costs',
     ],
+    photo: {
+      src: '/service-ocean-freight.jpg',
+      alt: 'Container terminal gantry crane at a seaport at dusk',
+    },
   },
   {
     slug: 'air-freight',
@@ -156,6 +172,10 @@ export const services: ServiceContent[] = [
       'The same shipment visibility as a full container booking',
       'Works well for both personal and commercial cargo',
     ],
+    photo: {
+      src: '/service-lcl.jpg',
+      alt: 'Forklift operator moving a palletized load of consolidated cartons in a warehouse',
+    },
   },
   {
     slug: 'roro',
@@ -240,6 +260,10 @@ export const services: ServiceContent[] = [
       'Cross-docking available for cargo that needs to move straight through',
       'Works with drop-to-door delivery once cargo arrives at destination',
     ],
+    photo: {
+      src: '/service-warehousing.jpg',
+      alt: 'Wrapped pallets staged on warehouse racking with a forklift in the aisle',
+    },
   },
 ];
 

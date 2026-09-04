@@ -1,3 +1,4 @@
+import Image from 'next/image';
 import { IconCheckCircle } from '@/components/icons';
 import { CTASection } from '@/components/marketing/CTASection';
 import { PageHero } from '@/components/marketing/PageHero';
@@ -48,7 +49,19 @@ export function ServiceDetailPage({ service }: { service: ServiceContent }) {
                 ))}
               </ul>
             </div>
-            <PhotoPlaceholder icon={Icon} label={service.name} tone="navy" />
+            {service.photo ? (
+              <div className="relative aspect-[4/3] overflow-hidden rounded-2xl shadow-xl">
+                <Image
+                  src={service.photo.src}
+                  alt={service.photo.alt}
+                  fill
+                  sizes="(min-width: 1024px) 50vw, 100vw"
+                  className="object-cover object-center"
+                />
+              </div>
+            ) : (
+              <PhotoPlaceholder icon={Icon} label={service.name} tone="navy" />
+            )}
           </div>
         </Container>
       </section>

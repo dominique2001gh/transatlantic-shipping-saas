@@ -1,9 +1,8 @@
-import { IconWarehouse } from '@/components/icons';
+import Image from 'next/image';
 import { CargoTypesGrid } from '@/components/marketing/CargoTypesGrid';
 import { CTASection } from '@/components/marketing/CTASection';
 import { Hero } from '@/components/marketing/Hero';
 import { HomeServiceHighlights } from '@/components/marketing/HomeServiceHighlights';
-import { PhotoPlaceholder } from '@/components/marketing/PhotoPlaceholder';
 import { ProcessTimeline } from '@/components/marketing/ProcessTimeline';
 import { ValuePropsGrid } from '@/components/marketing/ValuePropsGrid';
 import { LinkButton } from '@/components/ui/Button';
@@ -82,7 +81,15 @@ export default function HomePage() {
                 <TrackingForm />
               </div>
             </div>
-            <PhotoPlaceholder icon={IconWarehouse} label="Warehouse operations" tone="slate" />
+            <div className="relative aspect-[4/3] overflow-hidden rounded-2xl shadow-xl">
+              <Image
+                src="/homepage-warehouse-operations.jpg"
+                alt="Warehouse staff and forklifts actively receiving and staging palletized freight"
+                fill
+                sizes="(min-width: 1024px) 50vw, 100vw"
+                className="object-cover object-center"
+              />
+            </div>
           </div>
         </Container>
       </section>

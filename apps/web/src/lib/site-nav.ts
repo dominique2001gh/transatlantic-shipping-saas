@@ -10,18 +10,19 @@ export interface PrimaryNavLink {
  * sourced directly from `services` in lib/services-data.ts, so adding a
  * service never requires touching the nav separately.
  *
- * Two labels map to existing pages rather than dedicated ones, since this
- * is a frontend-only pass and no new routes were created for it:
- * - "Shipping Rates" -> /quote (no standalone rate calculator exists yet;
- *   requesting a quote is the real working equivalent).
- * - "Locations" -> /contact (the page that already renders
- *   siteConfig.locations — see ContactPage).
+ * "Shipping Rates" maps to /quote rather than a dedicated route, since this
+ * is a frontend-only pass and no standalone rate calculator exists yet —
+ * requesting a quote is the real working equivalent.
+ *
+ * A "Locations" item was removed for launch: it only ever pointed at
+ * /contact (which already renders siteConfig.locations — see
+ * ContactPage), duplicating "Contact Us" in the nav. A dedicated
+ * Locations page can be added later if it's worth a distinct route.
  */
 export const primaryNavLinks: PrimaryNavLink[] = [
   { label: 'Home', href: '/' },
   { label: 'About Us', href: '/about' },
   { label: 'Shipping Rates', href: '/quote' },
   { label: 'Track Your Shipment', href: '/track' },
-  { label: 'Locations', href: '/contact' },
   { label: 'Contact Us', href: '/contact' },
 ];

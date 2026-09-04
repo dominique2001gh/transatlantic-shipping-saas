@@ -1,8 +1,7 @@
 import type { Metadata } from 'next';
-import { IconGlobe } from '@/components/icons';
+import Image from 'next/image';
 import { CTASection } from '@/components/marketing/CTASection';
 import { PageHero } from '@/components/marketing/PageHero';
-import { PhotoPlaceholder } from '@/components/marketing/PhotoPlaceholder';
 import { ValuePropsGrid } from '@/components/marketing/ValuePropsGrid';
 import { Container } from '@/components/ui/Container';
 import { SectionHeading } from '@/components/ui/SectionHeading';
@@ -38,7 +37,15 @@ export default function AboutPage() {
                 drop-to-door delivery once it arrives at destination.
               </p>
             </div>
-            <PhotoPlaceholder icon={IconGlobe} label="International logistics" tone="teal" />
+            <div className="relative aspect-[4/3] overflow-hidden rounded-2xl shadow-xl">
+              <Image
+                src="/about-international-logistics.jpg"
+                alt="Aerial view of an international container port with cranes, stacked containers, and vessels at berth"
+                fill
+                sizes="(min-width: 1024px) 50vw, 100vw"
+                className="object-cover object-center"
+              />
+            </div>
           </div>
         </Container>
       </section>
