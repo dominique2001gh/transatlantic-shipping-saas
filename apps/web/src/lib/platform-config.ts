@@ -4,27 +4,25 @@
  * branding (see site-config.ts for that; Trans Atlantic is Tenant #1 and
  * keeps its own branding there, untouched by this file).
  *
- * "Ananse Logix" is a TEMPORARY working name for the platform while the
- * permanent product name is still being decided — every place that needs
- * to display it should read from `platformConfig.name` here rather than
- * hardcoding the string, so renaming the platform later is a one-file
- * change. Same reasoning for `domain`: the permanent SaaS domain is still
- * TBD, so this deliberately does NOT default to ananselogix.com or any
- * other guessed value — leave it `null` until a real decision is made,
- * and do not have callers assume it's set.
+ * "AnanseLogix" is the official name of the platform (confirmed —
+ * Final Brand + Deployment Plan) and ananselogix.com is the purchased
+ * master SaaS domain. Every place that needs to display the name should
+ * still read from `platformConfig.name` rather than hardcoding the
+ * string, so any future rename stays a one-file change.
  *
  * Scope: this file is for platform-wide concerns only (currently: the
  * /platform admin console used by Ananse Automation staff to manage all
  * tenants). It must never be read by tenant-facing surfaces — the public
  * marketing site, the customer portal, or a tenant's staff console —
  * those all read site-config.ts (or a future per-tenant equivalent)
- * instead.
+ * instead. Trans Atlantic's public site, portal, and staff console stay
+ * fully Trans Atlantic branded; AnanseLogix never appears there.
  */
 
 export interface PlatformContact {
   supportEmail: string | null;
   /**
-   * Ananse Logix / Ananse Automation's own platform-level support phone
+   * AnanseLogix / Ananse Automation's own platform-level support phone
    * number — never Trans Atlantic's (or any other tenant's) number. Keep
    * this separate from every tenant's site-config.ts contact info; a
    * tenant's public website must always show its own number, never this
@@ -45,23 +43,24 @@ export interface PlatformContact {
 }
 
 export const platformConfig = {
-  /** Temporary working name — see file header. Replace here only. */
-  name: 'Ananse Logix',
+  /** Official platform name — see file header. Replace here only. */
+  name: 'AnanseLogix',
   /** The company that owns/develops the platform (distinct from any tenant). */
   companyName: 'Ananse Automation',
   tagline: 'Multi-Tenant Logistics Operations Platform',
   /**
-   * Permanent SaaS domain — TBD. Deliberately left null rather than
-   * guessed (e.g. ananselogix.com); do not assume this in DNS, CORS, or
-   * deployment config until a real decision is made.
+   * Purchased master SaaS domain. Not yet wired into DNS, CORS, or
+   * deployment config anywhere — this is branding-config only. Do not
+   * assume any infrastructure reads this value until that's actually
+   * built.
    */
-  domain: null as string | null,
+  domain: 'ananselogix.com' as string | null,
   /** Platform logo asset path — TBD, not yet designed. */
   logoSrc: null as string | null,
   contact: {
     supportEmail: null,
     supportPhone: '+1 (214) 723-2121',
     supportPhoneHref: '+12147232121',
-    systemEmailFromName: 'Ananse Logix',
+    systemEmailFromName: 'AnanseLogix',
   } as PlatformContact,
 };
