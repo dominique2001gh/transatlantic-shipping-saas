@@ -43,6 +43,15 @@ export class ShipmentsController {
     return this.shipmentsService.findAll(tenantId, { customerId, status: validStatus });
   }
 
+  // Must stay above the @Get(':id') route below — Nest/Express match
+  // routes in declaration order, so 'search' would otherwise be swallowed
+  // as an :id value.
+  @Get('search')
+  @Roles(...VIEW_ROLES)
+  search(@CurrentUser() user: AuthenticatedUser, @Query('query') query?: string) {
+    return this.shipmentsService.search(requireTenantId(user.tenantId), query ?? '');
+  }
+
   @Get(':id')
   @Roles(...VIEW_ROLES)
   findOne(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {

@@ -51,6 +51,42 @@ export class ShipmentsService {
     return shipments.map((shipment) => this.withItemCounts(shipment));
   }
 
+  /**
+   * Staff Tracking page lookup: partial match across the three identifiers
+   * staff actually have in hand — shipment tracking number, item/package
+   * code, or customer name/number. Same OR-clause shape as
+   * WarehouseService.searchItems (proven pattern, not duplicated logic —
+   * that one searches ShipmentItem for the scan workflow; this one
+   * searches Shipment directly since the Tracking page's unit of result
+   * is a shipment, not an item). Reuses withItemCounts so the response
+   * shape is identical to findAll/findById — no new projection.
+   */
+  async search(tenantId: string, rawQuery: string) {
+    const query = rawQuery.trim();
+    if (!query) {
+      return [];
+    }
+    const shipments = await this.prisma.shipment.findMany({
+      where: {
+        tenantId,
+        OR: [
+          { trackingNumber: { contains: query, mode: 'insensitive' } },
+          { items: { some: { itemCode: { contains: query, mode: 'insensitive' } } } },
+          { customer: { customerNumber: { contains: query, mode: 'insensitive' } } },
+          { customer: { firstName: { contains: query, mode: 'insensitive' } } },
+          { customer: { lastName: { contains: query, mode: 'insensitive' } } },
+        ],
+      },
+      include: {
+        customer: true,
+        items: { select: { id: true, receivedAt: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 25,
+    });
+    return shipments.map((shipment) => this.withItemCounts(shipment));
+  }
+
   async findById(tenantId: string, id: string) {
     const shipment = await this.prisma.shipment.findFirst({
       where: { id, tenantId },

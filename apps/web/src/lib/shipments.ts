@@ -72,6 +72,12 @@ export function getShipment(id: string): Promise<ShipmentSummary> {
   return apiFetch<ShipmentSummary>(`/shipments/${id}`, { token: authToken() });
 }
 
+/** Staff Tracking page: search by tracking number, item/package code, or customer name/number. */
+export function searchShipments(query: string): Promise<ShipmentSummary[]> {
+  const params = new URLSearchParams({ query });
+  return apiFetch<ShipmentSummary[]>(`/shipments/search?${params.toString()}`, { token: authToken() });
+}
+
 export function createShipment(input: CreateShipmentInput): Promise<ShipmentSummary> {
   return apiFetch<ShipmentSummary>('/shipments', {
     method: 'POST',

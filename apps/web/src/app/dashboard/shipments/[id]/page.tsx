@@ -7,9 +7,10 @@ import type { ShipmentSummary, TrackingEventSummary } from '@transatlantic/share
 import { AddItemForm } from '@/components/dashboard/AddItemForm';
 import { AddTrackingEventForm } from '@/components/dashboard/AddTrackingEventForm';
 import { StatusBadge } from '@/components/dashboard/StatusBadge';
+import { TrackingTimeline } from '@/components/dashboard/TrackingTimeline';
 import { Card } from '@/components/ui/Card';
 import { ApiError } from '@/lib/api';
-import { formatDateTime, humanizeEnumValue } from '@/lib/format';
+import { humanizeEnumValue } from '@/lib/format';
 import { getShipment, listTrackingEvents } from '@/lib/shipments';
 
 export default function ShipmentDetailPage() {
@@ -138,33 +139,9 @@ export default function ShipmentDetailPage() {
 
       <section>
         <h2 className="text-lg font-semibold text-slate-900">Tracking History</h2>
-        <Card className="mt-3">
-          {events && events.length > 0 ? (
-            <ol className="flex flex-col gap-4">
-              {events.map((event) => (
-                <li key={event.id} className="flex gap-3 border-b border-slate-100 pb-4 last:border-0 last:pb-0">
-                  <div className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-primary-500" />
-                  <div>
-                    <p className="text-sm font-medium text-slate-900">
-                      {humanizeEnumValue(event.eventType)}
-                      {event.shipmentItemId && (
-                        <span className="ml-2 text-xs font-normal text-slate-400">(item-level)</span>
-                      )}
-                    </p>
-                    <p className="text-xs text-slate-500">
-                      {formatDateTime(event.occurredAt)}
-                      {event.createdByUser && ` · ${event.createdByUser.firstName} ${event.createdByUser.lastName}`}
-                      {event.source !== 'MANUAL' && ` · ${humanizeEnumValue(event.source)}`}
-                    </p>
-                    {event.notes && <p className="mt-1 text-sm text-slate-600">{event.notes}</p>}
-                  </div>
-                </li>
-              ))}
-            </ol>
-          ) : (
-            <p className="text-sm text-slate-500">No events yet.</p>
-          )}
-        </Card>
+        <div className="mt-3">
+          <TrackingTimeline events={events} />
+        </div>
         <AddTrackingEventForm shipmentId={shipmentId} items={shipment.items ?? []} onAdded={reload} />
       </section>
     </div>
