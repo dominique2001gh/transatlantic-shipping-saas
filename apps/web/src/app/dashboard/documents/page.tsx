@@ -50,9 +50,17 @@ export default function DocumentsPage() {
   }
 
   async function handleToggleVisibility(doc: DocumentSummary) {
+    const makingVisible = !doc.visibleToCustomer;
+    const confirmed = window.confirm(
+      makingVisible
+        ? `Make "${doc.fileName}" visible to the customer? They will be able to see and download it from their portal.`
+        : `Hide "${doc.fileName}" from the customer? They will no longer be able to see or download it from their portal.`,
+    );
+    if (!confirmed) return;
+
     setBusyId(doc.id);
     try {
-      const updated = await updateDocument(doc.id, { visibleToCustomer: !doc.visibleToCustomer });
+      const updated = await updateDocument(doc.id, { visibleToCustomer: makingVisible });
       setDocuments((prev) => prev?.map((d) => (d.id === doc.id ? updated : d)) ?? null);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to update visibility.');
@@ -120,7 +128,22 @@ export default function DocumentsPage() {
                   <td className="px-4 py-3 text-slate-500">{formatDate(doc.createdAt)}</td>
                   <td className="px-4 py-3 text-slate-500">{formatFileSize(doc.fileSizeBytes)}</td>
                   <td className="px-4 py-3">
-                    <button type="button" onClick={() => handleToggleVisibility(doc)} disabled={busyId === doc.id}>
+                    <button
+                      type="button"
+                      onClick={() => handleToggleVisibility(doc)}
+                      disabled={busyId === doc.id}
+                      title={
+                        doc.visibleToCustomer
+                          ? 'Click to hide this document from the customer'
+                          : 'Click to make this document visible to the customer'
+                      }
+                      aria-label={
+                        doc.visibleToCustomer
+                          ? 'Customer-visible. Click to hide from customer.'
+                          : 'Staff-only. Click to make visible to customer.'
+                      }
+                      className="cursor-pointer rounded-full transition hover:ring-2 hover:ring-primary-300 hover:ring-offset-1 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
                       <Badge variant={doc.visibleToCustomer ? 'success' : 'neutral'}>
                         {doc.visibleToCustomer ? 'Customer-visible' : 'Staff-only'}
                       </Badge>
