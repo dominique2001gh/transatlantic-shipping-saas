@@ -1,4 +1,6 @@
 import type { MetadataRoute } from 'next';
+import { headers } from 'next/headers';
+import { isTransAtlanticHostname } from '@/lib/trans-atlantic-hostname';
 
 /**
  * Website Launch: only the public marketing/content pages belong here —
@@ -14,7 +16,7 @@ import type { MetadataRoute } from 'next';
  */
 const BASE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://talogisticssolutions.com';
 
-const PUBLIC_PATHS: { path: string; priority: number }[] = [
+const TRANS_ATLANTIC_PATHS: { path: string; priority: number }[] = [
   { path: '/', priority: 1 },
   { path: '/about', priority: 0.7 },
   { path: '/how-it-works', priority: 0.7 },
@@ -27,11 +29,22 @@ const PUBLIC_PATHS: { path: string; priority: number }[] = [
   { path: '/contact', priority: 0.7 },
   { path: '/quote', priority: 0.9 },
   { path: '/track', priority: 0.8 },
-  // AnanseLogix Phase 2: the platform's own marketing site, mounted at
-  // /ananselogix/* in this single deployment (see AnanseLogixLayout's own
-  // doc comment on why — no separate domain/DNS exists yet). Transactional
-  // pages (signup wizard, its success page) are excluded, same reasoning
-  // as /login and /register above.
+];
+
+/**
+ * AnanseLogix Phase 2: the platform's own marketing site, mounted at
+ * /ananselogix/* in this single deployment (see AnanseLogixLayout's own
+ * doc comment on why — no separate domain/DNS exists yet). Transactional
+ * pages (signup wizard, its success page) are excluded, same reasoning
+ * as /login and /register above.
+ *
+ * Production-readiness follow-up: never advertised in the sitemap served
+ * on a Trans Atlantic hostname — see isTransAtlanticHostname's own doc
+ * comment. These entries only appear when this sitemap is fetched from
+ * somewhere other than Trans Atlantic's own domains (local dev, this
+ * deployment's raw Railway URL, or eventually ananselogix.com).
+ */
+const ANANSELOGIX_PATHS: { path: string; priority: number }[] = [
   { path: '/ananselogix', priority: 0.9 },
   { path: '/ananselogix/features', priority: 0.7 },
   { path: '/ananselogix/solutions', priority: 0.7 },
@@ -40,9 +53,12 @@ const PUBLIC_PATHS: { path: string; priority: number }[] = [
   { path: '/ananselogix/demo', priority: 0.6 },
 ];
 
-export default function sitemap(): MetadataRoute.Sitemap {
+export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
+  const host = (await headers()).get('host');
+  const paths = isTransAtlanticHostname(host) ? TRANS_ATLANTIC_PATHS : [...TRANS_ATLANTIC_PATHS, ...ANANSELOGIX_PATHS];
+
   const now = new Date();
-  return PUBLIC_PATHS.map(({ path, priority }) => ({
+  return paths.map(({ path, priority }) => ({
     url: `${BASE_URL}${path}`,
     lastModified: now,
     priority,

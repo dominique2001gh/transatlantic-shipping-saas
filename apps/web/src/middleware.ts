@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
+import { isTransAtlanticHostname } from '@/lib/trans-atlantic-hostname';
 
 /**
  * Website Launch Step 9 prep: this single Next.js deployment serves every
@@ -24,11 +25,28 @@ import type { NextRequest } from 'next/server';
  * unaffected — this only ever activates for a request that actually
  * arrives on app.talogisticssolutions.com, which won't happen until DNS
  * cutover.
+ *
+ * Production-readiness follow-up: this same deployment also hosts
+ * AnanseLogix's own marketing/signup/central-login/platform-admin pages
+ * at /ananselogix/* (see AnanseLogixLayout's own doc comment on why — no
+ * separate domain/service exists yet). Those must never be reachable on
+ * any Trans Atlantic hostname — see isTransAtlanticHostname's own doc
+ * comment for the full reasoning and the intended permanent fix
+ * (extracting AnanseLogix into its own app/Railway service, bound to its
+ * own domain). Until that lands, this middleware 404s /ananselogix/* on
+ * every Trans Atlantic hostname; it stays fully reachable everywhere
+ * else (localhost, this deployment's raw Railway URL, and eventually
+ * ananselogix.com if DNS is ever pointed at this same deployment as an
+ * interim step).
  */
 const STAFF_HOSTNAME = 'app.talogisticssolutions.com';
 
 export function middleware(request: NextRequest) {
   const host = request.headers.get('host') ?? '';
+
+  if (isTransAtlanticHostname(host) && request.nextUrl.pathname.startsWith('/ananselogix')) {
+    return new NextResponse(null, { status: 404 });
+  }
 
   if (host === STAFF_HOSTNAME && request.nextUrl.pathname === '/') {
     const url = request.nextUrl.clone();
@@ -40,5 +58,5 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: '/',
+  matcher: ['/', '/ananselogix/:path*'],
 };
