@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
-import type { AuthenticatedUser, JwtPayload, LoginResponseDto } from '@transatlantic/shared';
+import type { AuthenticatedUser, CustomerEntryPointResponse, JwtPayload, LoginResponseDto } from '@transatlantic/shared';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -101,6 +101,46 @@ export class AuthService {
 
   static async hashPassword(plainTextPassword: string, saltRounds = 10): Promise<string> {
     return bcrypt.hash(plainTextPassword, saltRounds);
+  }
+
+  /**
+   * The central AnanseLogix login (/ananselogix/login) is for tenant
+   * staff and platform admins, not shipping customers — a CUSTOMER who
+   * authenticates there must not land in /portal from that entry point
+   * (see that page's own doc comment). This resolves where their
+   * tenant's *own* branded customer login lives instead, so the
+   * frontend can redirect there or fall back to a generic message.
+   *
+   * `user` is always sourced from a verified JWT (never a client-
+   * supplied tenant ID), so this can only ever answer for the tenant
+   * the caller actually authenticated into.
+   *
+   * Trans Atlantic (tenant #1) is the only tenant with a real, working
+   * local entry point today — its login page is the hardcoded
+   * apps/web/src/lib/site-config.ts-branded /login, not anything driven
+   * by Tenant table data. Every other tenant's `customDomain` is, per
+   * its own schema comment, "reserved for a future real domain cutover
+   * — deliberately unused by any routing/DNS/deployment logic today,"
+   * so there is no real, live URL to send them to yet; those tenants
+   * get `available: false` and the frontend shows a generic message
+   * instead of a link to a page that doesn't actually exist. Once
+   * per-tenant domains are wired up, this is the one place that swaps
+   * from the `slug === 'transatlantic'` special case to reading
+   * `tenant.customDomain`.
+   */
+  async resolveCustomerEntryPoint(user: AuthenticatedUser): Promise<CustomerEntryPointResponse> {
+    if (!user.tenantId) return { available: false, url: null };
+
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id: user.tenantId },
+      select: { slug: true },
+    });
+    if (!tenant) return { available: false, url: null };
+
+    if (tenant.slug === 'transatlantic') {
+      return { available: true, url: '/login' };
+    }
+    return { available: false, url: null };
   }
 
   /**

@@ -1,7 +1,9 @@
 import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import { EntitlementFeature } from '@prisma/client';
 import type { AuthenticatedUser } from '@transatlantic/shared';
 import { ShipmentItemStatus, UserRole } from '@transatlantic/shared';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { RequireEntitlement } from '../common/decorators/require-entitlement.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { requireTenantId } from '../common/tenant/tenant.util';
 import { DeliverItemDto } from './dto/deliver-item.dto';
@@ -52,6 +54,7 @@ const WAREHOUSE_ROLES = [
 const DESTINATION_RECEIVE_ROLES = [...WAREHOUSE_ROLES, UserRole.DESTINATION_AGENT];
 
 @Controller('warehouse')
+@RequireEntitlement(EntitlementFeature.OPERATIONS_SOFTWARE)
 @Roles(...WAREHOUSE_ROLES)
 export class WarehouseController {
   constructor(private readonly warehouseService: WarehouseService) {}

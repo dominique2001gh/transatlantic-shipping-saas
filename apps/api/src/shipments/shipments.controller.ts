@@ -1,7 +1,9 @@
 import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { EntitlementFeature } from '@prisma/client';
 import type { AuthenticatedUser } from '@transatlantic/shared';
 import { ShipmentStatus, UserRole } from '@transatlantic/shared';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { RequireEntitlement } from '../common/decorators/require-entitlement.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { requireTenantId } from '../common/tenant/tenant.util';
 import { CreateShipmentDto } from './dto/create-shipment.dto';
@@ -28,6 +30,7 @@ const VIEW_ROLES = [...OPERATIONS_ROLES, UserRole.ACCOUNTANT, UserRole.DESTINATI
 const VALID_STATUSES = new Set<string>(Object.values(ShipmentStatus));
 
 @Controller('shipments')
+@RequireEntitlement(EntitlementFeature.OPERATIONS_SOFTWARE)
 export class ShipmentsController {
   constructor(private readonly shipmentsService: ShipmentsService) {}
 

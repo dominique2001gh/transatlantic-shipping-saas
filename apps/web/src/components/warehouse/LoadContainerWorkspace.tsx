@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ContainerDetail, WarehouseItemDetail, WarehouseSummary } from '@transatlantic/shared';
 import { ContainerType, UserRole } from '@transatlantic/shared';
 import { StatusBadge } from '@/components/dashboard/StatusBadge';
@@ -19,6 +19,7 @@ import {
 import { scanItem, searchWarehouseItems } from '@/lib/warehouse';
 import { ContainerContentsList } from './ContainerContentsList';
 import { ScanInput } from './ScanInput';
+import { ScanSessionStats } from './ScanSessionStats';
 
 const CONTAINER_TYPES: ContainerType[] = Object.values(ContainerType);
 const FINALIZE_ROLES = new Set<UserRole>([UserRole.TENANT_OWNER, UserRole.TENANT_ADMIN, UserRole.WAREHOUSE_MANAGER]);
@@ -28,6 +29,12 @@ const FINALIZE_ROLES = new Set<UserRole>([UserRole.TENANT_OWNER, UserRole.TENANT
  * selected warehouse, then scan items into it. Item resolution reuses the
  * exact same `/warehouse/scan` lookup Receive/Process use — there is one
  * scanning implementation in this app, not a parallel one for containers.
+ *
+ * Already continuous by design (scan -> load -> refocus, no confirm click)
+ * before Phase 3 — hardware acceptance testing adds the missing pieces on
+ * top: an instant, zero-network-round-trip duplicate guard (an item
+ * already loaded on *this* container, tracked per-container so switching
+ * containers doesn't carry a stale warning) and a running session count.
  */
 export function LoadContainerWorkspace({
   warehouses,
@@ -54,6 +61,10 @@ export function LoadContainerWorkspace({
   const [finalizing, setFinalizing] = useState(false);
   const [refocusKey, setRefocusKey] = useState(0);
 
+  const [stats, setStats] = useState({ succeeded: 0, duplicates: 0, errors: 0 });
+  /** Codes loaded onto the *currently selected* container — reset whenever the selected container changes (see the effect below), since "duplicate" is scoped to one container's manifest, not the whole session. */
+  const loadedCodesRef = useRef<Set<string>>(new Set());
+
   const [manualOpen, setManualOpen] = useState(false);
   const [manualQuery, setManualQuery] = useState('');
   const [manualResults, setManualResults] = useState<WarehouseItemDetail[] | null>(null);
@@ -74,6 +85,23 @@ export function LoadContainerWorkspace({
     reloadContainerList();
   }, [reloadContainerList]);
 
+  /**
+   * Reseeds the per-container duplicate guard whenever the *selected
+   * container itself* changes (not on every content refresh after a
+   * load — that would be a no-op anyway, since the just-loaded code is
+   * already in the set) — so switching from one container to another
+   * never carries a stale "already loaded" warning from the previous one,
+   * and re-selecting a container that already has items on it correctly
+   * flags those as duplicates from the first scan.
+   */
+  const lastContainerIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (selectedContainer?.id === lastContainerIdRef.current) return;
+    lastContainerIdRef.current = selectedContainer?.id ?? null;
+    loadedCodesRef.current = new Set(selectedContainer?.items.map((item) => item.shipmentItem.itemCode) ?? []);
+    setStats({ succeeded: 0, duplicates: 0, errors: 0 });
+  }, [selectedContainer]);
+
   async function refreshSelectedContainer(id: string) {
     try {
       const container = await getContainer(id);
@@ -81,6 +109,15 @@ export function LoadContainerWorkspace({
     } catch {
       setSelectedContainer(null);
     }
+  }
+
+  /** Rapid-loading's instant, no-network duplicate guard — passed straight to ScanInput. */
+  function checkDuplicate(code: string): string | undefined {
+    if (loadedCodesRef.current.has(code)) {
+      setStats((s) => ({ ...s, duplicates: s.duplicates + 1 }));
+      return `${code} is already loaded on ${selectedContainer?.containerNumber ?? 'this container'}.`;
+    }
+    return undefined;
   }
 
   async function handleCreateContainer() {
@@ -112,6 +149,8 @@ export function LoadContainerWorkspace({
     try {
       const updated = await loadItemIntoContainer(selectedContainer.id, itemId, { scanned, scanIdentifier });
       setSelectedContainer(updated);
+      loadedCodesRef.current.add(itemCode);
+      setStats((s) => ({ ...s, succeeded: s.succeeded + 1 }));
       setSuccessMessage(
         updated.destinationWarning
           ? `${itemCode} loaded — ${updated.destinationWarning}`
@@ -120,6 +159,7 @@ export function LoadContainerWorkspace({
       reloadContainerList();
     } catch (err) {
       setLookupError(err instanceof ApiError ? err.message : 'Failed to load item.');
+      setStats((s) => ({ ...s, errors: s.errors + 1 }));
     } finally {
       setLoadingItem(false);
       setRefocusKey((key) => key + 1);
@@ -307,6 +347,7 @@ export function LoadContainerWorkspace({
             <div className="mt-4">
               <ScanInput
                 onSubmit={handleScan}
+                onDuplicate={checkDuplicate}
                 disabled={loadingItem}
                 autoFocusKey={refocusKey}
                 placeholder="Scan or type a Ready item's code, then press Enter"
@@ -364,6 +405,17 @@ export function LoadContainerWorkspace({
                   </div>
                 )}
               </div>
+            </div>
+          )}
+
+          {(selectedContainer.status === 'BOOKED' || selectedContainer.status === 'LOADING') && (
+            <div className="mt-3">
+              <ScanSessionStats
+                succeeded={stats.succeeded}
+                succeededLabel="loaded onto this container"
+                duplicates={stats.duplicates}
+                errors={stats.errors}
+              />
             </div>
           )}
 

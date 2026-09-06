@@ -1,7 +1,9 @@
 import { Body, Controller, Delete, Get, Param, Post, Query } from '@nestjs/common';
+import { EntitlementFeature } from '@prisma/client';
 import type { AuthenticatedUser } from '@transatlantic/shared';
 import { ManifestStatus, ShipmentMode, UserRole } from '@transatlantic/shared';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { RequireEntitlement } from '../common/decorators/require-entitlement.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { requireTenantId } from '../common/tenant/tenant.util';
 import { AssignContainerDto } from './dto/assign-container.dto';
@@ -55,6 +57,7 @@ const VALID_MODES = new Set<string>(Object.values(ShipmentMode));
  * (FINALIZED -> DEPARTED).
  */
 @Controller('manifests')
+@RequireEntitlement(EntitlementFeature.OPERATIONS_SOFTWARE)
 export class ManifestsController {
   constructor(private readonly manifestsService: ManifestsService) {}
 

@@ -1,8 +1,10 @@
 import { Body, Controller, Get, Param, Patch, Post, Res } from '@nestjs/common';
+import { EntitlementFeature } from '@prisma/client';
 import type { AuthenticatedUser } from '@transatlantic/shared';
 import { UserRole } from '@transatlantic/shared';
 import type { Response } from 'express';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { RequireEntitlement } from '../common/decorators/require-entitlement.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { requireCustomerId, requireTenantId } from '../common/tenant/tenant.util';
 import { sendDownload } from '../documents/documents.controller';
@@ -24,6 +26,7 @@ import { UpdatePortalProfileDto } from './dto/update-portal-profile.dto';
  */
 @Controller('portal')
 @Roles(UserRole.CUSTOMER)
+@RequireEntitlement(EntitlementFeature.CUSTOMER_PORTAL)
 export class CustomerPortalController {
   constructor(private readonly customerPortalService: CustomerPortalService) {}
 

@@ -1,5 +1,5 @@
 import type { UserRole } from '@transatlantic/shared';
-import { ANALYTICS_ROLES, DOCUMENT_MANAGE_ROLES, INVOICE_MANAGE_ROLES, LEAD_MANAGE_ROLES, NOTIFICATION_MANAGE_ROLES } from '@transatlantic/shared';
+import { ANALYTICS_ROLES, DOCUMENT_MANAGE_ROLES, INVOICE_MANAGE_ROLES, LEAD_MANAGE_ROLES, NOTIFICATION_MANAGE_ROLES, ONBOARDING_ROLES } from '@transatlantic/shared';
 
 export interface NavItem {
   label: string;
@@ -26,7 +26,8 @@ export const dashboardNavItems: NavItem[] = [
   { label: 'Website Leads', href: '/dashboard/leads', roles: LEAD_MANAGE_ROLES },
   { label: 'Reports', href: '/dashboard/reports', roles: ANALYTICS_ROLES },
   { label: 'Messages', href: '/dashboard/messages', roles: NOTIFICATION_MANAGE_ROLES },
-  { label: 'Settings', href: '/dashboard/settings' },
+  { label: 'AI Assistant', href: '/dashboard/ai-agent' },
+  { label: 'Settings', href: '/dashboard/settings', roles: ONBOARDING_ROLES },
 ];
 
 export const portalNavItems: NavItem[] = [
@@ -41,6 +42,9 @@ export const portalNavItems: NavItem[] = [
 export const platformNavItems: NavItem[] = [
   { label: 'Overview', href: '/platform' },
   { label: 'Tenants', href: '/platform/tenants' },
+  { label: 'Leads', href: '/platform/leads' },
+  { label: 'Plans & Pricing', href: '/platform/plans' },
+  { label: 'SaaS Analytics', href: '/platform/analytics' },
   { label: 'Platform Users', href: '/platform/users' },
   { label: 'Billing', href: '/platform/billing' },
   { label: 'Settings', href: '/platform/settings' },

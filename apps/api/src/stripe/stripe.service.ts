@@ -78,6 +78,95 @@ export class StripeService {
   }
 
   /**
+   * AnanseLogix Phase 1: creates a `mode: 'subscription'` Checkout Session
+   * for the self-service signup wizard — the subscription-billing
+   * counterpart to createCheckoutSession's one-time invoice payment above.
+   * Same ad-hoc `price_data` approach (no pre-created Stripe Product/Price
+   * objects to keep in sync with SaasPlanPrice — see that model's own doc
+   * comment) but with `recurring` set on the monthly line item. The
+   * optional one-time setup-fee line item is charged on the same first
+   * invoice Stripe generates for the subscription — Stripe Checkout
+   * natively supports mixing one non-recurring price with a recurring one
+   * in a single subscription-mode session.
+   *
+   * `metadata.signupSessionToken` is how the webhook handler
+   * (SubscriptionsService.handleCheckoutCompleted) finds its way back to
+   * the SignupSession row that staged this signup — the same
+   * "metadata for traceability, never for authorization" posture
+   * createCheckoutSession's own doc comment establishes (the authoritative
+   * link is SignupSession.stripeCheckoutSessionId, set by the caller
+   * immediately after this returns).
+   */
+  async createSubscriptionCheckoutSession(params: {
+    signupSessionToken: string;
+    customerEmail: string;
+    planName: string;
+    currency: string;
+    monthlyAmountCents: number;
+    setupFeeCents: number;
+    trialDays: number;
+    successUrl: string;
+    cancelUrl: string;
+  }): Promise<Stripe.Checkout.Session> {
+    const lineItems: Stripe.Checkout.SessionCreateParams.LineItem[] = [
+      {
+        quantity: 1,
+        price_data: {
+          currency: params.currency,
+          unit_amount: params.monthlyAmountCents,
+          recurring: { interval: 'month' },
+          product_data: { name: `${params.planName} — Monthly Subscription` },
+        },
+      },
+    ];
+    if (params.setupFeeCents > 0) {
+      lineItems.push({
+        quantity: 1,
+        price_data: {
+          currency: params.currency,
+          unit_amount: params.setupFeeCents,
+          product_data: { name: `${params.planName} — One-time Setup Fee` },
+        },
+      });
+    }
+
+    return this.client.checkout.sessions.create({
+      mode: 'subscription',
+      customer_email: params.customerEmail,
+      line_items: lineItems,
+      subscription_data: params.trialDays > 0 ? { trial_period_days: params.trialDays } : undefined,
+      metadata: { signupSessionToken: params.signupSessionToken },
+      success_url: params.successUrl,
+      cancel_url: params.cancelUrl,
+    });
+  }
+
+  /**
+   * AnanseLogix Phase 1: fetches the full Subscription object right after
+   * checkout completes — the Checkout Session itself only carries the
+   * subscription id, not its status/period dates/trial end, all of which
+   * TenantProvisioningService needs to populate the new TenantSubscription
+   * row correctly on the very first write (rather than waiting for a
+   * subsequent customer.subscription.updated event to backfill them).
+   */
+  async retrieveSubscription(subscriptionId: string): Promise<Stripe.Subscription> {
+    return this.client.subscriptions.retrieve(subscriptionId);
+  }
+
+  /**
+   * AnanseLogix Phase 1: creates a Stripe-hosted Billing Portal session so
+   * a tenant owner can manage their own payment method/invoice
+   * history/cancellation (Section 9's "Stripe Customer Portal") without
+   * this app building any of that UI itself — Stripe's own hosted page
+   * handles it, the same "let Stripe's page collect it" principle
+   * createCheckoutSession's own doc comment already establishes for card
+   * data.
+   */
+  async createBillingPortalSession(customerId: string, returnUrl: string): Promise<Stripe.BillingPortal.Session> {
+    return this.client.billingPortal.sessions.create({ customer: customerId, return_url: returnUrl });
+  }
+
+  /**
    * Verifies a webhook payload's signature against `STRIPE_WEBHOOK_SECRET`
    * and returns the parsed event. This is the entire security boundary
    * for the unauthenticated /webhooks/stripe route — throws on any

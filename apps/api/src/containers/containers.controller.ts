@@ -1,7 +1,9 @@
 import { Body, Controller, Delete, Get, Param, Post, Query } from '@nestjs/common';
+import { EntitlementFeature } from '@prisma/client';
 import type { AuthenticatedUser } from '@transatlantic/shared';
 import { ContainerStatus, UserRole } from '@transatlantic/shared';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { RequireEntitlement } from '../common/decorators/require-entitlement.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { requireTenantId } from '../common/tenant/tenant.util';
 import { ContainersService } from './containers.service';
@@ -44,6 +46,7 @@ const CLOSE_ROLES = [...FINALIZE_ROLES, UserRole.DESTINATION_AGENT];
 const VALID_CONTAINER_STATUSES = new Set<string>(Object.values(ContainerStatus));
 
 @Controller('containers')
+@RequireEntitlement(EntitlementFeature.OPERATIONS_SOFTWARE)
 export class ContainersController {
   constructor(private readonly containersService: ContainersService) {}
 

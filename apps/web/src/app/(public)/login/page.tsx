@@ -8,7 +8,8 @@ import { AuthShell } from '@/components/marketing/AuthShell';
 import { TextInput } from '@/components/forms/FormField';
 import { Button } from '@/components/ui/Button';
 import { apiFetch, ApiError } from '@/lib/api';
-import { homeRouteForRole, storeSession } from '@/lib/auth';
+import { storeSession } from '@/lib/auth';
+import { resolvePostLoginRoute } from '@/lib/post-login';
 
 /**
  * Stage 3J: reads ?reason=expired, set only by apiFetch's own 401 handler
@@ -45,7 +46,7 @@ export default function LoginPage() {
         body: JSON.stringify({ email, password }),
       });
       storeSession(response.accessToken, response.user);
-      router.push(homeRouteForRole(response.user.role));
+      router.push(await resolvePostLoginRoute(response.user));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Unable to log in right now.');
     } finally {

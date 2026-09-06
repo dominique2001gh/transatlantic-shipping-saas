@@ -1,7 +1,9 @@
 import { Controller, Get, Query } from '@nestjs/common';
+import { EntitlementFeature } from '@prisma/client';
 import type { AuthenticatedUser } from '@transatlantic/shared';
 import { ANALYTICS_ROLES, DASHBOARD_ROLES } from '@transatlantic/shared';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { RequireEntitlement } from '../common/decorators/require-entitlement.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { requireTenantId } from '../common/tenant/tenant.util';
 import { AnalyticsService } from './analytics.service';
@@ -25,6 +27,7 @@ import { AnalyticsQueryDto } from './dto/analytics-query.dto';
  * — see ANALYTICS_ROLES's own doc comment in @transatlantic/shared.
  */
 @Controller('analytics')
+@RequireEntitlement(EntitlementFeature.ANALYTICS)
 export class AnalyticsController {
   constructor(private readonly analyticsService: AnalyticsService) {}
 

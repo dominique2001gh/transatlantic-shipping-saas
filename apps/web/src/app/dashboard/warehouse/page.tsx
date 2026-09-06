@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { WarehouseActivityEntry, WarehouseItemDetail, WarehouseSummary } from '@transatlantic/shared';
+import { AskAiLink } from '@/components/warehouse/AskAiLink';
 import { DestinationReceiveWorkspace } from '@/components/warehouse/DestinationReceiveWorkspace';
 import { LoadContainerWorkspace } from '@/components/warehouse/LoadContainerWorkspace';
 import { ModeSelector, type WarehouseMode } from '@/components/warehouse/ModeSelector';
@@ -100,6 +101,9 @@ export default function WarehousePage() {
             Scan a package&apos;s label, or search manually if it can&apos;t be scanned. The warehouse selected here
             also filters the inventory and activity below.
           </p>
+          <p className="mt-1">
+            <AskAiLink question="How do I receive a package?" />
+          </p>
           <Card className="mt-3">
             {warehouses.length > 0 ? (
               <ReceiveWorkspace
@@ -121,6 +125,9 @@ export default function WarehousePage() {
           <p className="mt-1 text-sm text-slate-500">
             Scan a received item to record its actual weight, dimensions, and condition. Damaged or flagged items are
             automatically held and never marked ready for container loading.
+          </p>
+          <p className="mt-1">
+            <AskAiLink question="How do I process and inspect an item?" />
           </p>
           <Card className="mt-3">
             {warehouses.length > 0 ? (
@@ -144,6 +151,9 @@ export default function WarehousePage() {
             Open or book a container, then scan Processed / Ready items into it. Held, unprocessed, or already-loaded
             items are rejected automatically.
           </p>
+          <p className="mt-1">
+            <AskAiLink question="How do I load items into a container?" />
+          </p>
           <Card className="mt-3">
             {warehouses.length > 0 ? (
               <LoadContainerWorkspace
@@ -165,6 +175,9 @@ export default function WarehousePage() {
             Scan an arrived item&apos;s label to record it as physically received at this destination warehouse.
             Damaged, missing, or discrepant cargo is flagged and held for review instead — it never silently counts
             as received.
+          </p>
+          <p className="mt-1">
+            <AskAiLink question="How do I receive items at the destination warehouse and reconcile against a container's manifest?" />
           </p>
           <Card className="mt-3">
             {warehouses.length > 0 ? (

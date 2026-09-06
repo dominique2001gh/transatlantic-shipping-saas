@@ -1,8 +1,9 @@
 import { Body, Controller, Get, Param, Patch, Query } from '@nestjs/common';
 import type { AuthenticatedUser } from '@transatlantic/shared';
 import { LEAD_MANAGE_ROLES } from '@transatlantic/shared';
-import type { WebsiteLeadStatus, WebsiteLeadType } from '@prisma/client';
+import { EntitlementFeature, type WebsiteLeadStatus, type WebsiteLeadType } from '@prisma/client';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { RequireEntitlement } from '../common/decorators/require-entitlement.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { requireTenantId } from '../common/tenant/tenant.util';
 import { UpdateLeadStatusDto } from './dto/update-lead-status.dto';
@@ -18,6 +19,7 @@ import { LeadsService } from './leads.service';
  * @Roles().
  */
 @Controller('leads')
+@RequireEntitlement(EntitlementFeature.OPERATIONS_SOFTWARE)
 @Roles(...LEAD_MANAGE_ROLES)
 export class LeadsController {
   constructor(private readonly leadsService: LeadsService) {}

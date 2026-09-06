@@ -1,7 +1,9 @@
 import { BadRequestException, Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { EntitlementFeature } from '@prisma/client';
 import type { AuthenticatedUser } from '@transatlantic/shared';
 import { NOTIFICATION_MANAGE_ROLES } from '@transatlantic/shared';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { RequireEntitlement } from '../common/decorators/require-entitlement.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { requireTenantId } from '../common/tenant/tenant.util';
 import { DisruptionsService } from './disruptions.service';
@@ -11,6 +13,7 @@ const MANAGE_ROLES = NOTIFICATION_MANAGE_ROLES;
 
 /** Stage 3H: staff-composed bulk container/manifest disruption messaging — see DisruptionsService's own doc comment. */
 @Controller('disruptions')
+@RequireEntitlement(EntitlementFeature.OPERATIONS_SOFTWARE)
 export class DisruptionsController {
   constructor(private readonly disruptionsService: DisruptionsService) {}
 

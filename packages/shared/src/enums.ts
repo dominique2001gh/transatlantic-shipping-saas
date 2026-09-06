@@ -323,3 +323,94 @@ export enum WebsiteLeadStatus {
   CONTACTED = 'CONTACTED',
   CLOSED = 'CLOSED',
 }
+
+// ==========================================================================
+// SAAS PLATFORM — mirrors apps/api/prisma/schema.prisma's SAAS PLATFORM
+// section 1:1. See that section's own header comment for what this layer is.
+// ==========================================================================
+
+/**
+ * SOFTWARE_ONLY and WEBSITE_AND_SOFTWARE are retired from public sale —
+ * SOFTWARE_AND_WEBSITE_BASIC/PROFESSIONAL replace WEBSITE_AND_SOFTWARE as
+ * the combined offering, at two price points — but stay in this enum
+ * (never removed) so existing plan/subscription records from tenants who
+ * bought under the old structure keep resolving cleanly.
+ */
+export enum SaasPlanType {
+  WEBSITE_ONLY = 'WEBSITE_ONLY',
+  SOFTWARE_ONLY = 'SOFTWARE_ONLY',
+  WEBSITE_AND_SOFTWARE = 'WEBSITE_AND_SOFTWARE',
+  SOFTWARE_AND_WEBSITE_BASIC = 'SOFTWARE_AND_WEBSITE_BASIC',
+  SOFTWARE_AND_WEBSITE_PROFESSIONAL = 'SOFTWARE_AND_WEBSITE_PROFESSIONAL',
+}
+
+export enum BillingInterval {
+  MONTH = 'MONTH',
+}
+
+export enum SignupSessionStatus {
+  DRAFT = 'DRAFT',
+  AWAITING_PAYMENT = 'AWAITING_PAYMENT',
+  COMPLETED = 'COMPLETED',
+  EXPIRED = 'EXPIRED',
+}
+
+export enum SubscriptionStatus {
+  TRIALING = 'TRIALING',
+  ACTIVE = 'ACTIVE',
+  PAST_DUE = 'PAST_DUE',
+  UNPAID = 'UNPAID',
+  CANCELED = 'CANCELED',
+  SUSPENDED = 'SUSPENDED',
+}
+
+export enum SetupFeeStatus {
+  PENDING = 'PENDING',
+  PAID = 'PAID',
+  WAIVED = 'WAIVED',
+}
+
+export enum EntitlementFeature {
+  PUBLIC_WEBSITE = 'PUBLIC_WEBSITE',
+  OPERATIONS_SOFTWARE = 'OPERATIONS_SOFTWARE',
+  CUSTOMER_PORTAL = 'CUSTOMER_PORTAL',
+  TRACKING = 'TRACKING',
+  BILLING = 'BILLING',
+  ANALYTICS = 'ANALYTICS',
+  AI_AGENT = 'AI_AGENT',
+  ADVANCED_FEATURES = 'ADVANCED_FEATURES',
+}
+
+export enum OnboardingStep {
+  BRANDING = 'BRANDING',
+  OPERATIONS = 'OPERATIONS',
+  STAFF = 'STAFF',
+  TRACKING = 'TRACKING',
+  NOTIFICATIONS = 'NOTIFICATIONS',
+  BILLING = 'BILLING',
+  DONE = 'DONE',
+}
+
+export enum TenantInvitationStatus {
+  PENDING = 'PENDING',
+  ACCEPTED = 'ACCEPTED',
+  EXPIRED = 'EXPIRED',
+  REVOKED = 'REVOKED',
+}
+
+/** Platform-level triage state for a prospect wanting to become a tenant — separate from WebsiteLeadStatus. */
+export enum PlatformLeadStatus {
+  NEW = 'NEW',
+  CONTACTED = 'CONTACTED',
+  DEMO_SCHEDULED = 'DEMO_SCHEDULED',
+  TRIAL = 'TRIAL',
+  CONVERTED = 'CONVERTED',
+  LOST = 'LOST',
+}
+
+export enum PlatformLeadSource {
+  DIRECT = 'DIRECT',
+  CAMPAIGN = 'CAMPAIGN',
+  REFERRAL = 'REFERRAL',
+  SALES_OUTREACH = 'SALES_OUTREACH',
+}

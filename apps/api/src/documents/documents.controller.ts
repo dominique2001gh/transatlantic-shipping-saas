@@ -12,11 +12,13 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { EntitlementFeature } from '@prisma/client';
 import type { AuthenticatedUser } from '@transatlantic/shared';
 import { DOCUMENT_MANAGE_ROLES } from '@transatlantic/shared';
 import type { Response } from 'express';
 import { memoryStorage } from 'multer';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { RequireEntitlement } from '../common/decorators/require-entitlement.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { requireTenantId } from '../common/tenant/tenant.util';
 import { ALLOWED_DOCUMENT_MIME_TYPES, MAX_DOCUMENT_SIZE_BYTES, type UploadedFile } from './documents.service';
@@ -49,6 +51,7 @@ const UPLOAD_INTERCEPTOR_OPTIONS = {
 };
 
 @Controller('documents')
+@RequireEntitlement(EntitlementFeature.OPERATIONS_SOFTWARE)
 export class DocumentsController {
   constructor(private readonly documentsService: DocumentsService) {}
 

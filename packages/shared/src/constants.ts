@@ -164,3 +164,12 @@ export const LEAD_MANAGE_ROLES: UserRole[] = [
   UserRole.CUSTOMER_SERVICE,
   UserRole.DESTINATION_AGENT,
 ];
+
+/**
+ * AnanseLogix Phase 1: roles that may run the post-signup onboarding
+ * wizard and invite initial staff — deliberately narrower than
+ * DASHBOARD_ROLES. Onboarding configures tenant-wide branding/billing/
+ * staff-invitation, not day-to-day operational work, so it stays scoped
+ * to the two roles capable of administering the tenant itself.
+ */
+export const ONBOARDING_ROLES: UserRole[] = [UserRole.TENANT_OWNER, UserRole.TENANT_ADMIN];

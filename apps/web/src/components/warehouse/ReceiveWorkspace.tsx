@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import type { WarehouseItemDetail, WarehouseSummary } from '@transatlantic/shared';
 import { Button } from '@/components/ui/Button';
 import { ApiError } from '@/lib/api';
@@ -8,11 +8,20 @@ import { humanizeEnumValue } from '@/lib/format';
 import { receiveItem, scanItem, searchWarehouseItems } from '@/lib/warehouse';
 import { ItemConfirmPanel } from './ItemConfirmPanel';
 import { ScanInput } from './ScanInput';
+import { ScanSessionStats } from './ScanSessionStats';
 
 /**
  * RECEIVE mode's full workflow: scan (fast path) or manual search
  * (fallback) both resolve to the same ItemConfirmPanel and the same
  * `receiveItem` call — there is exactly one receiving implementation.
+ *
+ * Phase 3 (hardware acceptance testing): adds an opt-in "Rapid Scan"
+ * toggle for the common no-exception case, so a real 2D scanner can
+ * receive a continuous stream of packages without a mouse click between
+ * each one. The default (toggle off) confirm-panel flow — unchanged from
+ * before — stays the right choice whenever staff actually need to look at
+ * what a scan resolved to before committing it; Rapid Scan is an
+ * additional option, not a replacement.
  */
 export function ReceiveWorkspace({
   warehouses,
@@ -32,23 +41,62 @@ export function ReceiveWorkspace({
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [refocusKey, setRefocusKey] = useState(0);
 
+  const [rapidMode, setRapidMode] = useState(false);
+  const [stats, setStats] = useState({ succeeded: 0, duplicates: 0, errors: 0 });
+  /** Codes successfully received this session — Rapid Scan's zero-network-round-trip duplicate guard (see ScanInput's own doc comment on `onDuplicate`). Cleared on page reload, same lifetime as `stats`. */
+  const receivedCodesRef = useRef<Set<string>>(new Set());
+
   const [manualOpen, setManualOpen] = useState(false);
   const [manualQuery, setManualQuery] = useState('');
   const [manualResults, setManualResults] = useState<WarehouseItemDetail[] | null>(null);
   const [manualSearching, setManualSearching] = useState(false);
+
+  /** Shared by both the manual "Confirm Receipt" click and Rapid Scan's auto-commit — one receiving implementation, two ways to trigger it. */
+  async function commitReceive(item: WarehouseItemDetail, code: string | undefined) {
+    await receiveItem(item.id, {
+      warehouseId: selectedWarehouseId,
+      scanned: !!code,
+      scanIdentifier: code,
+    });
+    if (code) receivedCodesRef.current.add(code);
+    setSuccessMessage(`Received ${item.itemCode} — ${item.shipment.trackingNumber}`);
+    setStats((s) => ({ ...s, succeeded: s.succeeded + 1 }));
+  }
 
   async function handleScan(code: string) {
     setLookupError(null);
     setSuccessMessage(null);
     try {
       const item = await scanItem(code);
+      if (rapidMode) {
+        try {
+          await commitReceive(item, code);
+          onReceived();
+        } catch (err) {
+          setLookupError(err instanceof ApiError ? err.message : 'Failed to receive item.');
+          setStats((s) => ({ ...s, errors: s.errors + 1 }));
+        } finally {
+          setRefocusKey((key) => key + 1);
+        }
+        return;
+      }
       setResolvedItem(item);
       setScannedCode(code);
     } catch (err) {
       setResolvedItem(null);
       setLookupError(err instanceof ApiError ? err.message : 'Lookup failed.');
+      setStats((s) => ({ ...s, errors: s.errors + 1 }));
       setRefocusKey((key) => key + 1);
     }
+  }
+
+  /** Rapid Scan's instant, no-network duplicate guard — passed straight to ScanInput. */
+  function checkDuplicate(code: string): string | undefined {
+    if (rapidMode && receivedCodesRef.current.has(code)) {
+      setStats((s) => ({ ...s, duplicates: s.duplicates + 1 }));
+      return `${code} was already received this session.`;
+    }
+    return undefined;
   }
 
   async function handleManualSearch() {
@@ -78,18 +126,14 @@ export function ReceiveWorkspace({
     if (!resolvedItem || !selectedWarehouseId) return;
     setConfirming(true);
     try {
-      await receiveItem(resolvedItem.id, {
-        warehouseId: selectedWarehouseId,
-        scanned: !!scannedCode,
-        scanIdentifier: scannedCode,
-      });
-      setSuccessMessage(`Received ${resolvedItem.itemCode} — ${resolvedItem.shipment.trackingNumber}`);
+      await commitReceive(resolvedItem, scannedCode);
       setResolvedItem(null);
       setScannedCode(undefined);
       setRefocusKey((key) => key + 1);
       onReceived();
     } catch (err) {
       setLookupError(err instanceof ApiError ? err.message : 'Failed to receive item.');
+      setStats((s) => ({ ...s, errors: s.errors + 1 }));
     } finally {
       setConfirming(false);
     }
@@ -104,7 +148,12 @@ export function ReceiveWorkspace({
   return (
     <div className="flex flex-col gap-4">
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_auto]">
-        <ScanInput onSubmit={handleScan} disabled={!selectedWarehouseId} autoFocusKey={refocusKey} />
+        <ScanInput
+          onSubmit={handleScan}
+          onDuplicate={checkDuplicate}
+          disabled={!selectedWarehouseId}
+          autoFocusKey={refocusKey}
+        />
         <div className="sm:w-64">
           <label htmlFor="receiveWarehouse" className="sr-only">
             Receiving warehouse
@@ -124,6 +173,29 @@ export function ReceiveWorkspace({
         </div>
       </div>
 
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
+          <input
+            type="checkbox"
+            checked={rapidMode}
+            onChange={(event) => {
+              setRapidMode(event.target.checked);
+              setResolvedItem(null);
+              setRefocusKey((key) => key + 1);
+            }}
+            className="h-4 w-4 rounded border-slate-300 text-primary-700 focus:ring-primary-500"
+          />
+          Rapid Scan Mode
+        </label>
+        <span className="text-xs text-slate-500">
+          {rapidMode
+            ? 'Each scan receives immediately — no confirm click. Use for straightforward, no-exception intake.'
+            : 'Each scan shows item details for you to confirm before it counts as received.'}
+        </span>
+      </div>
+
+      {rapidMode && <ScanSessionStats succeeded={stats.succeeded} duplicates={stats.duplicates} errors={stats.errors} />}
+
       {successMessage && (
         <p role="status" className="rounded-lg bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-800">
           {successMessage}
@@ -135,7 +207,7 @@ export function ReceiveWorkspace({
         </p>
       )}
 
-      {resolvedItem && (
+      {resolvedItem && !rapidMode && (
         <ItemConfirmPanel
           item={resolvedItem}
           onConfirm={handleConfirm}

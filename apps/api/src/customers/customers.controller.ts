@@ -1,7 +1,9 @@
 import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { EntitlementFeature } from '@prisma/client';
 import type { AuthenticatedUser } from '@transatlantic/shared';
 import { UserRole } from '@transatlantic/shared';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { RequireEntitlement } from '../common/decorators/require-entitlement.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { requireTenantId } from '../common/tenant/tenant.util';
 import { CustomersService } from './customers.service';
@@ -24,6 +26,7 @@ const VIEW_ROLES = [
 ];
 
 @Controller('customers')
+@RequireEntitlement(EntitlementFeature.OPERATIONS_SOFTWARE)
 export class CustomersController {
   constructor(private readonly customersService: CustomersService) {}
 

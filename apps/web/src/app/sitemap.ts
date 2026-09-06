@@ -27,6 +27,17 @@ const PUBLIC_PATHS: { path: string; priority: number }[] = [
   { path: '/contact', priority: 0.7 },
   { path: '/quote', priority: 0.9 },
   { path: '/track', priority: 0.8 },
+  // AnanseLogix Phase 2: the platform's own marketing site, mounted at
+  // /ananselogix/* in this single deployment (see AnanseLogixLayout's own
+  // doc comment on why — no separate domain/DNS exists yet). Transactional
+  // pages (signup wizard, its success page) are excluded, same reasoning
+  // as /login and /register above.
+  { path: '/ananselogix', priority: 0.9 },
+  { path: '/ananselogix/features', priority: 0.7 },
+  { path: '/ananselogix/solutions', priority: 0.7 },
+  { path: '/ananselogix/how-it-works', priority: 0.7 },
+  { path: '/ananselogix/pricing', priority: 0.8 },
+  { path: '/ananselogix/demo', priority: 0.6 },
 ];
 
 export default function sitemap(): MetadataRoute.Sitemap {

@@ -7,6 +7,10 @@ import type { MetadataRoute } from 'next';
  * though they sit behind login anyway (defense in depth, and keeps them
  * out of search results entirely rather than showing an indexed login
  * wall). Everything else (the public marketing site) is allowed.
+ *
+ * AnanseLogix Phase 2: /onboarding (authenticated setup wizard) and the
+ * signup wizard's own transactional pages are excluded the same way —
+ * /ananselogix itself (the marketing site) stays crawlable.
  */
 const BASE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://talogisticssolutions.com';
 
@@ -15,7 +19,7 @@ export default function robots(): MetadataRoute.Robots {
     rules: {
       userAgent: '*',
       allow: '/',
-      disallow: ['/dashboard', '/portal', '/platform'],
+      disallow: ['/dashboard', '/portal', '/platform', '/onboarding', '/ananselogix/signup'],
     },
     sitemap: `${BASE_URL}/sitemap.xml`,
   };

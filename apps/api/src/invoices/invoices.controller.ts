@@ -1,7 +1,9 @@
 import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import { EntitlementFeature } from '@prisma/client';
 import type { AuthenticatedUser } from '@transatlantic/shared';
 import { INVOICE_MANAGE_ROLES, InvoiceStatus } from '@transatlantic/shared';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { RequireEntitlement } from '../common/decorators/require-entitlement.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { requireTenantId } from '../common/tenant/tenant.util';
 import { CreatePaymentDto } from '../payments/dto/create-payment.dto';
@@ -26,6 +28,7 @@ const VIEW_ROLES = MANAGE_ROLES;
 const VALID_STATUSES = new Set<string>(Object.values(InvoiceStatus));
 
 @Controller('invoices')
+@RequireEntitlement(EntitlementFeature.OPERATIONS_SOFTWARE)
 export class InvoicesController {
   constructor(
     private readonly invoicesService: InvoicesService,

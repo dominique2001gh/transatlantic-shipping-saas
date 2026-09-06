@@ -1,24 +1,34 @@
 import type {
   AddressType,
+  BillingInterval,
   ContainerStatus,
   ContainerType,
   DimensionUnit,
   DisruptionType,
   DocumentType,
+  EntitlementFeature,
   InvoiceStatus,
   ItemProcessingResult,
   ManifestStatus,
   NotificationChannel,
   NotificationEventType,
   NotificationStatus,
+  OnboardingStep,
   PaymentMethod,
   PaymentSource,
   PaymentStatus,
+  PlatformLeadSource,
+  PlatformLeadStatus,
+  SaasPlanType,
+  SetupFeeStatus,
   ShipmentItemCondition,
   ShipmentItemStatus,
   ShipmentItemType,
   ShipmentMode,
   ShipmentStatus,
+  SignupSessionStatus,
+  SubscriptionStatus,
+  TenantInvitationStatus,
   TrackingEventSource,
   TrackingEventType,
   WebsiteLeadStatus,
@@ -62,6 +72,21 @@ export interface LoginRequestDto {
 export interface LoginResponseDto {
   accessToken: string;
   user: AuthenticatedUser;
+}
+
+/**
+ * Used only by the central AnanseLogix login (/ananselogix/login) to
+ * decide what to do with a CUSTOMER-role account: that page is for
+ * tenant staff/platform admins, not shipping customers, so a CUSTOMER
+ * who authenticates there gets redirected to their own tenant's
+ * branded customer login instead of /portal — see AuthService's
+ * resolveCustomerEntryPoint for how `url` is decided. `url` is either a
+ * same-app relative path or (once real per-tenant domains exist) an
+ * absolute URL; never a raw tenant ID or other internal identifier.
+ */
+export interface CustomerEntryPointResponse {
+  available: boolean;
+  url: string | null;
 }
 
 /** Standard shape for a validation/error response from the API. */
@@ -1153,4 +1178,278 @@ export interface AnalyticsExceptionsResponse {
   /** Null if nothing in range has ever been resolved to average. */
   avgResolutionHours: number | null;
   exceptionsByType: ExceptionsByType[];
+}
+
+// ==========================================================================
+// SAAS PLATFORM — signup, subscriptions, onboarding, entitlements, leads
+// ==========================================================================
+
+export interface SaasPlanPriceSummary {
+  id: string;
+  interval: BillingInterval;
+  currency: string;
+  setupFeeCents: number;
+  monthlyAmountCents: number;
+  trialDays: number;
+  promoLabel: string | null;
+  /** Null means the promo (if active) only discounts the monthly amount, not the setup fee. */
+  promoSetupFeeCents: number | null;
+  promoMonthlyAmountCents: number | null;
+  promoStartsAt: string | null;
+  promoEndsAt: string | null;
+  /** The admin's own on/off switch for the promo — independent of the date window. */
+  promoIsActive: boolean;
+  /** Null means unlimited redemptions. */
+  promoMaxRedemptions: number | null;
+  promoRedemptionCount: number;
+  isFoundingOffer: boolean;
+  /** Whether the promo is in effect *right now* — every condition (promoIsActive, date window, redemption cap) already evaluated server-side. */
+  isPromoCurrentlyActive: boolean;
+  /** setupFeeCents, or promoSetupFeeCents when the promo is currently active — computed server-side. */
+  effectiveSetupFeeCents: number;
+  /** monthlyAmountCents, or promoMonthlyAmountCents when the promo is currently active — computed server-side. */
+  effectiveMonthlyAmountCents: number;
+}
+
+/** Public, unauthenticated shape returned by GET /public/plans. */
+export interface SaasPlanSummary {
+  id: string;
+  key: SaasPlanType;
+  name: string;
+  description: string | null;
+  /** Null when no active price has been configured yet — the frontend must show a "pricing coming soon" state, never a fabricated number. */
+  price: SaasPlanPriceSummary | null;
+}
+
+/** Step 3 of the signup wizard — kept as one bag since it's staged as SignupSession.companyDetails Json until provisioning. */
+export interface SignupCompanyDetails {
+  legalName: string;
+  tradingName?: string;
+  businessPhone?: string;
+  businessEmail?: string;
+  existingWebsite?: string;
+  country: string;
+  stateRegion?: string;
+  city?: string;
+  address?: string;
+  timezone: string;
+  primaryShippingMarkets: string[];
+  serviceTypes: string[];
+}
+
+export interface StartSignupRequest {
+  planKey: SaasPlanType;
+}
+
+export interface StartSignupResponse {
+  token: string;
+}
+
+export interface SignupOwnerRequest {
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone?: string;
+  password: string;
+  confirmPassword: string;
+}
+
+export interface SignupCheckoutRequest {
+  successUrl: string;
+  cancelUrl: string;
+}
+
+export interface SignupCheckoutResponse {
+  url: string;
+}
+
+/**
+ * Polled by the signup success page — never derived from the redirect's
+ * own query params, only from server state the Stripe webhook wrote (see
+ * the Phase 1 build plan's "never trust the frontend redirect" rule).
+ */
+export interface SignupStatusResponse {
+  status: SignupSessionStatus;
+  tenantSlug: string | null;
+}
+
+export interface PlatformLeadCreateRequest {
+  companyName: string;
+  contactName: string;
+  phone?: string;
+  email: string;
+  country?: string;
+  currentWorkflow?: string;
+  monthlyShipmentVolume?: string;
+  currentSoftware?: string;
+  servicesOffered: string[];
+  message?: string;
+  source?: PlatformLeadSource;
+}
+
+export interface PlatformLeadSummary {
+  id: string;
+  status: PlatformLeadStatus;
+  source: PlatformLeadSource;
+  companyName: string;
+  contactName: string;
+  phone: string | null;
+  email: string;
+  country: string | null;
+  currentWorkflow: string | null;
+  monthlyShipmentVolume: string | null;
+  currentSoftware: string | null;
+  servicesOffered: string[];
+  message: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TenantSubscriptionSummary {
+  tenantId: string;
+  planKey: SaasPlanType;
+  planName: string;
+  status: SubscriptionStatus;
+  currentPeriodStart: string | null;
+  currentPeriodEnd: string | null;
+  trialEndsAt: string | null;
+  setupFeeStatus: SetupFeeStatus;
+  cancelAtPeriodEnd: boolean;
+  gracePeriodEndsAt: string | null;
+}
+
+export interface TenantEntitlementItem {
+  feature: EntitlementFeature;
+  enabled: boolean;
+}
+
+export interface TenantOnboardingSummary {
+  currentStep: OnboardingStep;
+  brandingCompletedAt: string | null;
+  operationsCompletedAt: string | null;
+  staffInvitedAt: string | null;
+  trackingCompletedAt: string | null;
+  notificationsCompletedAt: string | null;
+  completedAt: string | null;
+}
+
+/** Row shape for the platform-admin tenants list — extends the base Tenant fields with commercial/onboarding status. */
+export interface PlatformTenantListItem {
+  id: string;
+  name: string;
+  slug: string;
+  isActive: boolean;
+  createdAt: string;
+  subscription: TenantSubscriptionSummary | null;
+  onboardingStep: OnboardingStep | null;
+  onboardingCompleted: boolean;
+}
+
+export interface TenantInvitationSummary {
+  id: string;
+  email: string;
+  role: UserRole;
+  status: TenantInvitationStatus;
+  expiresAt: string;
+  createdAt: string;
+}
+
+export interface CreateTenantInvitationRequest {
+  email: string;
+  role: UserRole;
+}
+
+export interface AiAgentAskRequest {
+  question: string;
+}
+
+export interface AiAgentAskResponse {
+  answer: string;
+}
+
+// ==========================================================================
+// AnanseLogix Phase 2 — tenant-branded public website config (Section 15)
+// ==========================================================================
+
+export interface TenantLocationSummary {
+  id: string;
+  label: string;
+  city: string;
+  region: string | null;
+  country: string;
+}
+
+export interface PublicSiteConfigResponse {
+  slug: string;
+  companyName: string;
+  tagline: string | null;
+  aboutContent: string | null;
+  logoUrl: string | null;
+  primaryColor: string | null;
+  secondaryColor: string | null;
+  heroHeadline: string | null;
+  heroSubheadline: string | null;
+  serviceTypes: string[];
+  contact: {
+    email: string;
+    phone: string | null;
+    whatsapp: string | null;
+  };
+  locations: TenantLocationSummary[];
+  socialLinks: {
+    facebook: string | null;
+    linkedin: string | null;
+    instagram: string | null;
+    whatsapp: string | null;
+  };
+}
+
+export interface UpdateSiteConfigRequest {
+  tagline?: string;
+  aboutContent?: string;
+  heroHeadline?: string;
+  heroSubheadline?: string;
+  serviceTypes?: string[];
+  facebookUrl?: string;
+  linkedinUrl?: string;
+  instagramUrl?: string;
+}
+
+export interface TenantLocationInput {
+  label: string;
+  city: string;
+  region?: string;
+  country: string;
+}
+
+export interface UpdateTenantLocationsRequest {
+  locations: TenantLocationInput[];
+}
+
+// ==========================================================================
+// AnanseLogix Phase 2 — platform-wide SaaS usage analytics (Section 23)
+// ==========================================================================
+
+export interface SaasPlanDistributionItem {
+  planKey: SaasPlanType;
+  planName: string;
+  tenantCount: number;
+}
+
+/**
+ * Derived entirely from existing tables (SignupSession, PlatformLead,
+ * Tenant, TenantSubscription) — no new invasive tracking/pageview model.
+ * See SaasAnalyticsService's own doc comment.
+ */
+export interface SaasAnalyticsResponse {
+  signupStarts: number;
+  checkoutStarts: number;
+  signupCompletions: number;
+  demoRequests: number;
+  activeTenants: number;
+  trialingTenants: number;
+  pastDueTenants: number;
+  suspendedTenants: number;
+  canceledTenants: number;
+  planDistribution: SaasPlanDistributionItem[];
 }
