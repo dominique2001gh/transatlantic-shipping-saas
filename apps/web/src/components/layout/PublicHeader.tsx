@@ -6,7 +6,6 @@ import { usePathname } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import {
   IconChevronDown,
-  IconClose,
   IconMail,
   IconMapPin,
   IconMenu,
@@ -14,7 +13,7 @@ import {
 } from '@/components/icons';
 import { LinkButton } from '@/components/ui/Button';
 import { Container } from '@/components/ui/Container';
-import { TopInfoBar } from '@/components/layout/TopInfoBar';
+import { socialPlatforms, TopInfoBar } from '@/components/layout/TopInfoBar';
 import { services } from '@/lib/services-data';
 import { primaryNavLinks } from '@/lib/site-nav';
 import { siteConfig } from '@/lib/site-config';
@@ -38,6 +37,49 @@ import { siteConfig } from '@/lib/site-config';
  * so branding + navigation stay visible while contact-block clutter
  * doesn't compete for space once scrolled.
  */
+
+/**
+ * Renders the same `socialPlatforms` list (from TopInfoBar — the single
+ * source of truth for these destinations) as a row of icon links. Shared
+ * between the always-visible compact mobile contact bar and the hamburger
+ * menu so both stay in sync with zero duplicated link configuration.
+ */
+function SocialIconLinks({ iconClassName, onLinkClick }: { iconClassName: string; onLinkClick?: () => void }) {
+  return (
+    <>
+      {socialPlatforms.map((platform) => {
+        const Icon = platform.icon;
+        if (platform.url) {
+          return (
+            <a
+              key={platform.label}
+              href={platform.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label={platform.label}
+              onClick={onLinkClick}
+              className={`${platform.brandClassName} ${platform.hoverClassName ?? ''}`}
+            >
+              <Icon className={iconClassName} />
+            </a>
+          );
+        }
+        return (
+          <span
+            key={platform.label}
+            aria-disabled="true"
+            aria-label={`${platform.label} (link not yet configured)`}
+            title={`${platform.label} — URL not yet configured`}
+            className={`cursor-not-allowed ${platform.brandClassName}`}
+          >
+            <Icon className={iconClassName} />
+          </span>
+        );
+      })}
+    </>
+  );
+}
+
 export function PublicHeader() {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -138,11 +180,39 @@ export function PublicHeader() {
             type="button"
             className="inline-flex items-center justify-center rounded-md p-2 text-slate-600 lg:hidden"
             onClick={() => setMobileOpen((value) => !value)}
-            aria-label="Toggle menu"
+            aria-label={mobileOpen ? 'Close menu' : 'Open menu'}
             aria-expanded={mobileOpen}
           >
-            {mobileOpen ? <IconClose className="h-6 w-6" /> : <IconMenu className="h-6 w-6" />}
+            <IconMenu className="h-6 w-6" />
           </button>
+        </Container>
+
+        {/*
+          Compact mobile contact/access bar — always visible on real phones
+          (below `sm`, where TopInfoBar's equivalent tablet/desktop utility
+          bar is hidden), so phone/email/social/Customer Login don't require
+          opening the hamburger menu first. Deliberately not shown at `sm`+:
+          TopInfoBar already covers that range with the same information.
+        */}
+        <Container className="flex flex-col gap-1.5 border-t border-slate-100 py-2 sm:hidden">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] font-medium text-slate-600">
+            <a href={`tel:${siteConfig.contact.phoneHref}`} className="flex shrink-0 items-center gap-1.5 hover:text-primary-700">
+              <IconPhone className="h-3.5 w-3.5 shrink-0 text-primary-700" />
+              {siteConfig.contact.phone}
+            </a>
+            <a href={`mailto:${siteConfig.contact.email}`} className="flex min-w-0 items-center gap-1.5 hover:text-primary-700">
+              <IconMail className="h-3.5 w-3.5 shrink-0 text-primary-700" />
+              <span className="truncate">{siteConfig.contact.email}</span>
+            </a>
+          </div>
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <SocialIconLinks iconClassName="h-3.5 w-3.5" />
+            </div>
+            <Link href="/login" className="shrink-0 text-[11px] font-semibold text-primary-700 hover:text-primary-800">
+              Customer Login
+            </Link>
+          </div>
         </Container>
       </div>
 
@@ -273,6 +343,18 @@ export function PublicHeader() {
                 {siteConfig.contact.email}
               </a>
             </div>
+
+            <div className="mt-4 flex items-center justify-center gap-5 border-t border-slate-100 pt-4">
+              <SocialIconLinks iconClassName="h-5 w-5" onLinkClick={() => setMobileOpen(false)} />
+            </div>
+
+            <Link
+              href="/login"
+              className="mt-4 rounded-md px-2 py-3 text-sm font-medium text-slate-700"
+              onClick={() => setMobileOpen(false)}
+            >
+              Customer Login
+            </Link>
 
             <LinkButton href="/track" className="mt-4 justify-center" onClick={() => setMobileOpen(false)}>
               Track Shipment

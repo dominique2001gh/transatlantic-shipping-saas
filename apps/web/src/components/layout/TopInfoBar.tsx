@@ -5,7 +5,7 @@ import type { IconProps } from '@/components/icons';
 import { Container } from '@/components/ui/Container';
 import { siteConfig } from '@/lib/site-config';
 
-interface SocialPlatform {
+export interface SocialPlatform {
   label: string;
   url: string | null;
   icon: ComponentType<IconProps>;
@@ -24,7 +24,8 @@ interface SocialPlatform {
   hoverClassName?: string;
 }
 
-const socialPlatforms: SocialPlatform[] = [
+/** Exported so other chrome (e.g. the mobile nav menu in PublicHeader) can reuse the exact same destinations instead of duplicating/drifting from this list. */
+export const socialPlatforms: SocialPlatform[] = [
   { label: 'Facebook', url: siteConfig.socialLinks.facebook, icon: IconFacebook, brandClassName: 'text-[#1877F2]' },
   { label: 'LinkedIn', url: siteConfig.socialLinks.linkedin, icon: IconLinkedIn, brandClassName: 'text-[#0A66C2]' },
   {
