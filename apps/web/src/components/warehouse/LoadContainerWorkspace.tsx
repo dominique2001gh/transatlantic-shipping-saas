@@ -16,6 +16,7 @@ import {
   loadItemIntoContainer,
   unloadItemFromContainer,
 } from '@/lib/containers';
+import { playScanErrorTone, playScanSuccessTone } from '@/lib/scan-feedback';
 import { scanItem, searchWarehouseItems } from '@/lib/warehouse';
 import { ContainerContentsList } from './ContainerContentsList';
 import { ScanInput } from './ScanInput';
@@ -151,6 +152,7 @@ export function LoadContainerWorkspace({
       setSelectedContainer(updated);
       loadedCodesRef.current.add(itemCode);
       setStats((s) => ({ ...s, succeeded: s.succeeded + 1 }));
+      playScanSuccessTone();
       setSuccessMessage(
         updated.destinationWarning
           ? `${itemCode} loaded — ${updated.destinationWarning}`
@@ -158,6 +160,7 @@ export function LoadContainerWorkspace({
       );
       reloadContainerList();
     } catch (err) {
+      playScanErrorTone();
       setLookupError(err instanceof ApiError ? err.message : 'Failed to load item.');
       setStats((s) => ({ ...s, errors: s.errors + 1 }));
     } finally {
@@ -172,6 +175,7 @@ export function LoadContainerWorkspace({
       const item = await scanItem(code);
       await loadResolvedItem(item.id, item.itemCode, true, code);
     } catch (err) {
+      playScanErrorTone();
       setLookupError(err instanceof ApiError ? err.message : 'Lookup failed.');
       setRefocusKey((key) => key + 1);
     }

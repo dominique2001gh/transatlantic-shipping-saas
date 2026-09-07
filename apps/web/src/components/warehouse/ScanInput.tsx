@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { IconSearch } from '@/components/icons';
+import { playScanErrorTone } from '@/lib/scan-feedback';
 
 /**
  * Reusable scan-input field for any warehouse operation mode. USB,
@@ -71,6 +72,7 @@ export function ScanInput({
       setValue('');
       if (duplicateMessage) {
         setDuplicateWarning(duplicateMessage);
+        playScanErrorTone();
         return;
       }
       setDuplicateWarning(null);

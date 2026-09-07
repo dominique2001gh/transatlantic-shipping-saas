@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/Button';
 import { ApiError } from '@/lib/api';
 import { getContainer, listContainers } from '@/lib/containers';
 import { humanizeEnumValue } from '@/lib/format';
+import { playScanErrorTone, playScanSuccessTone } from '@/lib/scan-feedback';
 import { destinationReceiveItem, scanItem, searchWarehouseItems } from '@/lib/warehouse';
 import { ScanInput } from './ScanInput';
 import { ScanSessionStats } from './ScanSessionStats';
@@ -63,6 +64,8 @@ export function DestinationReceiveWorkspace({
   const [confirming, setConfirming] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [refocusKey, setRefocusKey] = useState(0);
+  /** Guards Rapid Scan's scan-to-commit round trip the same way LoadContainerWorkspace's `loadingItem` guards its own — see ReceiveWorkspace's identical field for the full rationale. */
+  const [scanBusy, setScanBusy] = useState(false);
 
   const [condition, setCondition] = useState<ShipmentItemCondition>(ShipmentItemCondition.GOOD);
   const [hasException, setHasException] = useState(false);
@@ -161,6 +164,7 @@ export function DestinationReceiveWorkspace({
     setLookupError(null);
     setSuccessMessage(null);
     setManifestWarning(null);
+    if (rapidMode) setScanBusy(true);
     try {
       const item = await scanItem(code);
       setManifestWarning(checkManifestMembership(item.itemCode));
@@ -168,22 +172,28 @@ export function DestinationReceiveWorkspace({
       if (rapidMode) {
         try {
           await commitDestinationReceive(item, code, { condition: ShipmentItemCondition.GOOD, hasException: false });
+          playScanSuccessTone();
         } catch (err) {
+          playScanErrorTone();
           setLookupError(err instanceof ApiError ? err.message : 'Failed to receive item.');
           setStats((s) => ({ ...s, errors: s.errors + 1 }));
         } finally {
+          setScanBusy(false);
           setRefocusKey((key) => key + 1);
         }
         return;
       }
 
+      playScanSuccessTone();
       setResolvedItem(item);
       setScannedCode(code);
       resetForm();
     } catch (err) {
+      playScanErrorTone();
       setResolvedItem(null);
       setLookupError(err instanceof ApiError ? err.message : 'Lookup failed.');
       setStats((s) => ({ ...s, errors: s.errors + 1 }));
+      if (rapidMode) setScanBusy(false);
       setRefocusKey((key) => key + 1);
     }
   }
@@ -251,7 +261,7 @@ export function DestinationReceiveWorkspace({
         <ScanInput
           onSubmit={handleScan}
           onDuplicate={checkDuplicate}
-          disabled={!selectedWarehouseId}
+          disabled={!selectedWarehouseId || scanBusy}
           autoFocusKey={refocusKey}
           placeholder="Scan or type an arrived item's code, then press Enter"
         />

@@ -6,6 +6,7 @@ import type { WarehouseItemDetail, WarehouseSummary } from '@transatlantic/share
 import { Button } from '@/components/ui/Button';
 import { ApiError } from '@/lib/api';
 import { humanizeEnumValue } from '@/lib/format';
+import { playScanErrorTone, playScanSuccessTone } from '@/lib/scan-feedback';
 import { processItem, scanItem, searchWarehouseItems, type ProcessItemInput } from '@/lib/warehouse';
 import { AlreadyProcessedSummary } from './AlreadyProcessedSummary';
 import { InspectionForm } from './InspectionForm';
@@ -56,10 +57,12 @@ export function ProcessWorkspace({
     setSuccessMessage(null);
     try {
       const item = await scanItem(code);
+      playScanSuccessTone();
       setResolvedItem(item);
       setScannedCode(code);
       setReinspecting(false);
     } catch (err) {
+      playScanErrorTone();
       setResolvedItem(null);
       setLookupError(err instanceof ApiError ? err.message : 'Lookup failed.');
       setRefocusKey((key) => key + 1);

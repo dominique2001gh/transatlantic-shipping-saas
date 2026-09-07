@@ -5,6 +5,7 @@ import type { WarehouseItemDetail, WarehouseSummary } from '@transatlantic/share
 import { StatusBadge } from '@/components/dashboard/StatusBadge';
 import { Button } from '@/components/ui/Button';
 import { ApiError } from '@/lib/api';
+import { playScanErrorTone, playScanSuccessTone } from '@/lib/scan-feedback';
 import { deliverItem, dispatchItem, pickupItem, returnItem, scanItem, searchWarehouseItems } from '@/lib/warehouse';
 import { ScanInput } from './ScanInput';
 
@@ -109,10 +110,12 @@ export function PickupWorkspace({
     setSuccessMessage(null);
     try {
       const item = await scanItem(code);
+      playScanSuccessTone();
       setResolvedItem(item);
       setScannedCode(code);
       resetForm();
     } catch (err) {
+      playScanErrorTone();
       setResolvedItem(null);
       setLookupError(err instanceof ApiError ? err.message : 'Lookup failed.');
       setRefocusKey((key) => key + 1);

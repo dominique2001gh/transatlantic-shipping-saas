@@ -26,7 +26,13 @@ function sideForMode(mode: WarehouseMode): WarehouseSide {
 
 export default function WarehousePage() {
   const [mode, setMode] = useState<WarehouseMode>('RECEIVE');
-  const [warehouses, setWarehouses] = useState<WarehouseSummary[]>([]);
+  /**
+   * `null` = not yet fetched (show "Loading…"); `[]` = fetched, but this
+   * tenant genuinely has no warehouses configured yet (show that
+   * explicitly, never a permanent fake "Loading…" — a tenant with zero
+   * warehouses was previously indistinguishable from one still loading).
+   */
+  const [warehouses, setWarehouses] = useState<WarehouseSummary[] | null>(null);
   const [selectedWarehouseId, setSelectedWarehouseId] = useState('');
   const [inventory, setInventory] = useState<WarehouseItemDetail[] | null>(null);
   const [inventorySearch, setInventorySearch] = useState('');
@@ -60,7 +66,7 @@ export default function WarehousePage() {
    */
   const lastDefaultedSideRef = useRef<WarehouseSide | null>(null);
   useEffect(() => {
-    if (warehouses.length === 0) return;
+    if (!warehouses || warehouses.length === 0) return;
     const side = sideForMode(mode);
     if (lastDefaultedSideRef.current === side) return;
     lastDefaultedSideRef.current = side;
@@ -105,7 +111,9 @@ export default function WarehousePage() {
             <AskAiLink question="How do I receive a package?" />
           </p>
           <Card className="mt-3">
-            {warehouses.length > 0 ? (
+            {warehouses === null ? (
+              <p className="text-sm text-slate-500">Loading warehouses…</p>
+            ) : warehouses.length > 0 ? (
               <ReceiveWorkspace
                 warehouses={warehouses}
                 selectedWarehouseId={selectedWarehouseId}
@@ -113,7 +121,10 @@ export default function WarehousePage() {
                 onReceived={reload}
               />
             ) : (
-              <p className="text-sm text-slate-500">Loading warehouses…</p>
+              <p className="text-sm text-slate-500">
+                No warehouses are configured for this tenant yet. Contact support to set one up before using
+                Warehouse operations.
+              </p>
             )}
           </Card>
         </section>
@@ -130,7 +141,9 @@ export default function WarehousePage() {
             <AskAiLink question="How do I process and inspect an item?" />
           </p>
           <Card className="mt-3">
-            {warehouses.length > 0 ? (
+            {warehouses === null ? (
+              <p className="text-sm text-slate-500">Loading warehouses…</p>
+            ) : warehouses.length > 0 ? (
               <ProcessWorkspace
                 warehouses={warehouses}
                 selectedWarehouseId={selectedWarehouseId}
@@ -138,7 +151,10 @@ export default function WarehousePage() {
                 onProcessed={reload}
               />
             ) : (
-              <p className="text-sm text-slate-500">Loading warehouses…</p>
+              <p className="text-sm text-slate-500">
+                No warehouses are configured for this tenant yet. Contact support to set one up before using
+                Warehouse operations.
+              </p>
             )}
           </Card>
         </section>
@@ -155,14 +171,19 @@ export default function WarehousePage() {
             <AskAiLink question="How do I load items into a container?" />
           </p>
           <Card className="mt-3">
-            {warehouses.length > 0 ? (
+            {warehouses === null ? (
+              <p className="text-sm text-slate-500">Loading warehouses…</p>
+            ) : warehouses.length > 0 ? (
               <LoadContainerWorkspace
                 warehouses={warehouses}
                 selectedWarehouseId={selectedWarehouseId}
                 onWarehouseChange={setSelectedWarehouseId}
               />
             ) : (
-              <p className="text-sm text-slate-500">Loading warehouses…</p>
+              <p className="text-sm text-slate-500">
+                No warehouses are configured for this tenant yet. Contact support to set one up before using
+                Warehouse operations.
+              </p>
             )}
           </Card>
         </section>
@@ -180,7 +201,9 @@ export default function WarehousePage() {
             <AskAiLink question="How do I receive items at the destination warehouse and reconcile against a container's manifest?" />
           </p>
           <Card className="mt-3">
-            {warehouses.length > 0 ? (
+            {warehouses === null ? (
+              <p className="text-sm text-slate-500">Loading warehouses…</p>
+            ) : warehouses.length > 0 ? (
               <DestinationReceiveWorkspace
                 warehouses={warehouses}
                 selectedWarehouseId={selectedWarehouseId}
@@ -188,7 +211,10 @@ export default function WarehousePage() {
                 onReceived={reload}
               />
             ) : (
-              <p className="text-sm text-slate-500">Loading warehouses…</p>
+              <p className="text-sm text-slate-500">
+                No warehouses are configured for this tenant yet. Contact support to set one up before using
+                Warehouse operations.
+              </p>
             )}
           </Card>
         </section>
@@ -203,7 +229,9 @@ export default function WarehousePage() {
             attempt.
           </p>
           <Card className="mt-3">
-            {warehouses.length > 0 ? (
+            {warehouses === null ? (
+              <p className="text-sm text-slate-500">Loading warehouses…</p>
+            ) : warehouses.length > 0 ? (
               <PickupWorkspace
                 warehouses={warehouses}
                 selectedWarehouseId={selectedWarehouseId}
@@ -211,7 +239,10 @@ export default function WarehousePage() {
                 onPickedUp={reload}
               />
             ) : (
-              <p className="text-sm text-slate-500">Loading warehouses…</p>
+              <p className="text-sm text-slate-500">
+                No warehouses are configured for this tenant yet. Contact support to set one up before using
+                Warehouse operations.
+              </p>
             )}
           </Card>
         </section>

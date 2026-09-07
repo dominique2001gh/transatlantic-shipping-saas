@@ -5,6 +5,7 @@ import type { WarehouseItemDetail, WarehouseSummary } from '@transatlantic/share
 import { Button } from '@/components/ui/Button';
 import { ApiError } from '@/lib/api';
 import { humanizeEnumValue } from '@/lib/format';
+import { playScanErrorTone, playScanSuccessTone } from '@/lib/scan-feedback';
 import { receiveItem, scanItem, searchWarehouseItems } from '@/lib/warehouse';
 import { ItemConfirmPanel } from './ItemConfirmPanel';
 import { ScanInput } from './ScanInput';
@@ -40,6 +41,8 @@ export function ReceiveWorkspace({
   const [confirming, setConfirming] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [refocusKey, setRefocusKey] = useState(0);
+  /** Guards Rapid Scan's scan-to-commit round trip the same way LoadContainerWorkspace's `loadingItem` guards its own — disables ScanInput for the duration so a scanner double-fire of the same code during the in-flight request can't fire two concurrent commits. Non-rapid mode never sets this (its confirm-click step is already the guard). */
+  const [scanBusy, setScanBusy] = useState(false);
 
   const [rapidMode, setRapidMode] = useState(false);
   const [stats, setStats] = useState({ succeeded: 0, duplicates: 0, errors: 0 });
@@ -66,26 +69,33 @@ export function ReceiveWorkspace({
   async function handleScan(code: string) {
     setLookupError(null);
     setSuccessMessage(null);
+    if (rapidMode) setScanBusy(true);
     try {
       const item = await scanItem(code);
       if (rapidMode) {
         try {
           await commitReceive(item, code);
+          playScanSuccessTone();
           onReceived();
         } catch (err) {
+          playScanErrorTone();
           setLookupError(err instanceof ApiError ? err.message : 'Failed to receive item.');
           setStats((s) => ({ ...s, errors: s.errors + 1 }));
         } finally {
+          setScanBusy(false);
           setRefocusKey((key) => key + 1);
         }
         return;
       }
+      playScanSuccessTone();
       setResolvedItem(item);
       setScannedCode(code);
     } catch (err) {
+      playScanErrorTone();
       setResolvedItem(null);
       setLookupError(err instanceof ApiError ? err.message : 'Lookup failed.');
       setStats((s) => ({ ...s, errors: s.errors + 1 }));
+      if (rapidMode) setScanBusy(false);
       setRefocusKey((key) => key + 1);
     }
   }
@@ -151,7 +161,7 @@ export function ReceiveWorkspace({
         <ScanInput
           onSubmit={handleScan}
           onDuplicate={checkDuplicate}
-          disabled={!selectedWarehouseId}
+          disabled={!selectedWarehouseId || scanBusy}
           autoFocusKey={refocusKey}
         />
         <div className="sm:w-64">
