@@ -1,5 +1,6 @@
 import { PublicFooter } from '@/components/layout/PublicFooter';
 import { PublicHeader } from '@/components/layout/PublicHeader';
+import { PublicAiAgentWidget } from '@/components/marketing/PublicAiAgentWidget';
 
 export default function PublicLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -7,6 +8,7 @@ export default function PublicLayout({ children }: { children: React.ReactNode }
       <PublicHeader />
       <main className="flex-1">{children}</main>
       <PublicFooter />
+      <PublicAiAgentWidget />
     </div>
   );
 }

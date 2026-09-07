@@ -304,6 +304,15 @@ export function IconWhatsApp(props: IconProps) {
   );
 }
 
+export function IconChatBubble(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <path d="M4 5h16v11H8l-4 4V5z" />
+      <path d="M8 9h8M8 12.5h5" />
+    </IconBase>
+  );
+}
+
 export function IconInstagram(props: IconProps) {
   return (
     <IconBase {...props}>

@@ -402,6 +402,14 @@ model Tenant {
   /// the onboarding wizard's Branding step — separate from `phone` since a
   /// tenant may publish a different number (or none) for WhatsApp vs voice.
   whatsappNumber String?
+
+  /// Public Website AI Agent, Phase 1: the display name a tenant's public
+  /// chat widget uses for its assistant (e.g. Trans Atlantic's "Eddie") —
+  /// deliberately per-tenant, never hardcoded, so every tenant can name
+  /// their own assistant independently. Null means no custom name has been
+  /// set yet; PublicAiAgentService falls back to "{tenant.name} Assistant"
+  /// in that case rather than requiring a value here.
+  agentName String?
   country        String
   timezone       String
   currency       String
@@ -458,7 +466,8 @@ model Tenant {
   operationalExceptions OperationalException[]
   websiteLeads          WebsiteLead[]
 
-  publicLocations TenantLocation[]
+  publicLocations       TenantLocation[]
+  agentKnowledgeEntries TenantAgentKnowledgeEntry[]
 
   subscription         TenantSubscription?
   entitlements         TenantEntitlement[]
@@ -520,6 +529,52 @@ model TenantLocation {
 
   @@index([tenantId])
   @@map("tenant_locations")
+}
+
+/// Public Website AI Agent, Phase 1: which kind of knowledge entry this row
+/// is — FACT (a labeled topic paragraph, e.g. "Ocean Freight" -> a
+/// description) or FAQ (a literal question -> answer pair). Both shapes are
+/// stored in the same table with the same two content columns (`title`/
+/// `body`) rather than two separate models, since both are fundamentally
+/// "a labeled chunk of text the agent may draw from" — see
+/// TenantAgentKnowledgeEntry's own doc comment.
+enum TenantAgentKnowledgeKind {
+  FACT
+  FAQ
+}
+
+/// Public Website AI Agent, Phase 1: the ONLY knowledge source the public,
+/// unauthenticated agent (see apps/api/src/public-ai-agent) is allowed to
+/// read from. Deliberately separate from every operational model (Shipment,
+/// Customer, Invoice, ...) and from the Section 15 public-site-config
+/// fields on Tenant — this is purpose-built for "facts an anonymous website
+/// visitor may be told," never anything staff-only or customer-private.
+///
+/// `kind = FACT`: `title` is a topic label (e.g. "Ocean Freight", "DFW
+/// Origin Warehouse"), `body` is the paragraph of real, verified
+/// information about it. `kind = FAQ`: `title` is the literal question,
+/// `body` is the answer. The agent's system prompt is assembled by
+/// concatenating every `isActive` row for the resolved tenant, in
+/// `sortOrder` — see PublicAiAgentService's own doc comment. There is
+/// deliberately no per-row "confidence"/"source" field in Phase 1; every row
+/// is asserted true content a human reviewed before inserting it (see the
+/// seed script's own doc comment on Trans Atlantic's initial backfill).
+model TenantAgentKnowledgeEntry {
+  id        String                   @id @default(cuid())
+  tenantId  String
+  kind      TenantAgentKnowledgeKind
+  title     String
+  body      String                   @db.Text
+  sortOrder Int                      @default(0)
+  isActive  Boolean                  @default(true)
+  createdAt DateTime                 @default(now())
+  updatedAt DateTime                 @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([tenantId, isActive])
+  @@map("tenant_agent_knowledge_entries")
 }
 
 // ==========================================================================
@@ -1742,6 +1797,14 @@ enum EntitlementFeature {
   BILLING
   ANALYTICS
   AI_AGENT
+  /// Public Website AI Agent, Phase 1: distinct from AI_AGENT (the
+  /// authenticated staff Training & Support Agent) — this gates the
+  /// unauthenticated, customer-facing widget on a tenant's own public
+  /// website. A tenant can have one without the other. See
+  /// plan-entitlements.ts for which plans include it by default, and
+  /// PublicAiAgentService for the same "no subscription row = grandfathered
+  /// true" rule SiteConfigService already established for PUBLIC_WEBSITE.
+  PUBLIC_AI_AGENT
   ADVANCED_FEATURES
 }
 

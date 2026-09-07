@@ -14,6 +14,7 @@ import { EntitlementFeature, SaasPlanType } from '@prisma/client';
 export const PLAN_DEFAULT_ENTITLEMENTS: Record<SaasPlanType, Partial<Record<EntitlementFeature, boolean>>> = {
   [SaasPlanType.WEBSITE_ONLY]: {
     [EntitlementFeature.PUBLIC_WEBSITE]: true,
+    [EntitlementFeature.PUBLIC_AI_AGENT]: true,
     [EntitlementFeature.BILLING]: true,
   },
   [SaasPlanType.SOFTWARE_ONLY]: {
@@ -26,6 +27,7 @@ export const PLAN_DEFAULT_ENTITLEMENTS: Record<SaasPlanType, Partial<Record<Enti
   },
   [SaasPlanType.WEBSITE_AND_SOFTWARE]: {
     [EntitlementFeature.PUBLIC_WEBSITE]: true,
+    [EntitlementFeature.PUBLIC_AI_AGENT]: true,
     [EntitlementFeature.OPERATIONS_SOFTWARE]: true,
     [EntitlementFeature.CUSTOMER_PORTAL]: true,
     [EntitlementFeature.TRACKING]: true,
@@ -40,6 +42,7 @@ export const PLAN_DEFAULT_ENTITLEMENTS: Record<SaasPlanType, Partial<Record<Enti
   // (see that model's own doc comment) if a real tier split is wanted.
   [SaasPlanType.SOFTWARE_AND_WEBSITE_BASIC]: {
     [EntitlementFeature.PUBLIC_WEBSITE]: true,
+    [EntitlementFeature.PUBLIC_AI_AGENT]: true,
     [EntitlementFeature.OPERATIONS_SOFTWARE]: true,
     [EntitlementFeature.CUSTOMER_PORTAL]: true,
     [EntitlementFeature.TRACKING]: true,
@@ -49,6 +52,7 @@ export const PLAN_DEFAULT_ENTITLEMENTS: Record<SaasPlanType, Partial<Record<Enti
   },
   [SaasPlanType.SOFTWARE_AND_WEBSITE_PROFESSIONAL]: {
     [EntitlementFeature.PUBLIC_WEBSITE]: true,
+    [EntitlementFeature.PUBLIC_AI_AGENT]: true,
     [EntitlementFeature.OPERATIONS_SOFTWARE]: true,
     [EntitlementFeature.CUSTOMER_PORTAL]: true,
     [EntitlementFeature.TRACKING]: true,

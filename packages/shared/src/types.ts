@@ -1368,6 +1368,30 @@ export interface AiAgentAskResponse {
 }
 
 // ==========================================================================
+// Public Website AI Agent, Phase 1 — knowledge + guidance only, no actions.
+// Entirely separate request/response shape from the staff AI_AGENT above:
+// this one is unauthenticated, tenant-resolved by slug (not by JWT), and
+// answers only from that tenant's own TenantAgentKnowledgeEntry rows.
+// ==========================================================================
+
+export interface AskPublicAgentRequest {
+  tenantSlug: string;
+  question: string;
+  /** Echo back a previous response's conversationId to continue that same short-lived, server-held conversation; omit to start a new one. Never a client-supplied transcript — the server is the sole source of truth for conversation history. */
+  conversationId?: string;
+}
+
+export interface AskPublicAgentResponse {
+  answer: string;
+  conversationId: string;
+}
+
+export interface PublicAgentConfigResponse {
+  /** Tenant-configured display name for the public chat widget (e.g. Trans Atlantic's "Eddie") — never a hardcoded/global value. Falls back server-side to "{tenant.name} Assistant" if the tenant hasn't set one. */
+  agentName: string;
+}
+
+// ==========================================================================
 // AnanseLogix Phase 2 — tenant-branded public website config (Section 15)
 // ==========================================================================
 

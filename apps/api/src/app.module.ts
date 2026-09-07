@@ -23,6 +23,7 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { OnboardingModule } from './onboarding/onboarding.module';
 import { PlatformLeadsModule } from './platform-leads/platform-leads.module';
 import { PrismaModule } from './prisma/prisma.module';
+import { PublicAiAgentModule } from './public-ai-agent/public-ai-agent.module';
 import { SaasAnalyticsModule } from './saas-analytics/saas-analytics.module';
 import { SaasPlansModule } from './saas-plans/saas-plans.module';
 import { ShipmentsModule } from './shipments/shipments.module';
@@ -74,6 +75,7 @@ import { WebhooksModule } from './webhooks/webhooks.module';
     PlatformLeadsModule,
     EntitlementsModule,
     AiAgentModule,
+    PublicAiAgentModule,
     SiteConfigModule,
     SaasAnalyticsModule,
   ],
