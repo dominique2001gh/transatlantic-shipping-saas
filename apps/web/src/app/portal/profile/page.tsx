@@ -5,7 +5,7 @@ import type { PortalCustomerProfile, PortalNotificationPreferences } from '@tran
 import { TextInput } from '@/components/forms/FormField';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
-import { changePassword } from '@/lib/account';
+import { PasswordSection } from '@/components/account/PasswordSection';
 import { ApiError } from '@/lib/api';
 import {
   getPortalNotificationPreferences,
@@ -28,7 +28,9 @@ export default function PortalProfilePage() {
     <div className="flex flex-col gap-8">
       <div>
         <h1 className="text-2xl font-semibold text-slate-900">Profile</h1>
-        <p className="mt-1 text-sm text-slate-500">Manage your contact details, notification preferences, and password.</p>
+        <p className="mt-1 text-sm text-slate-500">
+          Manage your contact details, notification preferences, and password.
+        </p>
       </div>
 
       <ProfileSection />
@@ -60,7 +62,9 @@ function ProfileSection() {
         setLastName(data.lastName);
         setPhone(data.phone ?? '');
       })
-      .catch((err) => setLoadError(err instanceof ApiError ? err.message : 'Failed to load your profile.'));
+      .catch((err) =>
+        setLoadError(err instanceof ApiError ? err.message : 'Failed to load your profile.'),
+      );
   }, []);
 
   // Auto-revert the "Saved ✓" state a couple seconds after a successful
@@ -153,7 +157,9 @@ function ProfileSection() {
               <Button
                 type="submit"
                 disabled={submitting}
-                className={saved ? 'bg-green-700 hover:bg-green-700 focus-visible:outline-green-700' : ''}
+                className={
+                  saved ? 'bg-green-700 hover:bg-green-700 focus-visible:outline-green-700' : ''
+                }
               >
                 {submitting ? 'Saving…' : saved ? 'Saved ✓' : 'Save changes'}
               </Button>
@@ -193,7 +199,11 @@ function NotificationPreferencesSection() {
         setNotifyByWhatsapp(data.notifyByWhatsapp);
         setWhatsappPhone(data.whatsappPhone ?? '');
       })
-      .catch((err) => setLoadError(err instanceof ApiError ? err.message : 'Failed to load your notification preferences.'));
+      .catch((err) =>
+        setLoadError(
+          err instanceof ApiError ? err.message : 'Failed to load your notification preferences.',
+        ),
+      );
   }, []);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -212,7 +222,9 @@ function NotificationPreferencesSection() {
       setWhatsappPhone(updated.whatsappPhone ?? '');
       setSaved(true);
     } catch (err) {
-      setSaveError(err instanceof ApiError ? err.message : 'Failed to save your notification preferences.');
+      setSaveError(
+        err instanceof ApiError ? err.message : 'Failed to save your notification preferences.',
+      );
     } finally {
       setSubmitting(false);
     }
@@ -231,8 +243,8 @@ function NotificationPreferencesSection() {
               <span>
                 <span className="font-medium text-slate-900">In-app notifications</span>
                 <span className="mt-0.5 block text-slate-500">
-                  Always on. Updates about your shipments, invoices, and documents always appear in your Notifications
-                  list, regardless of the settings below.
+                  Always on. Updates about your shipments, invoices, and documents always appear in
+                  your Notifications list, regardless of the settings below.
                 </span>
               </span>
             </label>
@@ -299,93 +311,6 @@ function NotificationPreferencesSection() {
             </Button>
           </form>
         )}
-      </Card>
-    </section>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Password change.
-// ---------------------------------------------------------------------------
-
-function PasswordSection() {
-  const [currentPassword, setCurrentPassword] = useState('');
-  const [newPassword, setNewPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [error, setError] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setError(null);
-    setSaved(false);
-
-    if (newPassword !== confirmPassword) {
-      setError('New password and confirmation do not match.');
-      return;
-    }
-
-    setSubmitting(true);
-    try {
-      await changePassword({ currentPassword, newPassword });
-      setCurrentPassword('');
-      setNewPassword('');
-      setConfirmPassword('');
-      setSaved(true);
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Failed to change your password.');
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  return (
-    <section>
-      <h2 className="text-lg font-semibold text-slate-900">Password</h2>
-      <Card className="mt-3 max-w-lg">
-        <form className="flex flex-col gap-4" onSubmit={handleSubmit} noValidate>
-          <TextInput
-            label="Current password"
-            id="currentPassword"
-            type="password"
-            autoComplete="current-password"
-            required
-            value={currentPassword}
-            onChange={(event) => setCurrentPassword(event.target.value)}
-          />
-          <TextInput
-            label="New password"
-            id="newPassword"
-            type="password"
-            autoComplete="new-password"
-            required
-            minLength={8}
-            value={newPassword}
-            onChange={(event) => setNewPassword(event.target.value)}
-          />
-          <TextInput
-            label="Confirm new password"
-            id="confirmPassword"
-            type="password"
-            autoComplete="new-password"
-            required
-            minLength={8}
-            value={confirmPassword}
-            onChange={(event) => setConfirmPassword(event.target.value)}
-          />
-          <p className="text-xs text-slate-400">At least 8 characters.</p>
-
-          {error && (
-            <p role="alert" className="text-sm text-red-600">
-              {error}
-            </p>
-          )}
-          {saved && <p className="text-sm text-green-700">Password changed.</p>}
-          <Button type="submit" disabled={submitting} className="mt-2 self-start">
-            {submitting ? 'Changing…' : 'Change password'}
-          </Button>
-        </form>
       </Card>
     </section>
   );
