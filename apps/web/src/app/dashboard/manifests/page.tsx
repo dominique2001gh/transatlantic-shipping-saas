@@ -7,12 +7,12 @@ import { StatusBadge } from '@/components/dashboard/StatusBadge';
 import { CreateManifestForm } from '@/components/manifests/CreateManifestForm';
 import { ManifestContainerAssignment } from '@/components/manifests/ManifestContainerAssignment';
 import { ManifestItemAssignment } from '@/components/manifests/ManifestItemAssignment';
-import { Button } from '@/components/ui/Button';
+import { Button, LinkButton } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { ApiError } from '@/lib/api';
 import { getStoredUser } from '@/lib/auth';
 import { formatDateTime, humanizeEnumValue } from '@/lib/format';
-import { arriveManifest, departManifest, finalizeManifest, getManifest, listManifests } from '@/lib/manifests';
+import { arriveManifest, departManifest, downloadManifestPdf, finalizeManifest, getManifest, listManifests } from '@/lib/manifests';
 import { listWarehouseLocations } from '@/lib/warehouse';
 
 /** Same role sets ManifestsController enforces server-side — see manifests.controller.ts. */
@@ -58,6 +58,7 @@ export default function ManifestsPage() {
   const [finalizing, setFinalizing] = useState(false);
   const [departing, setDeparting] = useState(false);
   const [arriving, setArriving] = useState(false);
+  const [downloadingPdf, setDownloadingPdf] = useState(false);
 
   const reload = useCallback(() => {
     if (!canView) return;
@@ -134,6 +135,19 @@ export default function ManifestsPage() {
       setError(err instanceof ApiError ? err.message : 'Failed to depart manifest.');
     } finally {
       setDeparting(false);
+    }
+  }
+
+  async function handleDownloadPdf() {
+    if (!selected) return;
+    setDownloadingPdf(true);
+    setError(null);
+    try {
+      await downloadManifestPdf(selected.id, selected.manifestNumber);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed to download PDF.');
+    } finally {
+      setDownloadingPdf(false);
     }
   }
 
@@ -325,7 +339,17 @@ export default function ManifestsPage() {
                 {selected.destinationLocation ?? selected.route?.name ?? '—'}
               </p>
             </div>
-            <StatusBadge status={selected.status} />
+            <div className="flex flex-col items-end gap-2">
+              <StatusBadge status={selected.status} />
+              <div className="flex gap-2">
+                <Button type="button" size="sm" variant="secondary" onClick={handleDownloadPdf} disabled={downloadingPdf}>
+                  {downloadingPdf ? 'Preparing…' : 'Download PDF'}
+                </Button>
+                <LinkButton href={`/dashboard/manifests/${selected.id}/print`} size="sm" variant="secondary">
+                  Print Manifest
+                </LinkButton>
+              </div>
+            </div>
           </div>
 
           <div className="mt-3 flex flex-wrap gap-x-6 gap-y-1 text-sm text-slate-600">

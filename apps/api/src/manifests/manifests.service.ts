@@ -8,6 +8,12 @@ import {
   ShipmentStatus as DbShipmentStatus,
   TrackingEventSource,
 } from '@prisma/client';
+import type {
+  ManifestContentsSummary,
+  ManifestPrintCargoItem,
+  ManifestPrintContainer,
+  ManifestPrintDocument,
+} from '@transatlantic/shared';
 import { ShipmentItemStatus, ShipmentStatus, TrackingEventType } from '@transatlantic/shared';
 import { generateManifestNumber } from '../common/numbering/numbering.util';
 import { PrismaService } from '../prisma/prisma.service';
@@ -133,6 +139,221 @@ function present(manifest: ManifestDetailRaw) {
     status,
   }));
   return { ...manifest, containers, summary };
+}
+
+/**
+ * Print/PDF Cargo List — deliberately separate SELECT constants from
+ * MANIFEST_DETAIL_INCLUDE and FINALIZE_ITEM_SELECT above, never reusing
+ * or modifying either: this feature only ever reads, and must never risk
+ * changing what finalize()'s snapshot captures (lifecycle behavior is
+ * explicitly out of scope for this feature) or what the normal manifest
+ * detail response shape returns to existing callers. The only difference
+ * from FINALIZE_ITEM_SELECT is including `description`/`quantity`, which
+ * the Cargo/Packing List needs but the finalize snapshot historically
+ * didn't capture — see getPrintDocument's own doc comment for how an
+ * already-finalized manifest (whose stored snapshot predates these two
+ * fields) still gets them, without ever writing back to that snapshot.
+ */
+const PRINT_ITEM_SELECT = {
+  itemCode: true,
+  itemType: true,
+  description: true,
+  quantity: true,
+  weight: true,
+  weightUnit: true,
+} satisfies Prisma.ShipmentItemSelect;
+
+const PRINT_SHIPMENT_SELECT = {
+  trackingNumber: true,
+  destinationCountry: true,
+  destinationLocation: true,
+  customer: { select: { id: true, firstName: true, lastName: true } },
+} satisfies Prisma.ShipmentSelect;
+
+const PRINT_CONTAINER_INCLUDE = {
+  items: {
+    where: { removedAt: null },
+    include: {
+      shipmentItem: { select: PRINT_ITEM_SELECT },
+      shipment: { select: PRINT_SHIPMENT_SELECT },
+    },
+  },
+} satisfies Prisma.ContainerInclude;
+
+const PRINT_MANIFEST_ITEM_INCLUDE = {
+  shipmentItem: { select: PRINT_ITEM_SELECT },
+  shipment: { select: PRINT_SHIPMENT_SELECT },
+} satisfies Prisma.ManifestItemInclude;
+
+type PrintContainerRaw = Prisma.ContainerGetPayload<{ include: typeof PRINT_CONTAINER_INCLUDE }>;
+type PrintManifestItemRaw = Prisma.ManifestItemGetPayload<{ include: typeof PRINT_MANIFEST_ITEM_INCLUDE }>;
+
+/** The exact JSON shape buildFinalizeSnapshot (above) writes to Manifest.snapshotJson — read-only here, never re-derived or rewritten. */
+interface ManifestSnapshotShape {
+  containers?: {
+    containerNumber: string;
+    containerType: string;
+    items: ManifestSnapshotItem[];
+  }[];
+  items?: ManifestSnapshotItem[];
+  summary?: { containerCount: number; itemCount: number; customerCount: number; weightByUnit: Record<string, number> };
+}
+interface ManifestSnapshotItem {
+  shipmentItemId: string;
+  itemCode: string;
+  itemType: string;
+  weight: string | null;
+  weightUnit: string;
+  trackingNumber: string;
+  destinationCountry: string;
+  destinationLocation: string | null;
+  customer: { id: string; firstName: string; lastName: string };
+}
+
+function destinationLabel(location: string | null, country: string): string {
+  return [location, country].filter(Boolean).join(', ') || country;
+}
+
+/**
+ * Builds the Cargo/Packing List + container list + summary for a manifest
+ * that has never been finalized (still DRAFT) — the live, current
+ * assignment state, using the exact same container/item shape finalize()
+ * itself reads, just with description/quantity added.
+ */
+async function buildPrintDataFromLive(
+  prisma: PrismaService,
+  tenantId: string,
+  manifestId: string,
+  shipmentMode: DbShipmentMode,
+): Promise<{ containers: ManifestPrintContainer[]; cargo: ManifestPrintCargoItem[]; summary: ManifestContentsSummary }> {
+  const containers: ManifestPrintContainer[] = [];
+  const cargo: ManifestPrintCargoItem[] = [];
+  const weightByUnit: Record<string, number> = {};
+  const customerIds = new Set<string>();
+
+  const toCargoRow = (
+    shipmentItem: PrintContainerRaw['items'][number]['shipmentItem'],
+    shipment: PrintContainerRaw['items'][number]['shipment'],
+    containerNumber: string | null,
+  ): ManifestPrintCargoItem => {
+    customerIds.add(shipment.customer.id);
+    if (shipmentItem.weight) {
+      weightByUnit[shipmentItem.weightUnit] = (weightByUnit[shipmentItem.weightUnit] ?? 0) + Number(shipmentItem.weight);
+    }
+    return {
+      itemCode: shipmentItem.itemCode,
+      trackingNumber: shipment.trackingNumber,
+      customerName: `${shipment.customer.firstName} ${shipment.customer.lastName}`,
+      itemType: shipmentItem.itemType as ManifestPrintCargoItem['itemType'],
+      description: shipmentItem.description,
+      quantity: shipmentItem.quantity,
+      weight: shipmentItem.weight ? shipmentItem.weight.toString() : null,
+      weightUnit: shipmentItem.weightUnit as ManifestPrintCargoItem['weightUnit'],
+      destination: destinationLabel(shipment.destinationLocation, shipment.destinationCountry),
+      containerNumber,
+    };
+  };
+
+  if (shipmentMode === DbShipmentMode.AIR) {
+    const manifestItems: PrintManifestItemRaw[] = await prisma.manifestItem.findMany({
+      where: { manifestId, tenantId, removedAt: null },
+      include: PRINT_MANIFEST_ITEM_INCLUDE,
+    });
+    for (const manifestItem of manifestItems) {
+      cargo.push(toCargoRow(manifestItem.shipmentItem, manifestItem.shipment, null));
+    }
+  } else {
+    const dbContainers: PrintContainerRaw[] = await prisma.container.findMany({
+      where: { manifestId, tenantId },
+      include: PRINT_CONTAINER_INCLUDE,
+    });
+    for (const container of dbContainers) {
+      containers.push({
+        containerNumber: container.containerNumber,
+        containerType: container.containerType as ManifestPrintContainer['containerType'],
+      });
+      for (const containerItem of container.items) {
+        cargo.push(toCargoRow(containerItem.shipmentItem, containerItem.shipment, container.containerNumber));
+      }
+    }
+  }
+
+  return {
+    containers,
+    cargo,
+    summary: { containerCount: containers.length, itemCount: cargo.length, customerCount: customerIds.size, weightByUnit },
+  };
+}
+
+/**
+ * Builds the Cargo/Packing List + container list + summary for a manifest
+ * that HAS been finalized — read from Manifest.snapshotJson, the
+ * immutable "what was approved for transport" record, rather than
+ * re-querying current container/item state (which is the whole point of
+ * the snapshot: correct even if underlying rows changed since). The one
+ * enrichment on top: `description`/`quantity` aren't in the snapshot for
+ * any manifest finalized before this printing feature existed (the
+ * snapshot predates those two fields), so they're read fresh from each
+ * ShipmentItem by id here — a read-only lookup for display only, never
+ * written back to the snapshot or anywhere else. A manifest's items don't
+ * change their type/weight/description after being loaded for transport
+ * in practice, so this stays accurate without needing to touch
+ * buildFinalizeSnapshot or finalize() itself (explicitly out of scope —
+ * lifecycle behavior must not change).
+ */
+async function buildPrintDataFromSnapshot(
+  prisma: PrismaService,
+  tenantId: string,
+  snapshot: ManifestSnapshotShape,
+): Promise<{ containers: ManifestPrintContainer[]; cargo: ManifestPrintCargoItem[]; summary: ManifestContentsSummary }> {
+  const containers: ManifestPrintContainer[] = (snapshot.containers ?? []).map((container) => ({
+    containerNumber: container.containerNumber,
+    containerType: container.containerType as ManifestPrintContainer['containerType'],
+  }));
+
+  const rows: { item: ManifestSnapshotItem; containerNumber: string | null }[] = [];
+  for (const container of snapshot.containers ?? []) {
+    for (const item of container.items) {
+      rows.push({ item, containerNumber: container.containerNumber });
+    }
+  }
+  for (const item of snapshot.items ?? []) {
+    rows.push({ item, containerNumber: null });
+  }
+
+  const shipmentItemIds = rows.map(({ item }) => item.shipmentItemId);
+  const liveDetails = shipmentItemIds.length
+    ? await prisma.shipmentItem.findMany({
+        where: { id: { in: shipmentItemIds }, tenantId },
+        select: { id: true, description: true, quantity: true },
+      })
+    : [];
+  const detailById = new Map(liveDetails.map((detail) => [detail.id, detail]));
+
+  const cargo: ManifestPrintCargoItem[] = rows.map(({ item, containerNumber }) => {
+    const detail = detailById.get(item.shipmentItemId);
+    return {
+      itemCode: item.itemCode,
+      trackingNumber: item.trackingNumber,
+      customerName: `${item.customer.firstName} ${item.customer.lastName}`,
+      itemType: item.itemType as ManifestPrintCargoItem['itemType'],
+      description: detail?.description ?? null,
+      quantity: detail?.quantity ?? 1,
+      weight: item.weight,
+      weightUnit: item.weightUnit as ManifestPrintCargoItem['weightUnit'],
+      destination: destinationLabel(item.destinationLocation, item.destinationCountry),
+      containerNumber,
+    };
+  });
+
+  const summary = snapshot.summary ?? {
+    containerCount: containers.length,
+    itemCount: cargo.length,
+    customerCount: new Set(rows.map(({ item }) => item.customer.id)).size,
+    weightByUnit: {},
+  };
+
+  return { containers, cargo, summary };
 }
 
 const OCEAN_RORO_MODES: DbShipmentMode[] = [
@@ -407,6 +628,74 @@ export class ManifestsService {
       throw new NotFoundException('Manifest not found');
     }
     return present(manifest);
+  }
+
+  /**
+   * Print Manifest / Download PDF — the tenant-branded document GET
+   * /manifests/:id/print (HTML view) and GET /manifests/:id/pdf both
+   * render from. Read-only, purely additive: never touches manifest,
+   * container, or shipment-item state, and never writes to
+   * Manifest.snapshotJson — this only ever reads it. Same tenant-scoped
+   * `findFirst({ where: { id, tenantId } })` lookup as findById above,
+   * which is what makes cross-tenant access 404 (not leak a 403 that
+   * would confirm the id exists) — identical isolation posture to every
+   * other method in this service.
+   *
+   * A FINALIZED/DEPARTED/ARRIVED manifest is documented from its
+   * immutable snapshotJson (what was actually approved for transport,
+   * unaffected by anything that happened to the underlying rows since);
+   * a still-DRAFT manifest — which has no snapshot yet — is documented
+   * from its live, current assignment state instead. See
+   * buildPrintDataFromSnapshot/buildPrintDataFromLive's own doc comments.
+   */
+  async getPrintDocument(tenantId: string, id: string): Promise<ManifestPrintDocument> {
+    const manifest = await this.prisma.manifest.findFirst({
+      where: { id, tenantId },
+      include: {
+        tenant: { select: { name: true, legalName: true, email: true, phone: true, website: true } },
+        originWarehouse: { select: { name: true, code: true } },
+      },
+    });
+    if (!manifest) {
+      throw new NotFoundException('Manifest not found');
+    }
+
+    const { containers, cargo, summary } = manifest.snapshotJson
+      ? await buildPrintDataFromSnapshot(this.prisma, tenantId, manifest.snapshotJson as unknown as ManifestSnapshotShape)
+      : await buildPrintDataFromLive(this.prisma, tenantId, manifest.id, manifest.shipmentMode);
+
+    return {
+      tenant: {
+        name: manifest.tenant.name,
+        legalName: manifest.tenant.legalName,
+        email: manifest.tenant.email,
+        phone: manifest.tenant.phone,
+        website: manifest.tenant.website,
+      },
+      manifest: {
+        id: manifest.id,
+        manifestNumber: manifest.manifestNumber,
+        status: manifest.status as ManifestPrintDocument['manifest']['status'],
+        shipmentMode: manifest.shipmentMode as ManifestPrintDocument['manifest']['shipmentMode'],
+        originWarehouse: manifest.originWarehouse
+          ? { name: manifest.originWarehouse.name, code: manifest.originWarehouse.code }
+          : null,
+        originLocation: manifest.originLocation,
+        destinationLocation: manifest.destinationLocation,
+        carrierName: manifest.carrierName,
+        vesselName: manifest.vesselName,
+        voyageNumber: manifest.voyageNumber,
+        flightNumber: manifest.flightNumber,
+        plannedDepartureAt: manifest.plannedDepartureAt?.toISOString() ?? null,
+        estimatedArrivalAt: manifest.estimatedArrivalAt?.toISOString() ?? null,
+        departedAt: manifest.departedAt?.toISOString() ?? null,
+        arrivedAt: manifest.arrivedAt?.toISOString() ?? null,
+      },
+      containers,
+      summary,
+      cargo,
+      generatedAt: new Date().toISOString(),
+    };
   }
 
   /**

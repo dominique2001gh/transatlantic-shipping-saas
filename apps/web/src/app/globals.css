@@ -134,3 +134,132 @@ body {
     page-break-inside: avoid;
   }
 }
+
+/*
+ * Manifest print/PDF (printable HTML view at /dashboard/manifests/[id]/print).
+ * `thead { display: table-header-group }` + `tfoot` are the standard
+ * multi-page-safe HTML table print pattern — every browser repeats a
+ * table-header-group row block on each new printed page automatically,
+ * so the Cargo/Packing List column headers never scroll off on page 2+.
+ * `break-inside: avoid` on each row keeps one item's cells from splitting
+ * across a page boundary.
+ */
+.manifest-print {
+  max-width: 8.5in;
+  margin: 0 auto;
+  color: #0f172a;
+}
+
+.manifest-print__header h1 {
+  font-size: 1.4rem;
+  font-weight: 700;
+}
+
+.manifest-print__contact {
+  margin-top: 0.15rem;
+  font-size: 0.8rem;
+  color: #475569;
+}
+
+.manifest-print__title {
+  margin-top: 0.75rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.manifest-print__title h2 {
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+
+.manifest-print__title p {
+  margin-top: 0.15rem;
+  font-size: 0.85rem;
+  color: #334155;
+}
+
+.manifest-print__grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.6rem 1.5rem;
+  margin: 0.85rem 0;
+}
+
+.manifest-print__field dt {
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #64748b;
+}
+
+.manifest-print__field dd {
+  margin: 0;
+  font-size: 0.85rem;
+  color: #0f172a;
+}
+
+.manifest-print__tallies {
+  padding: 0.6rem 0;
+  border-top: 1px solid #e2e8f0;
+  border-bottom: 1px solid #e2e8f0;
+  font-size: 0.85rem;
+}
+
+.manifest-print__section-title {
+  margin-top: 1rem;
+  margin-bottom: 0.4rem;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.manifest-print__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.75rem;
+}
+
+.manifest-print__table thead {
+  display: table-header-group;
+}
+
+.manifest-print__table th {
+  background: #1e293b;
+  color: #fff;
+  text-align: left;
+  padding: 0.35rem 0.4rem;
+  font-weight: 600;
+}
+
+.manifest-print__table td {
+  padding: 0.35rem 0.4rem;
+  border-bottom: 1px solid #e2e8f0;
+  vertical-align: top;
+}
+
+.manifest-print__table tr {
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.manifest-print__empty {
+  text-align: center;
+  color: #64748b;
+  font-style: italic;
+}
+
+.manifest-print__generated {
+  margin-top: 1rem;
+  font-size: 0.7rem;
+  color: #94a3b8;
+}
+
+@media print {
+  @page {
+    size: A4;
+    margin: 0.6in;
+  }
+  .manifest-print__table {
+    font-size: 0.7rem;
+  }
+}

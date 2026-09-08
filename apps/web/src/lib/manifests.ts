@@ -1,5 +1,5 @@
-import type { ManifestDetail, ShipmentMode } from '@transatlantic/shared';
-import { apiFetch } from './api';
+import type { ManifestDetail, ManifestPrintDocument, ShipmentMode } from '@transatlantic/shared';
+import { apiFetch, downloadAuthenticatedFile } from './api';
 import { getStoredToken } from './auth';
 
 function authToken(): string {
@@ -106,4 +106,20 @@ export function arriveManifest(manifestId: string): Promise<ManifestDetail> {
     method: 'POST',
     token: authToken(),
   });
+}
+
+/** Powers the printable HTML view at /dashboard/manifests/[id]/print. */
+export function getManifestPrintDocument(manifestId: string): Promise<ManifestPrintDocument> {
+  return apiFetch<ManifestPrintDocument>(`/manifests/${manifestId}/print`, { token: authToken() });
+}
+
+/**
+ * Downloads the same document as a real PDF file — reuses
+ * downloadAuthenticatedFile, the same authenticated-blob-download
+ * mechanism already used for uploaded documents (Stage 3G). The server
+ * sets the real filename via Content-Disposition; `manifestNumber` is
+ * only the fallback if that header is ever missing.
+ */
+export function downloadManifestPdf(manifestId: string, manifestNumber: string): Promise<void> {
+  return downloadAuthenticatedFile(`/manifests/${manifestId}/pdf`, authToken(), `Manifest-${manifestNumber}.pdf`);
 }

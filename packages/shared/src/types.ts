@@ -431,6 +431,77 @@ export interface ManifestContentsSummary {
   weightByUnit: Record<string, number>;
 }
 
+/**
+ * One row of a manifest's printable Cargo / Packing List — the shape the
+ * Ghana (or any destination) receiving team reconciles cargo against. For
+ * a FINALIZED+ manifest this is sourced from Manifest.snapshotJson (the
+ * immutable "what was approved for transport" record); for a still-DRAFT
+ * manifest it's the live current assignment state. Either way, `quantity`/
+ * `description` are read fresh from the ShipmentItem at request time (a
+ * read-only display enrichment, never written back) rather than only from
+ * the snapshot, since older snapshots (pre-dating this feature) don't
+ * carry those two fields — see ManifestsService.getPrintDocument's own
+ * doc comment.
+ */
+export interface ManifestPrintCargoItem {
+  itemCode: string;
+  trackingNumber: string;
+  customerName: string;
+  itemType: ShipmentItemType;
+  description: string | null;
+  quantity: number;
+  weight: string | null;
+  weightUnit: WeightUnit;
+  /** Combined "City, Country" (or whichever half is available) — never blank. */
+  destination: string;
+  /** Null for a direct (air) item with no container. */
+  containerNumber: string | null;
+}
+
+export interface ManifestPrintContainer {
+  containerNumber: string;
+  containerType: ContainerType;
+}
+
+/**
+ * The complete, tenant-branded document GET /manifests/:id/print and
+ * GET /manifests/:id/pdf both render — one shared shape so the printable
+ * HTML view and the generated PDF can never drift apart. See
+ * ManifestsService.getPrintDocument's own doc comment for exactly how
+ * `cargo` is sourced (snapshot vs. live) depending on manifest status.
+ */
+export interface ManifestPrintDocument {
+  tenant: {
+    name: string;
+    legalName: string | null;
+    email: string;
+    phone: string | null;
+    website: string | null;
+  };
+  manifest: {
+    id: string;
+    manifestNumber: string;
+    status: ManifestStatus;
+    shipmentMode: ShipmentMode;
+    originWarehouse: { name: string; code: string } | null;
+    originLocation: string | null;
+    destinationLocation: string | null;
+    carrierName: string | null;
+    vesselName: string | null;
+    voyageNumber: string | null;
+    flightNumber: string | null;
+    plannedDepartureAt: string | null;
+    estimatedArrivalAt: string | null;
+    departedAt: string | null;
+    arrivedAt: string | null;
+  };
+  containers: ManifestPrintContainer[];
+  summary: ManifestContentsSummary;
+  cargo: ManifestPrintCargoItem[];
+  /** When this document was generated — always "now," never stored. */
+  generatedAt: string;
+}
+
 export interface ManifestDetail {
   id: string;
   tenantId: string;

@@ -1,7 +1,8 @@
-import { Body, Controller, Delete, Get, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Query, Res } from '@nestjs/common';
 import { EntitlementFeature } from '@prisma/client';
 import type { AuthenticatedUser } from '@transatlantic/shared';
 import { ManifestStatus, ShipmentMode, UserRole } from '@transatlantic/shared';
+import type { Response } from 'express';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { RequireEntitlement } from '../common/decorators/require-entitlement.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -10,6 +11,7 @@ import { AssignContainerDto } from './dto/assign-container.dto';
 import { AssignItemDto } from './dto/assign-item.dto';
 import { CreateManifestDto } from './dto/create-manifest.dto';
 import { UnassignDto } from './dto/unassign.dto';
+import { renderManifestPdf } from './manifest-pdf.util';
 import { ManifestsService } from './manifests.service';
 
 /** Planning task, same set ContainersController uses for booking/assigning a container — no scanning involved. */
@@ -80,6 +82,35 @@ export class ManifestsController {
   @Roles(...VIEW_ROLES)
   findOne(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
     return this.manifestsService.findById(requireTenantId(user.tenantId), id);
+  }
+
+  /**
+   * Print Manifest / Download PDF — read-only, same VIEW_ROLES and same
+   * tenant-scoped lookup as findOne above (getPrintDocument uses the
+   * identical `findFirst({ where: { id, tenantId } })` pattern), so a
+   * user can no more retrieve another tenant's manifest document by
+   * guessing/changing an id than they can retrieve their manifest record
+   * itself — 404, not a leak. JSON data for the printable HTML view; the
+   * PDF endpoint below renders the exact same document.
+   */
+  @Get(':id/print')
+  @Roles(...VIEW_ROLES)
+  getPrintDocument(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+    return this.manifestsService.getPrintDocument(requireTenantId(user.tenantId), id);
+  }
+
+  @Get(':id/pdf')
+  @Roles(...VIEW_ROLES)
+  async getPdf(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Res() res: Response) {
+    const doc = await this.manifestsService.getPrintDocument(requireTenantId(user.tenantId), id);
+    const pdf = renderManifestPdf(doc);
+    const fileName = `Manifest-${doc.manifest.manifestNumber}.pdf`;
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename="${fileName}"`,
+    });
+    pdf.pipe(res);
+    pdf.end();
   }
 
   @Post()
