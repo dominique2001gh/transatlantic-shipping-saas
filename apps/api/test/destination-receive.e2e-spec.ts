@@ -453,26 +453,34 @@ describe('Destination Receive (e2e)', () => {
       expect(res.status).toBe(400);
     });
 
-    it('CRITICAL: every item individually RECEIVED_DESTINATION_WAREHOUSE never advances the shipment past ARRIVED_DESTINATION — Ready for Pickup/Delivery is a later milestone', async () => {
+    it('CRITICAL: the shipment stays at ARRIVED_DESTINATION until every item is individually RECEIVED_DESTINATION_WAREHOUSE, then advances to READY_FOR_PICKUP — not before, and not skipped', async () => {
       const manifest = await createArrivedOceanManifest(app, tokenA, tenantA, 2);
       let dbShipment = await prisma.shipment.findUniqueOrThrow({ where: { id: manifest.shipmentId } });
       expect(dbShipment.status).toBe('ARRIVED_DESTINATION');
 
-      for (const itemId of manifest.itemIds) {
-        const res = await destinationReceive(app, tokenA, itemId, tenantA.warehouseId, { condition: 'GOOD' });
-        expect(res.status).toBe(201);
-      }
+      const [firstItemId, secondItemId] = manifest.itemIds;
 
-      // All items are now individually received...
+      // Only the first item received — shipment must NOT advance yet
+      // (Final-Mile Notifications milestone: WarehouseService.
+      // maybeRollupShipmentReadyForPickup requires every applicable item,
+      // not just one).
+      let res = await destinationReceive(app, tokenA, firstItemId, tenantA.warehouseId, { condition: 'GOOD' });
+      expect(res.status).toBe(201);
+      dbShipment = await prisma.shipment.findUniqueOrThrow({ where: { id: manifest.shipmentId } });
+      expect(dbShipment.status).toBe('ARRIVED_DESTINATION');
+
+      // Second (last) item received — now every item is individually
+      // received...
+      res = await destinationReceive(app, tokenA, secondItemId, tenantA.warehouseId, { condition: 'GOOD' });
+      expect(res.status).toBe(201);
       const items = await prisma.shipmentItem.findMany({ where: { id: { in: manifest.itemIds } } });
       expect(items.every((i) => i.status === 'RECEIVED_DESTINATION_WAREHOUSE')).toBe(true);
 
-      // ...but the shipment must still be exactly ARRIVED_DESTINATION, not
-      // READY_FOR_PICKUP or anything further — this is the explicit
-      // requirement reinforced for Milestone 3F.
+      // ...and the shipment correctly advances to READY_FOR_PICKUP —
+      // Milestone 3F deliberately stopped short of this; Final-Mile
+      // Notifications is what implements it.
       dbShipment = await prisma.shipment.findUniqueOrThrow({ where: { id: manifest.shipmentId } });
-      expect(dbShipment.status).toBe('ARRIVED_DESTINATION');
-      expect(dbShipment.status).not.toBe('READY_FOR_PICKUP');
+      expect(dbShipment.status).toBe('READY_FOR_PICKUP');
     });
 
     it('appends RECEIVED_DESTINATION_WAREHOUSE without erasing prior history', async () => {

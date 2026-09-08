@@ -388,9 +388,13 @@ describe('Delivery/Driver Dispatch (e2e)', () => {
 
       await pickup(app, tokenA, itemA, tenantA.warehouseId, { recipientName: 'Ama Boateng' });
 
+      // createReceivedOceanManifest already destination-received every
+      // item, so the shipment has already advanced past ARRIVED_DESTINATION
+      // to READY_FOR_PICKUP (Final-Mile Notifications milestone) by this
+      // point — before either item's own pickup/dispatch/deliver happens.
       let dbShipment = await prisma.shipment.findUniqueOrThrow({ where: { id: manifest.shipmentId } });
       expect(dbShipment.status).not.toBe('COMPLETED');
-      expect(dbShipment.status).toBe('ARRIVED_DESTINATION');
+      expect(dbShipment.status).toBe('READY_FOR_PICKUP');
 
       await dispatch(app, tokenA, itemB, tenantA.warehouseId, { recipientName: 'Kofi Owusu', courierName: 'DHL Ghana' });
 

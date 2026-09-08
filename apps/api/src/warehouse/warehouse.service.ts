@@ -85,6 +85,36 @@ const ITEM_PROCESSED_OR_LATER: DbShipmentItemStatus[] = [
 export const ITEM_TERMINAL_HANDOFF: DbShipmentItemStatus[] = [DbShipmentItemStatus.PICKED_UP, DbShipmentItemStatus.DELIVERED];
 
 /**
+ * Final-Mile Notifications milestone: "reached at least
+ * RECEIVED_DESTINATION_WAREHOUSE." ShipmentItemStatus.READY_FOR_PICKUP
+ * itself is never set anywhere in this codebase —
+ * RECEIVED_DESTINATION_WAREHOUSE is this system's actual "available for
+ * pickup" state (see destinationReceiveItem, and pickupItem's own
+ * precondition), so maybeRollupShipmentReadyForPickup below checks for
+ * that real state rather than a status value nothing ever reaches. Same
+ * "at least this far along" pattern as ITEM_PROCESSED_OR_LATER above.
+ */
+const ITEM_AT_DESTINATION_OR_LATER: DbShipmentItemStatus[] = [
+  DbShipmentItemStatus.RECEIVED_DESTINATION_WAREHOUSE,
+  DbShipmentItemStatus.OUT_FOR_DELIVERY,
+  DbShipmentItemStatus.DELIVERED,
+  DbShipmentItemStatus.PICKED_UP,
+];
+
+/**
+ * Final-Mile Notifications milestone: "reached at least OUT_FOR_DELIVERY."
+ * An already-PICKED_UP item is further along than dispatch in
+ * customer-relevance terms (it left the building via a different,
+ * equally-terminal path — see ITEM_TERMINAL_HANDOFF above), so it
+ * satisfies this too, on a mixed-fulfillment shipment.
+ */
+const ITEM_OUT_FOR_DELIVERY_OR_LATER: DbShipmentItemStatus[] = [
+  DbShipmentItemStatus.OUT_FOR_DELIVERY,
+  DbShipmentItemStatus.DELIVERED,
+  DbShipmentItemStatus.PICKED_UP,
+];
+
+/**
  * Shared shape for every endpoint that resolves to a full ShipmentItem
  * (scan, search, receive result, process result, inventory row) — one
  * definition so the confirm panel, inventory table, and receive/process
@@ -555,6 +585,8 @@ export class WarehouseService {
       },
     });
 
+    await this.maybeRollupShipmentReadyForPickup(tenantId, actorUserId, item.shipmentId);
+
     const received = await this.prisma.shipmentItem.findUniqueOrThrow({
       where: { id: item.id },
       include: ITEM_DETAIL_INCLUDE,
@@ -823,6 +855,8 @@ export class WarehouseService {
       },
     });
 
+    await this.maybeRollupShipmentOutForDelivery(tenantId, actorUserId, item.shipmentId);
+
     const dispatched = await this.prisma.shipmentItem.findUniqueOrThrow({
       where: { id: item.id },
       include: ITEM_DETAIL_INCLUDE,
@@ -943,6 +977,7 @@ export class WarehouseService {
       },
     });
 
+    await this.maybeRollupShipmentDelivered(tenantId, actorUserId, item.shipmentId);
     await this.maybeRollupShipmentCompletion(tenantId, actorUserId, item.shipmentId);
 
     const delivered = await this.prisma.shipmentItem.findUniqueOrThrow({
@@ -1057,6 +1092,161 @@ export class WarehouseService {
   }
 
   /**
+   * Final-Mile Notifications milestone: advances a shipment to
+   * READY_FOR_PICKUP once every applicable item has reached the
+   * destination warehouse (see ITEM_AT_DESTINATION_OR_LATER above) — same
+   * template as every other rollup in this file/ManifestsService:
+   * eligible-source-status guard, "every item at least this far along"
+   * check, forward-only, SYSTEM-sourced shipment-level tracking event.
+   * CANCELLED items are excluded from the check, EXCEPTION items are not
+   * (an unresolved discrepancy on one item holds up the "your shipment is
+   * ready" notification for the whole shipment) — identical policy to
+   * maybeRollupShipmentCompletion below, for the same reason.
+   *
+   * Called unconditionally at the end of destinationReceiveItem,
+   * regardless of that call's own good/exception outcome — safe either
+   * way: an EXCEPTION-branch item is never in ITEM_AT_DESTINATION_OR_LATER,
+   * so the "every item" check correctly stays false until it's resolved.
+   */
+  private async maybeRollupShipmentReadyForPickup(tenantId: string, actorUserId: string, shipmentId: string) {
+    const ROLLUP_ELIGIBLE_STATUSES: DbShipmentStatus[] = [DbShipmentStatus.ARRIVED_DESTINATION];
+
+    const shipment = await this.prisma.shipment.findFirst({
+      where: { id: shipmentId, tenantId },
+      include: { items: { select: { status: true } } },
+    });
+    if (!shipment || shipment.items.length === 0) {
+      return;
+    }
+    if (!ROLLUP_ELIGIBLE_STATUSES.includes(shipment.status)) {
+      return;
+    }
+
+    const applicableItems = shipment.items.filter((shipmentItem) => shipmentItem.status !== DbShipmentItemStatus.CANCELLED);
+    if (applicableItems.length === 0) {
+      return;
+    }
+    const allAtDestination = applicableItems.every((shipmentItem) => ITEM_AT_DESTINATION_OR_LATER.includes(shipmentItem.status));
+    if (!allAtDestination) {
+      return;
+    }
+
+    await this.shipmentsService.createTrackingEvent(
+      tenantId,
+      actorUserId,
+      shipmentId,
+      {
+        eventType: TrackingEventType.READY_FOR_PICKUP,
+        status: ShipmentStatus.READY_FOR_PICKUP,
+        notes: 'All applicable items received at the destination warehouse',
+      },
+      { source: TrackingEventSource.SYSTEM },
+    );
+  }
+
+  /**
+   * Final-Mile Notifications milestone: advances a shipment to
+   * OUT_FOR_DELIVERY once every applicable item has been dispatched or is
+   * further along (see ITEM_OUT_FOR_DELIVERY_OR_LATER above) — same
+   * template, same CANCELLED/EXCEPTION policy as
+   * maybeRollupShipmentReadyForPickup. Eligible from either
+   * ARRIVED_DESTINATION (dispatch happened before every item was
+   * individually confirmed ready) or READY_FOR_PICKUP (the ordinary case)
+   * — both are legitimate prior states once destination-receiving and
+   * dispatch can interleave across a multi-item shipment.
+   */
+  private async maybeRollupShipmentOutForDelivery(tenantId: string, actorUserId: string, shipmentId: string) {
+    const ROLLUP_ELIGIBLE_STATUSES: DbShipmentStatus[] = [DbShipmentStatus.ARRIVED_DESTINATION, DbShipmentStatus.READY_FOR_PICKUP];
+
+    const shipment = await this.prisma.shipment.findFirst({
+      where: { id: shipmentId, tenantId },
+      include: { items: { select: { status: true } } },
+    });
+    if (!shipment || shipment.items.length === 0) {
+      return;
+    }
+    if (!ROLLUP_ELIGIBLE_STATUSES.includes(shipment.status)) {
+      return;
+    }
+
+    const applicableItems = shipment.items.filter((shipmentItem) => shipmentItem.status !== DbShipmentItemStatus.CANCELLED);
+    if (applicableItems.length === 0) {
+      return;
+    }
+    const allOutForDelivery = applicableItems.every((shipmentItem) =>
+      ITEM_OUT_FOR_DELIVERY_OR_LATER.includes(shipmentItem.status),
+    );
+    if (!allOutForDelivery) {
+      return;
+    }
+
+    await this.shipmentsService.createTrackingEvent(
+      tenantId,
+      actorUserId,
+      shipmentId,
+      {
+        eventType: TrackingEventType.OUT_FOR_DELIVERY,
+        status: ShipmentStatus.OUT_FOR_DELIVERY,
+        notes: 'All applicable items dispatched for delivery',
+      },
+      { source: TrackingEventSource.SYSTEM },
+    );
+  }
+
+  /**
+   * Final-Mile Notifications milestone: advances a shipment to DELIVERED
+   * once every applicable item has reached a terminal handoff (reuses
+   * ITEM_TERMINAL_HANDOFF — the same PICKED_UP/DELIVERED array
+   * maybeRollupShipmentCompletion already uses, no separate constant
+   * needed). Called from deliverItem, immediately before the existing,
+   * unmodified call to maybeRollupShipmentCompletion below — on a
+   * delivery-fulfilled shipment, DELIVERED and COMPLETED will both fire
+   * back to back for the same real-world moment (the last item being
+   * delivered). That's a known, accepted redundancy: COMPLETED's own
+   * trigger condition/content/dedupe are deliberately untouched here, per
+   * explicit instruction, rather than narrowed to avoid it.
+   */
+  private async maybeRollupShipmentDelivered(tenantId: string, actorUserId: string, shipmentId: string) {
+    const ROLLUP_ELIGIBLE_STATUSES: DbShipmentStatus[] = [
+      DbShipmentStatus.ARRIVED_DESTINATION,
+      DbShipmentStatus.READY_FOR_PICKUP,
+      DbShipmentStatus.OUT_FOR_DELIVERY,
+    ];
+
+    const shipment = await this.prisma.shipment.findFirst({
+      where: { id: shipmentId, tenantId },
+      include: { items: { select: { status: true } } },
+    });
+    if (!shipment || shipment.items.length === 0) {
+      return;
+    }
+    if (!ROLLUP_ELIGIBLE_STATUSES.includes(shipment.status)) {
+      return;
+    }
+
+    const applicableItems = shipment.items.filter((shipmentItem) => shipmentItem.status !== DbShipmentItemStatus.CANCELLED);
+    if (applicableItems.length === 0) {
+      return;
+    }
+    const allHandedOff = applicableItems.every((shipmentItem) => ITEM_TERMINAL_HANDOFF.includes(shipmentItem.status));
+    if (!allHandedOff) {
+      return;
+    }
+
+    await this.shipmentsService.createTrackingEvent(
+      tenantId,
+      actorUserId,
+      shipmentId,
+      {
+        eventType: TrackingEventType.DELIVERED,
+        status: ShipmentStatus.DELIVERED,
+        notes: 'All applicable items confirmed delivered',
+      },
+      { source: TrackingEventSource.SYSTEM },
+    );
+  }
+
+  /**
    * Advances a shipment to COMPLETED once every one of its applicable
    * items has reached a terminal handoff status (see ITEM_TERMINAL_HANDOFF
    * above) — mirrors ManifestsService.maybeRollupShipmentArrival exactly:
@@ -1079,9 +1269,28 @@ export class WarehouseService {
    * predated this milestone and would have mislabeled a delivered-only
    * or mixed completion as "picked up," which matters once these events
    * feed customer-facing tracking/notifications.
+   *
+   * Final-Mile Notifications milestone: ROLLUP_ELIGIBLE_STATUSES widened
+   * from [ARRIVED_DESTINATION] to also include READY_FOR_PICKUP,
+   * OUT_FOR_DELIVERY, and DELIVERED — a required, purely structural
+   * consequence of those three new intermediate shipment statuses now
+   * existing between ARRIVED_DESTINATION and COMPLETED (see
+   * maybeRollupShipmentReadyForPickup/OutForDelivery/Delivered above).
+   * Without this widening, a shipment that passed through any of them
+   * would no longer be "eligible" by the time every item reaches
+   * ITEM_TERMINAL_HANDOFF, and COMPLETED would silently stop firing for
+   * every shipment going forward. Nothing else about this method changed:
+   * the trigger condition (every applicable item at ITEM_TERMINAL_HANDOFF),
+   * the notification content/dedupe key, and TrackingEventType.COMPLETED
+   * are all exactly as they were.
    */
   private async maybeRollupShipmentCompletion(tenantId: string, actorUserId: string, shipmentId: string) {
-    const ROLLUP_ELIGIBLE_STATUSES: DbShipmentStatus[] = [DbShipmentStatus.ARRIVED_DESTINATION];
+    const ROLLUP_ELIGIBLE_STATUSES: DbShipmentStatus[] = [
+      DbShipmentStatus.ARRIVED_DESTINATION,
+      DbShipmentStatus.READY_FOR_PICKUP,
+      DbShipmentStatus.OUT_FOR_DELIVERY,
+      DbShipmentStatus.DELIVERED,
+    ];
 
     const shipment = await this.prisma.shipment.findFirst({
       where: { id: shipmentId, tenantId },

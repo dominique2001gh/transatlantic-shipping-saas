@@ -155,9 +155,13 @@ describe('Customer Pickup (e2e)', () => {
       const manifest = await createReceivedOceanManifest(app, tokenA, tenantA, 2);
       await pickup(app, tokenA, manifest.itemIds[0], tenantA.warehouseId, { recipientName: 'Ama Boateng' });
 
+      // createReceivedOceanManifest already destination-received every
+      // item, so the shipment already advanced to READY_FOR_PICKUP
+      // (Final-Mile Notifications milestone) before either item's own
+      // pickup happens — completion specifically still must not move yet.
       let dbShipment = await prisma.shipment.findUniqueOrThrow({ where: { id: manifest.shipmentId } });
       expect(dbShipment.status).not.toBe('COMPLETED');
-      expect(dbShipment.status).toBe('ARRIVED_DESTINATION'); // one item down, shipment-level status must not move yet
+      expect(dbShipment.status).toBe('READY_FOR_PICKUP'); // one item down, completion must not move yet
 
       await pickup(app, tokenA, manifest.itemIds[1], tenantA.warehouseId, { recipientName: 'Kofi Owusu' });
 
