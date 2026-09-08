@@ -10,20 +10,23 @@ import { CustomersService } from './customers.service';
 import { CreateCustomerDto } from './dto/create-customer.dto';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
 
-/** Creating/editing customer profiles is a front-office/admin task. */
+/**
+ * Creating/editing customer profiles. Originally front-office/admin only;
+ * WAREHOUSE_STAFF was added per explicit product decision (2026-09) —
+ * warehouse intake requires registering a new customer on the spot when
+ * receiving their first shipment, the same operational tier as
+ * ShipmentsController's OPERATIONS_ROLES (which already included
+ * WAREHOUSE_STAFF for exactly this reason).
+ */
 const MANAGE_ROLES = [
   UserRole.TENANT_OWNER,
   UserRole.TENANT_ADMIN,
   UserRole.WAREHOUSE_MANAGER,
+  UserRole.WAREHOUSE_STAFF,
   UserRole.CUSTOMER_SERVICE,
 ];
-/** Broader read access — warehouse staff routinely need to look up whose shipment they're handling. */
-const VIEW_ROLES = [
-  ...MANAGE_ROLES,
-  UserRole.WAREHOUSE_STAFF,
-  UserRole.ACCOUNTANT,
-  UserRole.DESTINATION_AGENT,
-];
+/** Broader read access — ACCOUNTANT/DESTINATION_AGENT can look up whose shipment they're handling but not create/edit customers. */
+const VIEW_ROLES = [...MANAGE_ROLES, UserRole.ACCOUNTANT, UserRole.DESTINATION_AGENT];
 
 @Controller('customers')
 @RequireEntitlement(EntitlementFeature.OPERATIONS_SOFTWARE)
