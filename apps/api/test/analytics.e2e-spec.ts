@@ -1,5 +1,5 @@
 import { INestApplication } from '@nestjs/common';
-import { PrismaClient, UserRole } from '@prisma/client';
+import { ContainerStatus, PrismaClient, TrackingEventType, UserRole } from '@prisma/client';
 import request from 'supertest';
 import {
   createTestTenant,
@@ -482,6 +482,356 @@ describe('Analytics: tenant isolation, role authorization, aggregation correctne
       const countries = (res.body.topDestinations as { destinationCountry: string }[]).map((d) => d.destinationCountry);
       expect(countries).toContain('Kenya');
       expect(countries).toContain('Tanzania');
+    });
+  });
+});
+
+/**
+ * Executive Dashboard (GET /analytics/executive) — deliberately its own
+ * top-level describe with its own fresh tenants, not sharing tenantA/
+ * tenantB above (those are already torn down by the outer describe's own
+ * afterAll before this one's tests run). Proves the same three things as
+ * the suite above, plus the live-vs-period split unique to this endpoint:
+ *   1. Role authorization — identical ANALYTICS_ROLES gate as every other
+ *      route except /analytics/overview (this route is NOT open to
+ *      DASHBOARD_ROLES — it carries real financial figures).
+ *   2. Tenant isolation.
+ *   3. Correctness: `activeShipments`/`openInvoices`/`outstandingBalance`/
+ *      `containerMovement`/`attention` never move when the date range
+ *      changes (live state); `revenue`/`completedShipments`/
+ *      `warehouseActivity`/both trends do respect it (period-bound).
+ *   4. Multi-currency safety (never summed across currencies).
+ *   5. Empty state (a tenant with no activity yet returns all-zero/empty,
+ *      never a crash or a fabricated non-zero value).
+ */
+describe('Executive Dashboard: GET /analytics/executive (e2e)', () => {
+  let app: INestApplication;
+  const prisma = new PrismaClient();
+
+  let tenantExec: TestTenantFixture;
+  let tenantOther: TestTenantFixture;
+  let tenantEmpty: TestTenantFixture;
+  let ownerToken: string;
+  let adminToken: string;
+  let managerToken: string;
+  let warehouseStaffToken: string;
+  let ownerTokenOther: string;
+  let ownerTokenEmpty: string;
+
+  const now = new Date();
+  const fiveDaysAgo = new Date(now.getTime() - 5 * 24 * 60 * 60 * 1000);
+  const tenDaysAgo = new Date(now.getTime() - 10 * 24 * 60 * 60 * 1000);
+  const sixtyDaysAgo = new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000);
+  const today = now.toISOString().slice(0, 10);
+
+  beforeAll(async () => {
+    app = await createTestApp();
+
+    tenantExec = await createTestTenant(prisma, 'ExecDashA', UserRole.TENANT_OWNER);
+    tenantOther = await createTestTenant(prisma, 'ExecDashB', UserRole.TENANT_OWNER);
+    tenantEmpty = await createTestTenant(prisma, 'ExecDashEmpty', UserRole.TENANT_OWNER);
+    ownerToken = await login(app, tenantExec.user.email, tenantExec.user.password);
+    ownerTokenOther = await login(app, tenantOther.user.email, tenantOther.user.password);
+    ownerTokenEmpty = await login(app, tenantEmpty.user.email, tenantEmpty.user.password);
+
+    const admin = await createUserInTenant(prisma, tenantExec.tenantId, 'Admin', UserRole.TENANT_ADMIN);
+    adminToken = await login(app, admin.email, admin.password);
+    const manager = await createUserInTenant(prisma, tenantExec.tenantId, 'Manager', UserRole.WAREHOUSE_MANAGER);
+    managerToken = await login(app, manager.email, manager.password);
+    const warehouseStaff = await createUserInTenant(prisma, tenantExec.tenantId, 'Staff', UserRole.WAREHOUSE_STAFF);
+    warehouseStaffToken = await login(app, warehouseStaff.email, warehouseStaff.password);
+
+    // --- Financial: one overdue USD invoice + one fully-paid GHS invoice ---
+    // proves outstandingBalance/openInvoices (live) and multi-currency
+    // revenue (period), never cross-summed.
+    const invoiceUsd = await prisma.invoice.create({
+      data: {
+        tenantId: tenantExec.tenantId,
+        customerId: tenantExec.customerId,
+        invoiceNumber: 'EXEC-TEST-INV-USD',
+        status: 'PARTIALLY_PAID',
+        subtotal: '1000.00',
+        tax: '0.00',
+        total: '1000.00',
+        amountPaid: '500.00',
+        currency: 'USD',
+        dueDate: fiveDaysAgo,
+        issuedAt: now,
+      },
+    });
+    await prisma.payment.create({
+      data: {
+        tenantId: tenantExec.tenantId,
+        invoiceId: invoiceUsd.id,
+        customerId: tenantExec.customerId,
+        amount: '500.00',
+        currency: 'USD',
+        method: 'CARD',
+        status: 'COMPLETED',
+        source: 'ONLINE',
+        paidAt: now,
+      },
+    });
+    const invoiceGhs = await prisma.invoice.create({
+      data: {
+        tenantId: tenantExec.tenantId,
+        customerId: tenantExec.customerId,
+        invoiceNumber: 'EXEC-TEST-INV-GHS',
+        status: 'PAID',
+        subtotal: '300.00',
+        tax: '0.00',
+        total: '300.00',
+        amountPaid: '300.00',
+        currency: 'GHS',
+        issuedAt: now,
+      },
+    });
+    await prisma.payment.create({
+      data: {
+        tenantId: tenantExec.tenantId,
+        invoiceId: invoiceGhs.id,
+        customerId: tenantExec.customerId,
+        amount: '300.00',
+        currency: 'GHS',
+        method: 'MOBILE_MONEY',
+        status: 'COMPLETED',
+        source: 'MANUAL',
+        paidAt: now,
+      },
+    });
+
+    // --- A stale, unresolved exception -> "Requires Attention" ---
+    await prisma.operationalException.create({
+      data: { tenantId: tenantExec.tenantId, type: 'DELAYED', message: 'Executive dashboard test fixture', createdAt: tenDaysAgo },
+    });
+
+    // --- Shipments: one active (live), one completed (period) ---
+    await prisma.shipment.create({
+      data: {
+        tenantId: tenantExec.tenantId,
+        customerId: tenantExec.customerId,
+        trackingNumber: 'EXEC-TEST-ACTIVE',
+        shipmentMode: 'AIR',
+        originCountry: 'US',
+        destinationCountry: 'Ghana',
+        status: 'PROCESSING',
+        createdAt: now,
+      },
+    });
+    const completedShipment = await prisma.shipment.create({
+      data: {
+        tenantId: tenantExec.tenantId,
+        customerId: tenantExec.customerId,
+        trackingNumber: 'EXEC-TEST-COMPLETED',
+        shipmentMode: 'AIR',
+        originCountry: 'US',
+        destinationCountry: 'Ghana',
+        status: 'COMPLETED',
+        createdAt: now,
+      },
+    });
+
+    // --- TrackingEvents: known warehouse-activity counts, in and out of range ---
+    const eventTypes: { eventType: TrackingEventType; occurredAt: Date }[] = [
+      { eventType: TrackingEventType.RECEIVED_AT_WAREHOUSE, occurredAt: now },
+      { eventType: TrackingEventType.RECEIVED_AT_WAREHOUSE, occurredAt: now },
+      { eventType: TrackingEventType.PROCESSED, occurredAt: now },
+      { eventType: TrackingEventType.LOADED, occurredAt: now },
+      { eventType: TrackingEventType.RECEIVED_DESTINATION_WAREHOUSE, occurredAt: now },
+      { eventType: TrackingEventType.DELIVERED, occurredAt: now },
+      { eventType: TrackingEventType.PICKED_UP, occurredAt: now },
+      // Outside "today" but inside a wide range — proves date-range exclusion.
+      { eventType: TrackingEventType.RECEIVED_AT_WAREHOUSE, occurredAt: sixtyDaysAgo },
+    ];
+    for (const e of eventTypes) {
+      await prisma.trackingEvent.create({
+        data: {
+          tenantId: tenantExec.tenantId,
+          shipmentId: completedShipment.id,
+          eventType: e.eventType,
+          source: 'MANUAL',
+          occurredAt: e.occurredAt,
+        },
+      });
+    }
+
+    // --- Containers: one per bucket, plus a CLOSED one to prove exclusion ---
+    const containerStatuses: ContainerStatus[] = [
+      ContainerStatus.BOOKED,
+      ContainerStatus.LOADING,
+      ContainerStatus.DEPARTED,
+      ContainerStatus.IN_TRANSIT,
+      ContainerStatus.ARRIVED,
+      ContainerStatus.CLOSED,
+    ];
+    for (const status of containerStatuses) {
+      await prisma.container.create({
+        data: {
+          tenantId: tenantExec.tenantId,
+          containerNumber: `EXEC-TEST-${status}`,
+          containerType: 'TWENTY_FT',
+          status,
+        },
+      });
+    }
+
+    // --- Tenant isolation counterpart: a different known amount ---
+    const invoiceOther = await prisma.invoice.create({
+      data: {
+        tenantId: tenantOther.tenantId,
+        customerId: tenantOther.customerId,
+        invoiceNumber: 'EXEC-TEST-OTHER-INV',
+        status: 'PAID',
+        subtotal: '7777.00',
+        tax: '0.00',
+        total: '7777.00',
+        amountPaid: '7777.00',
+        currency: 'USD',
+        issuedAt: now,
+      },
+    });
+    await prisma.payment.create({
+      data: {
+        tenantId: tenantOther.tenantId,
+        invoiceId: invoiceOther.id,
+        customerId: tenantOther.customerId,
+        amount: '7777.00',
+        currency: 'USD',
+        method: 'CASH',
+        status: 'COMPLETED',
+        source: 'MANUAL',
+        paidAt: now,
+      },
+    });
+  }, 30_000);
+
+  afterAll(async () => {
+    await app.close();
+    await deleteTestTenant(prisma, tenantExec.tenantId);
+    await deleteTestTenant(prisma, tenantOther.tenantId);
+    await deleteTestTenant(prisma, tenantEmpty.tenantId);
+    await prisma.$disconnect();
+  }, 30_000);
+
+  describe('Role authorization', () => {
+    it('unauthenticated requests get 401', async () => {
+      const res = await request(app.getHttpServer()).get('/analytics/executive');
+      expect(res.status).toBe(401);
+    });
+
+    it('OWNER, ADMIN, MANAGER (ANALYTICS_ROLES) get 200', async () => {
+      for (const token of [ownerToken, adminToken, managerToken]) {
+        const res = await request(app.getHttpServer()).get('/analytics/executive').set('Authorization', `Bearer ${token}`);
+        expect(res.status).toBe(200);
+      }
+    });
+
+    it('WAREHOUSE_STAFF gets 403 — unlike /analytics/overview, this route carries financial data', async () => {
+      const res = await request(app.getHttpServer()).get('/analytics/executive').set('Authorization', `Bearer ${warehouseStaffToken}`);
+      expect(res.status).toBe(403);
+    });
+
+    it('a CUSTOMER token gets 403', async () => {
+      const customerToken = await loginAsPortalCustomer(app, prisma, tenantExec.tenantId);
+      const res = await request(app.getHttpServer()).get('/analytics/executive').set('Authorization', `Bearer ${customerToken}`);
+      expect(res.status).toBe(403);
+    });
+  });
+
+  describe('Tenant isolation', () => {
+    it("tenantOther's executive snapshot reflects only its own $7777 revenue, never tenantExec's figures", async () => {
+      const res = await request(app.getHttpServer())
+        .get(`/analytics/executive?from=2020-01-01&to=${today}`)
+        .set('Authorization', `Bearer ${ownerTokenOther}`);
+      expect(res.status).toBe(200);
+      expect(res.body.revenue).toEqual([{ currency: 'USD', amount: '7777.00' }]);
+      expect(res.body.openInvoices).toBe(0); // tenantOther's invoice is fully PAID, not open
+      expect(res.body.outstandingBalance).toEqual([]);
+      // Never contaminated by tenantExec's GHS revenue or open invoice.
+      expect(res.body.revenue.find((r: { currency: string }) => r.currency === 'GHS')).toBeUndefined();
+    });
+  });
+
+  describe('Live vs. period fields', () => {
+    it('activeShipments/openInvoices/outstandingBalance/containerMovement/attention are identical for "today" and a wide historical range', async () => {
+      const resToday = await request(app.getHttpServer())
+        .get(`/analytics/executive?from=${today}&to=${today}`)
+        .set('Authorization', `Bearer ${ownerToken}`);
+      const resWide = await request(app.getHttpServer())
+        .get(`/analytics/executive?from=2020-01-01&to=${today}`)
+        .set('Authorization', `Bearer ${ownerToken}`);
+      expect(resToday.status).toBe(200);
+      expect(resWide.status).toBe(200);
+
+      expect(resToday.body.activeShipments).toBe(resWide.body.activeShipments);
+      expect(resToday.body.openInvoices).toBe(resWide.body.openInvoices);
+      expect(resToday.body.outstandingBalance).toEqual(resWide.body.outstandingBalance);
+      expect(resToday.body.containerMovement).toEqual(resWide.body.containerMovement);
+      expect(resToday.body.attention).toEqual(resWide.body.attention);
+
+      // Sanity: the live fields actually reflect the known fixture, not just "equal to each other."
+      expect(resToday.body.activeShipments).toBeGreaterThanOrEqual(1); // EXEC-TEST-ACTIVE
+      expect(resToday.body.openInvoices).toBe(1); // only the PARTIALLY_PAID USD invoice
+      expect(resToday.body.outstandingBalance).toEqual([{ currency: 'USD', amount: '500.00' }]);
+      expect(resToday.body.attention.overdueInvoices.count).toBe(1);
+      expect(resToday.body.attention.staleExceptions.count).toBeGreaterThanOrEqual(1);
+    });
+
+    it('revenue/completedShipments/warehouseActivity DO respect the requested period', async () => {
+      const resToday = await request(app.getHttpServer())
+        .get(`/analytics/executive?from=${today}&to=${today}`)
+        .set('Authorization', `Bearer ${ownerToken}`);
+      const resWide = await request(app.getHttpServer())
+        .get(`/analytics/executive?from=2020-01-01&to=${today}`)
+        .set('Authorization', `Bearer ${ownerToken}`);
+
+      // Multi-currency revenue for "today": never summed across currencies.
+      const revenueToday = (resToday.body.revenue as { currency: string; amount: string }[]).sort((a, b) => a.currency.localeCompare(b.currency));
+      expect(revenueToday).toEqual([
+        { currency: 'GHS', amount: '300.00' },
+        { currency: 'USD', amount: '500.00' },
+      ]);
+
+      // The 60-day-old RECEIVED_AT_WAREHOUSE event is excluded from "today"
+      // but included in the wide range — proves warehouseActivity is
+      // genuinely period-bound, not accidentally live.
+      expect(resToday.body.warehouseActivity.received).toBe(2);
+      expect(resWide.body.warehouseActivity.received).toBe(3);
+      expect(resToday.body.warehouseActivity.processed).toBe(1);
+      expect(resToday.body.warehouseActivity.loaded).toBe(1);
+      expect(resToday.body.warehouseActivity.destinationReceived).toBe(1);
+      expect(resToday.body.warehouseActivity.deliveredOrPickedUp).toBe(2); // DELIVERED + PICKED_UP combined
+      expect(resToday.body.completedShipments).toBeGreaterThanOrEqual(1); // EXEC-TEST-COMPLETED
+    });
+  });
+
+  describe('Container movement bucketing', () => {
+    it('groups BOOKED/LOADING into loadingOrLoaded, DEPARTED/IN_TRANSIT into inTransit, ARRIVED into arrivedOrUnloading, and excludes CLOSED entirely', async () => {
+      const res = await request(app.getHttpServer())
+        .get(`/analytics/executive?from=${today}&to=${today}`)
+        .set('Authorization', `Bearer ${ownerToken}`);
+      expect(res.status).toBe(200);
+      expect(res.body.containerMovement).toEqual({ loadingOrLoaded: 2, inTransit: 2, arrivedOrUnloading: 1 });
+    });
+  });
+
+  describe('Empty state', () => {
+    it('a tenant with no shipments/invoices/containers/exceptions yet returns all-zero/empty, not a crash or a fabricated value', async () => {
+      const res = await request(app.getHttpServer())
+        .get(`/analytics/executive?from=${today}&to=${today}`)
+        .set('Authorization', `Bearer ${ownerTokenEmpty}`);
+      expect(res.status).toBe(200);
+      expect(res.body.activeShipments).toBe(0);
+      expect(res.body.openInvoices).toBe(0);
+      expect(res.body.outstandingBalance).toEqual([]);
+      expect(res.body.revenue).toEqual([]);
+      expect(res.body.completedShipments).toBe(0);
+      expect(res.body.containerMovement).toEqual({ loadingOrLoaded: 0, inTransit: 0, arrivedOrUnloading: 0 });
+      expect(res.body.warehouseActivity).toEqual({ received: 0, processed: 0, loaded: 0, destinationReceived: 0, deliveredOrPickedUp: 0 });
+      expect(res.body.attention.overdueInvoices.count).toBe(0);
+      expect(res.body.attention.staleExceptions.count).toBe(0);
+      expect(res.body.shipmentVolumeTrend).toEqual([]);
+      expect(res.body.revenueTrend).toEqual([]);
     });
   });
 });

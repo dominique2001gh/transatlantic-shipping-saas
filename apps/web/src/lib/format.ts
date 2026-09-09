@@ -72,6 +72,20 @@ export function formatCurrency(amount: string, currency: string): string {
   }
 }
 
+/**
+ * Stage 4: joins a CurrencyAmount[] for display — e.g. "$1,234.50" or
+ * "$1,234.50 + GH₵500.00" when a tenant genuinely has more than one
+ * currency in play. Never sums across currencies (see CurrencyAmount's
+ * own doc comment) — reuses formatCurrency per-entry, the same
+ * currency-safe formatter every other money display in this app uses.
+ * Shared by dashboard/reports and the Executive Dashboard so the two
+ * surfaces can never render the same figures differently.
+ */
+export function formatAmounts(amounts: { currency: string; amount: string }[]): string {
+  if (amounts.length === 0) return '—';
+  return amounts.map((a) => formatCurrency(a.amount, a.currency)).join(' + ');
+}
+
 /** Stage 3G: bytes -> "1.2 MB"-style display for document file sizes. */
 export function formatFileSize(bytes: number | null): string {
   if (bytes === null || Number.isNaN(bytes)) return '—';

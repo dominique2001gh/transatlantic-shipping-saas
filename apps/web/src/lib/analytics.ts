@@ -4,6 +4,7 @@ import type {
   AnalyticsDateRangeQuery,
   AnalyticsDestinationsResponse,
   AnalyticsExceptionsResponse,
+  AnalyticsExecutiveResponse,
   AnalyticsOperationsResponse,
   AnalyticsOverviewResponse,
   AnalyticsRevenueResponse,
@@ -65,4 +66,9 @@ export function getAnalyticsCustomers(query?: AnalyticsDateRangeQuery): Promise<
 
 export function getAnalyticsExceptions(query?: AnalyticsDateRangeQuery): Promise<AnalyticsExceptionsResponse> {
   return apiFetch<AnalyticsExceptionsResponse>(`/analytics/exceptions${toQueryString(query)}`, { token: authToken() });
+}
+
+/** Backs the Executive Dashboard at /dashboard — ANALYTICS_ROLES only (see AnalyticsController). Only `from`/`to` are meaningful here; the endpoint ignores shipmentMode/warehouseId by design (an unfiltered tenant-wide snapshot). */
+export function getAnalyticsExecutive(query?: Pick<AnalyticsDateRangeQuery, 'from' | 'to'>): Promise<AnalyticsExecutiveResponse> {
+  return apiFetch<AnalyticsExecutiveResponse>(`/analytics/executive${toQueryString(query)}`, { token: authToken() });
 }

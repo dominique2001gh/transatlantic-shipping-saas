@@ -8,7 +8,6 @@ import type {
   AnalyticsExceptionsResponse,
   AnalyticsOperationsResponse,
   AnalyticsRevenueResponse,
-  CurrencyAmount,
   ShipmentMode,
   WarehouseSummary,
 } from '@transatlantic/shared';
@@ -27,9 +26,13 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
+import { EntitlementFeature } from '@transatlantic/shared';
+import { IconLayers } from '@/components/icons';
 import { Card } from '@/components/ui/Card';
 import { SelectInput } from '@/components/forms/FormField';
-import { humanizeEnumValue } from '@/lib/format';
+import { fetchMyEntitlements } from '@/lib/entitlements';
+import { computeRange, PRESET_LABELS, type PresetKey } from '@/lib/date-range';
+import { formatAmounts, humanizeEnumValue } from '@/lib/format';
 import {
   getAnalyticsAlerts,
   getAnalyticsCustomers,
@@ -39,70 +42,6 @@ import {
   getAnalyticsRevenue,
 } from '@/lib/analytics';
 import { listWarehouseLocations } from '@/lib/warehouse';
-
-// ---------------------------------------------------------------------------
-// Date-range presets
-// ---------------------------------------------------------------------------
-
-type PresetKey = 'today' | '7d' | '30d' | 'thisMonth' | 'lastMonth' | 'thisQuarter' | 'thisYear' | 'custom';
-
-const PRESET_LABELS: Record<PresetKey, string> = {
-  today: 'Today',
-  '7d': 'Last 7 days',
-  '30d': 'Last 30 days',
-  thisMonth: 'This Month',
-  lastMonth: 'Last Month',
-  thisQuarter: 'This Quarter',
-  thisYear: 'This Year',
-  custom: 'Custom range',
-};
-
-function isoDate(d: Date): string {
-  return d.toISOString().slice(0, 10);
-}
-
-function computeRange(preset: PresetKey): { from: string; to: string } {
-  const now = new Date();
-  const end = isoDate(now);
-  switch (preset) {
-    case 'today':
-      return { from: end, to: end };
-    case '7d':
-      return { from: isoDate(new Date(now.getTime() - 7 * 86400000)), to: end };
-    case 'thisMonth':
-      return { from: isoDate(new Date(now.getFullYear(), now.getMonth(), 1)), to: end };
-    case 'lastMonth': {
-      const first = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-      const last = new Date(now.getFullYear(), now.getMonth(), 0);
-      return { from: isoDate(first), to: isoDate(last) };
-    }
-    case 'thisQuarter': {
-      const q = Math.floor(now.getMonth() / 3);
-      return { from: isoDate(new Date(now.getFullYear(), q * 3, 1)), to: end };
-    }
-    case 'thisYear':
-      return { from: isoDate(new Date(now.getFullYear(), 0, 1)), to: end };
-    case '30d':
-    default:
-      return { from: isoDate(new Date(now.getTime() - 30 * 86400000)), to: end };
-  }
-}
-
-/** Amounts joined for display — e.g. "$1,234.50" or "$1,234.50 + GH₵500.00" when a tenant genuinely has more than one currency in play. Never summed into one number across currencies. */
-function formatAmounts(amounts: CurrencyAmount[]): string {
-  if (amounts.length === 0) return '—';
-  return amounts.map((a) => formatCurrencyAmount(a)).join(' + ');
-}
-
-function formatCurrencyAmount({ currency, amount }: CurrencyAmount): string {
-  const value = Number(amount);
-  if (Number.isNaN(value)) return `${currency} ${amount}`;
-  try {
-    return new Intl.NumberFormat(undefined, { style: 'currency', currency }).format(value);
-  } catch {
-    return `${currency} ${amount}`;
-  }
-}
 
 const CHART_COLORS = ['var(--color-primary-700)', '#059669', '#d97706', '#dc2626', '#7c3aed', '#0891b2', '#64748b', '#be185d'];
 
@@ -124,6 +63,19 @@ export default function ReportsPage() {
   const [customers, setCustomers] = useState<AnalyticsCustomersResponse | null>(null);
   const [exceptions, setExceptions] = useState<AnalyticsExceptionsResponse | null>(null);
   const [error, setError] = useState(false);
+  const [entitled, setEntitled] = useState<boolean | null>(null);
+
+  /**
+   * UX convenience only, same pattern as dashboard/ai-agent — the real
+   * enforcement is AnalyticsController's own @RequireEntitlement(ANALYTICS).
+   * A Basic-tier tenant (see plan-entitlements.ts) sees an explanatory
+   * message here instead of every chart below silently failing with a 403.
+   */
+  useEffect(() => {
+    fetchMyEntitlements()
+      .then((entitlements) => setEntitled(entitlements.some((e) => e.feature === EntitlementFeature.ANALYTICS && e.enabled)))
+      .catch(() => setEntitled(true)); // fail open on the UX check — the API guard is the real gate
+  }, []);
 
   useEffect(() => {
     listWarehouseLocations()
@@ -132,6 +84,7 @@ export default function ReportsPage() {
   }, []);
 
   useEffect(() => {
+    if (entitled === false) return;
     const query = { from: range.from, to: range.to, ...(shipmentMode ? { shipmentMode } : {}), ...(warehouseId ? { warehouseId } : {}) };
     setError(false);
     Promise.all([
@@ -151,7 +104,7 @@ export default function ReportsPage() {
         setExceptions(exceptionsRes);
       })
       .catch(() => setError(true));
-  }, [range.from, range.to, shipmentMode, warehouseId]);
+  }, [entitled, range.from, range.to, shipmentMode, warehouseId]);
 
   function handlePresetChange(next: PresetKey) {
     setPreset(next);
@@ -159,6 +112,21 @@ export default function ReportsPage() {
   }
 
   const loading = !error && (!alerts || !revenue || !operations || !destinations || !customers || !exceptions);
+
+  if (entitled === false) {
+    return (
+      <Card className="mx-auto mt-10 max-w-lg text-center">
+        <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-accent-500/10 text-accent-600">
+          <IconLayers className="h-6 w-6" />
+        </span>
+        <h1 className="mt-4 font-display text-lg font-semibold text-slate-900">Reports not included in your plan</h1>
+        <p className="mt-2 text-sm text-slate-600">
+          Advanced analytics and reporting is a Professional-plan feature. Contact your account owner or AnanseLogix
+          support to upgrade.
+        </p>
+      </Card>
+    );
+  }
 
   return (
     <div className="flex flex-col gap-8">

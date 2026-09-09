@@ -1251,6 +1251,76 @@ export interface AnalyticsExceptionsResponse {
   exceptionsByType: ExceptionsByType[];
 }
 
+/**
+ * Live ContainerStatus snapshot for the Executive Dashboard's compact
+ * movement widget (GET /analytics/executive). `inTransit` is the exact
+ * same DEPARTED+IN_TRANSIT definition as
+ * AnalyticsOverviewResponse.containersInTransit — not a second
+ * definition of "in transit." CLOSED containers are deliberately excluded
+ * from all three buckets (a closed-out container isn't "moving"). Not
+ * bounded by any date range — this is current physical state, same
+ * time semantics as containersInTransit.
+ */
+export interface ExecutiveContainerMovement {
+  /** BOOKED + LOADING + LOADED. */
+  loadingOrLoaded: number;
+  inTransit: number;
+  /** ARRIVED + CUSTOMS_HOLD + UNLOADING. */
+  arrivedOrUnloading: number;
+}
+
+/**
+ * Tenant-wide (not per-warehouse) counts of the same TrackingEventType
+ * vocabulary AnalyticsOperationsResponse.warehouseThroughput already uses
+ * per-warehouse for Reports — bounded by the Executive Dashboard's
+ * selected period, for "how much happened," not current state.
+ */
+export interface ExecutiveWarehouseActivity {
+  received: number;
+  processed: number;
+  loaded: number;
+  destinationReceived: number;
+  /** DELIVERED + PICKED_UP combined — both are terminal successful handoffs, shown together for a non-operational audience. */
+  deliveredOrPickedUp: number;
+}
+
+/**
+ * GET /analytics/executive — the Owner/Manager Executive Dashboard at
+ * /dashboard (ANALYTICS_ROLES only, same as every /analytics/* route
+ * except overview). A compact snapshot, not a second implementation of
+ * Reports: every field here is either copied directly from
+ * AnalyticsOverviewResponse/AnalyticsAlertsResponse/
+ * AnalyticsRevenueResponse/AnalyticsOperationsResponse (see
+ * AnalyticsService.getExecutive's own doc comment) or computed with the
+ * exact same enum vocabulary those already use.
+ *
+ * Two time semantics are mixed on purpose, exactly like Reports already
+ * mixes them for outstandingBalance/alerts: `activeShipments`,
+ * `openInvoices`, `outstandingBalance`, `containerMovement`, and
+ * `attention` reflect CURRENT state regardless of `period`; `revenue`,
+ * `completedShipments`, `warehouseActivity`, and both trends are bounded
+ * by `period`. `period` is only ever an ISO from/to echo of what was
+ * actually queried — this endpoint never invents "Today"/"Last 7 days"
+ * wording itself; that's the frontend's own preset labeling.
+ */
+export interface AnalyticsExecutiveResponse {
+  period: { from: string; to: string };
+
+  // --- live / current state, not bounded by `period` ---
+  activeShipments: number;
+  openInvoices: number;
+  outstandingBalance: CurrencyAmount[];
+  containerMovement: ExecutiveContainerMovement;
+  attention: AnalyticsAlertsResponse;
+
+  // --- bounded by `period` ---
+  revenue: CurrencyAmount[];
+  completedShipments: number;
+  warehouseActivity: ExecutiveWarehouseActivity;
+  shipmentVolumeTrend: ShipmentVolumeTrendPoint[];
+  revenueTrend: RevenueTrendPoint[];
+}
+
 // ==========================================================================
 // SAAS PLATFORM — signup, subscriptions, onboarding, entitlements, leads
 // ==========================================================================

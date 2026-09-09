@@ -2,8 +2,11 @@
 
 import { useEffect, useState } from 'react';
 import type { AnalyticsOverviewResponse } from '@transatlantic/shared';
+import { ANALYTICS_ROLES, DASHBOARD_ROLES } from '@transatlantic/shared';
+import { ExecutiveDashboard } from '@/components/dashboard/ExecutiveDashboard';
 import { Card } from '@/components/ui/Card';
 import { getAnalyticsOverview } from '@/lib/analytics';
+import { useRequireAuth } from '@/lib/useRequireAuth';
 
 /**
  * Stage 4: wires the four tiles that have sat as hardcoded "—" placeholders
@@ -12,8 +15,39 @@ import { getAnalyticsOverview } from '@/lib/analytics';
  * AnalyticsController's own doc comment for why this one endpoint is
  * deliberately not ANALYTICS_ROLES-gated like the rest of Stage 4). The
  * deeper financial/operational analytics live at /dashboard/reports.
+ *
+ * Executive Dashboard upgrade: ANALYTICS_ROLES (Owner/Admin/Manager) get
+ * the richer <ExecutiveDashboard/> instead of these four tiles — the API
+ * would 403 them out of most of that page's data anyway (its financial
+ * figures require ANALYTICS_ROLES, same as /dashboard/reports), so this
+ * is a UX routing choice, not the security boundary; every other staff
+ * role (WAREHOUSE_STAFF, DRIVER, CUSTOMER_SERVICE, ACCOUNTANT,
+ * DESTINATION_AGENT) keeps exactly this original operational-only
+ * Overview, unchanged, since they were never entitled to tenant-wide
+ * financial data.
+ *
+ * `useRequireAuth` is already called once by DashboardLayout — calling it
+ * again here is cheap (localStorage read only, no network) and is the
+ * same pattern DashboardLayout itself uses to read `user.role`.
  */
 export default function DashboardOverviewPage() {
+  const { user, loading } = useRequireAuth(DASHBOARD_ROLES);
+
+  // Wait for the role to actually be known before picking a variant —
+  // otherwise a management user would flash the plain Overview (and fire
+  // its GET /analytics/overview call) for one render before switching.
+  if (loading || !user) {
+    return null;
+  }
+
+  if ((ANALYTICS_ROLES as string[]).includes(user.role)) {
+    return <ExecutiveDashboard />;
+  }
+
+  return <PlainOverview />;
+}
+
+function PlainOverview() {
   const [overview, setOverview] = useState<AnalyticsOverviewResponse | null>(null);
   const [error, setError] = useState(false);
 

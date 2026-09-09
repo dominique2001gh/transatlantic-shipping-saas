@@ -5,10 +5,13 @@ import type {
   AnalyticsCustomersResponse,
   AnalyticsDestinationsResponse,
   AnalyticsExceptionsResponse,
+  AnalyticsExecutiveResponse,
   AnalyticsOperationsResponse,
   AnalyticsOverviewResponse,
   AnalyticsRevenueResponse,
   CurrencyAmount,
+  ExecutiveContainerMovement,
+  ExecutiveWarehouseActivity,
   OutstandingAgingBucket,
 } from '@transatlantic/shared';
 import { formatMoney } from '../common/money/money.util';
@@ -577,6 +580,125 @@ export class AnalyticsService {
         type: type as AnalyticsExceptionsResponse['exceptionsByType'][number]['type'],
         ...counts,
       })),
+    };
+  }
+
+  // -----------------------------------------------------------------
+  // /analytics/executive — Owner/Manager Executive Dashboard (/dashboard)
+  // -----------------------------------------------------------------
+
+  /**
+   * Backs the Executive Dashboard at /dashboard for ANALYTICS_ROLES — a
+   * compact "is everything OK" snapshot, deliberately not a second
+   * implementation of Reports. Every field is either taken directly from
+   * getOverview/getAlerts/getRevenue/getOperations (already tenant-scoped
+   * and correct — see each one's own doc comment) or computed with the
+   * exact same TrackingEventType/ContainerStatus vocabulary those methods
+   * already use, just aggregated tenant-wide instead of per-warehouse or
+   * per-status-row. Nothing here invents a new definition of an existing
+   * metric.
+   *
+   * Mixes two time semantics on purpose, exactly like Reports already
+   * does for outstandingBalance/alerts (see this class's own top-level
+   * doc comment): `activeShipments`/`openInvoices`/`outstandingBalance`/
+   * `containerMovement`/`attention` reflect CURRENT state regardless of
+   * `query`; `revenue`/`completedShipments`/`warehouseActivity`/both
+   * trends are bounded by the resolved period. `query.shipmentMode`/
+   * `warehouseId` are deliberately ignored here — the Executive Dashboard
+   * is an unfiltered tenant-wide snapshot, not a filtered report; only
+   * `from`/`to` are forwarded to the period-bound sub-calls.
+   */
+  async getExecutive(tenantId: string, query: AnalyticsQueryDto): Promise<AnalyticsExecutiveResponse> {
+    const { start, end } = this.resolveDateRange(query);
+    const periodQuery: AnalyticsQueryDto = { from: query.from, to: query.to };
+
+    const [overview, alerts, revenue, operations, containerMovement, warehouseActivity] = await Promise.all([
+      this.getOverview(tenantId),
+      this.getAlerts(tenantId),
+      this.getRevenue(tenantId, periodQuery),
+      this.getOperations(tenantId, periodQuery),
+      this.computeContainerMovement(tenantId),
+      this.computeWarehouseActivity(tenantId, start, end),
+    ]);
+
+    return {
+      period: { from: start.toISOString(), to: end.toISOString() },
+      activeShipments: overview.activeShipments,
+      openInvoices: overview.openInvoices,
+      outstandingBalance: revenue.outstandingBalance,
+      containerMovement,
+      attention: alerts,
+      revenue: revenue.totalRevenue,
+      completedShipments: operations.completedShipments,
+      warehouseActivity,
+      shipmentVolumeTrend: operations.shipmentVolumeTrend,
+      revenueTrend: revenue.revenueTrend,
+    };
+  }
+
+  /**
+   * Live container-status snapshot for the Executive Dashboard's compact
+   * movement widget — the three ContainerStatus groupings the product
+   * spec asked for. `inTransit` uses the identical DEPARTED+IN_TRANSIT
+   * definition as AnalyticsOverviewResponse.containersInTransit; CLOSED
+   * is deliberately excluded from every bucket (a closed-out container
+   * isn't "moving" in any sense this widget is about). Not date-bounded
+   * — like getOverview, this is current physical state, not "in this
+   * period."
+   */
+  private async computeContainerMovement(tenantId: string): Promise<ExecutiveContainerMovement> {
+    const grouped = await this.prisma.container.groupBy({
+      by: ['status'],
+      where: { tenantId },
+      _count: { _all: true },
+    });
+    const countOf = (statuses: ContainerStatus[]) =>
+      grouped.filter((g) => statuses.includes(g.status)).reduce((sum, g) => sum + g._count._all, 0);
+
+    return {
+      loadingOrLoaded: countOf([ContainerStatus.BOOKED, ContainerStatus.LOADING, ContainerStatus.LOADED]),
+      inTransit: countOf([ContainerStatus.DEPARTED, ContainerStatus.IN_TRANSIT]),
+      arrivedOrUnloading: countOf([ContainerStatus.ARRIVED, ContainerStatus.CUSTOMS_HOLD, ContainerStatus.UNLOADING]),
+    };
+  }
+
+  /**
+   * Tenant-wide warehouse-activity counts for the Executive Dashboard's
+   * compact operational snapshot — the exact same TrackingEventType
+   * vocabulary computeWarehouseThroughput already uses per-warehouse for
+   * Reports, just summed across every warehouse instead of broken out by
+   * one (the Executive Dashboard doesn't need a per-warehouse
+   * breakdown — Reports already has that). Bounded by `start`/`end`:
+   * "how much happened in the selected period," not current state.
+   */
+  private async computeWarehouseActivity(tenantId: string, start: Date, end: Date): Promise<ExecutiveWarehouseActivity> {
+    const grouped = await this.prisma.trackingEvent.groupBy({
+      by: ['eventType'],
+      where: {
+        tenantId,
+        occurredAt: { gte: start, lte: end },
+        eventType: {
+          in: [
+            TrackingEventType.RECEIVED_AT_WAREHOUSE,
+            TrackingEventType.PROCESSED,
+            TrackingEventType.LOADED,
+            TrackingEventType.RECEIVED_DESTINATION_WAREHOUSE,
+            TrackingEventType.DELIVERED,
+            TrackingEventType.PICKED_UP,
+          ],
+        },
+      },
+      _count: { _all: true },
+    });
+    const countOf = (types: TrackingEventType[]) =>
+      grouped.filter((g) => types.includes(g.eventType)).reduce((sum, g) => sum + g._count._all, 0);
+
+    return {
+      received: countOf([TrackingEventType.RECEIVED_AT_WAREHOUSE]),
+      processed: countOf([TrackingEventType.PROCESSED]),
+      loaded: countOf([TrackingEventType.LOADED]),
+      destinationReceived: countOf([TrackingEventType.RECEIVED_DESTINATION_WAREHOUSE]),
+      deliveredOrPickedUp: countOf([TrackingEventType.DELIVERED, TrackingEventType.PICKED_UP]),
     };
   }
 

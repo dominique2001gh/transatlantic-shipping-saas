@@ -72,4 +72,16 @@ export class AnalyticsController {
   exceptions(@CurrentUser() user: AuthenticatedUser, @Query() query: AnalyticsQueryDto) {
     return this.analyticsService.getExceptions(requireTenantId(user.tenantId), query);
   }
+
+  /**
+   * Owner/Manager Executive Dashboard (/dashboard) — same ANALYTICS_ROLES
+   * gate as every route above except `overview`, since this carries real
+   * financial figures (revenue, outstanding balance) unlike the plain
+   * Overview tiles every DASHBOARD_ROLES member can see.
+   */
+  @Get('executive')
+  @Roles(...ANALYTICS_ROLES)
+  executive(@CurrentUser() user: AuthenticatedUser, @Query() query: AnalyticsQueryDto) {
+    return this.analyticsService.getExecutive(requireTenantId(user.tenantId), query);
+  }
 }
