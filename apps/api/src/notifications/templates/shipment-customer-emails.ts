@@ -249,7 +249,7 @@ export function shipmentReceivedEmail(params: BaseParams): ShipmentCustomerEmail
   const heading = "We've received your shipment";
   const paragraphsHtml = [
     'Good news — your shipment has been received at our origin warehouse and is now in our system.',
-    'You can use the tracking number below to follow your shipment throughout its journey, from processing all the way through to delivery.',
+    'You can use the tracking number below to follow your shipment throughout its journey, from processing all the way through to delivery or pickup.',
   ];
   return {
     subject: `We've received your shipment — ${params.trackingNumber}`,
