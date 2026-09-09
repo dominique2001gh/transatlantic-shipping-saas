@@ -16,8 +16,9 @@ import type { EmailProvider, ProviderSendResult, SmsProvider, WhatsAppProvider }
 export class ConsoleEmailProvider implements EmailProvider {
   private readonly logger = new Logger('EmailProvider(console)');
 
-  async send(params: { to: string; subject: string; body: string }): Promise<ProviderSendResult> {
-    this.logger.log(`[SIMULATED EMAIL] to=${params.to} subject="${params.subject}" body="${params.body}"`);
+  async send(params: { to: string; subject: string; body: string; html?: string }): Promise<ProviderSendResult> {
+    const htmlNote = params.html ? ` (+html, ${params.html.length} chars)` : '';
+    this.logger.log(`[SIMULATED EMAIL] to=${params.to} subject="${params.subject}" body="${params.body}"${htmlNote}`);
     return { success: true, providerMessageId: `console-email-${randomUUID()}` };
   }
 }

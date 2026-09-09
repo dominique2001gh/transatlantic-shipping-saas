@@ -62,7 +62,7 @@ export class ResendEmailProvider implements EmailProvider {
 
   constructor(private readonly config: ConfigService) {}
 
-  async send(params: { to: string; subject: string; body: string }): Promise<ProviderSendResult> {
+  async send(params: { to: string; subject: string; body: string; html?: string }): Promise<ProviderSendResult> {
     const fromAddress = this.config.get<string>('EMAIL_FROM_ADDRESS', 'onboarding@resend.dev');
     const fromName = this.config.get<string>('EMAIL_FROM_NAME');
     const from = formatFromHeader(fromAddress, fromName);
@@ -79,6 +79,13 @@ export class ResendEmailProvider implements EmailProvider {
           to: params.to,
           subject: params.subject,
           text: params.body,
+          // Customer Email Redesign: Resend accepts `text` and `html`
+          // together in one request and uses `html` for clients that
+          // render it, falling back to `text` otherwise — omitted
+          // entirely (not sent as null/empty) for every caller that
+          // doesn't pass it, so this is a pure addition, never a change
+          // to existing plain-text sends.
+          ...(params.html ? { html: params.html } : {}),
         }),
       });
 

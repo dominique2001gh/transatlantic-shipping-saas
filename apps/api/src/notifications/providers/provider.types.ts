@@ -19,8 +19,17 @@ export interface ProviderSendResult {
  * token (see notification-providers.module.ts) so a real provider can
  * replace the console default later with zero changes anywhere else.
  */
+/**
+ * Customer Email Redesign: `html` is optional and additive — every
+ * existing caller (platform-emails.ts, LeadsService, the original
+ * shipment-status plain title/body path) keeps sending plain text
+ * unchanged by simply omitting it. Only NotificationsService's new
+ * shipment-customer-email templates pass both `body` (the plain-text
+ * fallback) and `html` together. `subject`/`body` remain required so no
+ * existing call site needs to change.
+ */
 export interface EmailProvider {
-  send(params: { to: string; subject: string; body: string }): Promise<ProviderSendResult>;
+  send(params: { to: string; subject: string; body: string; html?: string }): Promise<ProviderSendResult>;
 }
 
 export interface SmsProvider {

@@ -1,22 +1,55 @@
 import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { NotificationChannel, NotificationStatus, Prisma } from '@prisma/client';
+import { HandoffType, NotificationChannel, NotificationStatus, Prisma } from '@prisma/client';
 import {
   NotificationEventType as SharedNotificationEventType,
   SHIPMENT_STATUS_MILESTONES,
   ShipmentStatus as SharedShipmentStatus,
 } from '@transatlantic/shared';
 import type { NotificationSummary, PortalNotificationSummary } from '@transatlantic/shared';
-import type { ShipmentStatus } from '@prisma/client';
+import type { ShipmentMode as DbShipmentMode, ShipmentStatus } from '@prisma/client';
+import type { ShipmentMode as SharedShipmentMode } from '@transatlantic/shared';
 import { formatMoney } from '../common/money/money.util';
 import { PrismaService } from '../prisma/prisma.service';
 import { normalizeToE164 } from './phone-normalization.util';
 import { EMAIL_PROVIDER, SMS_PROVIDER, WHATSAPP_PROVIDER } from './providers/provider.types';
 import type { EmailProvider, SmsProvider, WhatsAppProvider } from './providers/provider.types';
+import {
+  buildShipmentTrackingUrl,
+  shipmentArrivedEmail,
+  shipmentDeliveredEmail,
+  shipmentDepartedEmail,
+  shipmentOutForDeliveryEmail,
+  shipmentPickedUpEmail,
+  shipmentReadyForPickupEmail,
+  shipmentReceivedEmail,
+  type ShipmentCustomerEmail,
+  type ShipmentEmailPickupLocation,
+  type ShipmentEmailTenantBranding,
+} from './templates/shipment-customer-emails';
 import { buildShipmentStatusWhatsAppTemplate, type WhatsAppTemplatePayload } from './whatsapp-template.util';
 
 const WHATSAPP_DEFAULT_TEMPLATE_NAME = 'shipment_status_update';
 const WHATSAPP_DEFAULT_TEMPLATE_LANGUAGE = 'en_US';
+
+/**
+ * Customer Email Redesign: exactly the 7 shipment-lifecycle statuses this
+ * stage has a real branded template for — deliberately NOT "every
+ * notifiable SHIPMENT_STATUS_MILESTONES entry" (which also includes
+ * CUSTOMS_CLEARED). A notifiable status absent here simply keeps using the
+ * original generic title/body for its email — not a bug, an explicit scope
+ * boundary, same posture WHATSAPP_SUPPORTED_SHIPMENT_STATUSES already
+ * documents for the same reason.
+ */
+const EMAIL_TEMPLATED_SHIPMENT_STATUSES: ReadonlySet<SharedShipmentStatus> = new Set([
+  SharedShipmentStatus.WAREHOUSE_RECEIVED,
+  SharedShipmentStatus.DEPARTED,
+  SharedShipmentStatus.ARRIVED_DESTINATION,
+  SharedShipmentStatus.READY_FOR_PICKUP,
+  SharedShipmentStatus.OUT_FOR_DELIVERY,
+  SharedShipmentStatus.DELIVERED,
+  SharedShipmentStatus.COMPLETED,
+]);
 
 const NOTIFICATION_LIST_INCLUDE = {
   customer: { select: { firstName: true, lastName: true } },
@@ -88,7 +121,14 @@ export class NotificationsService {
     try {
       const shipment = await this.prisma.shipment.findUnique({
         where: { id: shipmentId },
-        select: { id: true, trackingNumber: true, customerId: true },
+        select: {
+          id: true,
+          trackingNumber: true,
+          customerId: true,
+          shipmentMode: true,
+          destinationCountry: true,
+          destinationWarehouseId: true,
+        },
       });
       if (!shipment) return;
 
@@ -107,6 +147,14 @@ export class NotificationsService {
         this.config.get<string>('META_WHATSAPP_TEMPLATE_LANGUAGE', WHATSAPP_DEFAULT_TEMPLATE_LANGUAGE),
       );
 
+      // Customer Email Redesign: a branded, plain-language email for the 7
+      // major milestones (see EMAIL_TEMPLATED_SHIPMENT_STATUSES); `null` for
+      // every other notifiable status (falls back to the original generic
+      // title/body below, unchanged), or the literal string 'suppress' for
+      // a COMPLETED that immediately follows an already-emailed DELIVERED —
+      // see buildShipmentEmailContent's own doc comment.
+      const emailContent = await this.buildShipmentEmailContent(tenantId, shipment, status as unknown as SharedShipmentStatus);
+
       await this.fireEventForCustomer({
         tenantId,
         eventType: SharedNotificationEventType.SHIPMENT_STATUS_CHANGED,
@@ -116,10 +164,159 @@ export class NotificationsService {
         body: `Your shipment ${shipment.trackingNumber} status: ${milestone.label}.`,
         sourceRefs: { shipmentId },
         whatsappTemplate,
+        emailContent,
       });
     } catch (err) {
       this.logger.error(`fireShipmentStatusChanged failed for shipment ${shipmentId}: ${err}`);
     }
+  }
+
+  /**
+   * Customer Email Redesign: resolves the branded email for one of the 7
+   * templated shipment milestones, or `null` (use the original generic
+   * title/body) for anything outside that set, or the literal string
+   * `'suppress'` to skip the EMAIL channel entirely for this one
+   * occurrence.
+   *
+   * The `'suppress'` case: `maybeRollupShipmentCompletion` fires COMPLETED
+   * for both a pure customer-pickup shipment AND, redundantly, right after
+   * a driver-delivery's own DELIVERED (an existing, documented,
+   * intentional redundancy in WarehouseService — not something this stage
+   * changes). Sending the customer two near-identical "your shipment is
+   * done" emails seconds apart would read as a mistake, so: if this
+   * shipment already has a `PickupDeliveryRecord` of type DELIVERY (i.e. a
+   * DELIVERED email already went out for the same real-world event), the
+   * COMPLETED email is suppressed — the customer gets exactly one final
+   * completion message, not two. A pure pickup shipment (no DELIVERY
+   * record) has no earlier email to duplicate, so COMPLETED renders as the
+   * "Picked Up" template instead. This only affects EMAIL — IN_APP/SMS/
+   * WhatsApp keep their existing, unrelated behavior for COMPLETED
+   * entirely untouched.
+   */
+  private async buildShipmentEmailContent(
+    tenantId: string,
+    shipment: {
+      id: string;
+      trackingNumber: string;
+      customerId: string;
+      shipmentMode: DbShipmentMode;
+      destinationCountry: string;
+      destinationWarehouseId: string | null;
+    },
+    status: SharedShipmentStatus,
+  ): Promise<ShipmentCustomerEmail | 'suppress' | null> {
+    if (!EMAIL_TEMPLATED_SHIPMENT_STATUSES.has(status)) {
+      return null;
+    }
+
+    const [tenant, customer] = await Promise.all([
+      this.prisma.tenant.findUnique({
+        where: { id: tenantId },
+        select: { name: true, legalName: true, logoUrl: true, primaryColor: true, secondaryColor: true, email: true, phone: true, website: true },
+      }),
+      this.prisma.customer.findFirst({ where: { id: shipment.customerId, tenantId }, select: { firstName: true } }),
+    ]);
+    if (!tenant) return null;
+
+    const branding: ShipmentEmailTenantBranding = tenant;
+    const trackingUrl = buildShipmentTrackingUrl(tenant.website, shipment.trackingNumber);
+    const base = {
+      trackingNumber: shipment.trackingNumber,
+      customerFirstName: customer?.firstName ?? null,
+      tenant: branding,
+      trackingUrl,
+    };
+
+    switch (status) {
+      case SharedShipmentStatus.WAREHOUSE_RECEIVED:
+        return shipmentReceivedEmail(base);
+
+      case SharedShipmentStatus.DEPARTED: {
+        const estimatedArrival = await this.resolveShipmentEta(tenantId, shipment.id);
+        return shipmentDepartedEmail({
+          ...base,
+          shipmentMode: shipment.shipmentMode as unknown as SharedShipmentMode,
+          destinationCountry: shipment.destinationCountry,
+          estimatedArrival,
+        });
+      }
+
+      case SharedShipmentStatus.ARRIVED_DESTINATION:
+        return shipmentArrivedEmail(base);
+
+      case SharedShipmentStatus.READY_FOR_PICKUP: {
+        const pickupLocation = await this.resolvePickupLocation(tenantId, shipment.destinationWarehouseId);
+        return shipmentReadyForPickupEmail({ ...base, pickupLocation });
+      }
+
+      case SharedShipmentStatus.OUT_FOR_DELIVERY:
+        return shipmentOutForDeliveryEmail(base);
+
+      case SharedShipmentStatus.DELIVERED:
+        return shipmentDeliveredEmail(base);
+
+      case SharedShipmentStatus.COMPLETED: {
+        const alreadyDelivered = await this.prisma.pickupDeliveryRecord.findFirst({
+          where: { tenantId, shipmentId: shipment.id, type: HandoffType.DELIVERY },
+          select: { id: true },
+        });
+        return alreadyDelivered ? 'suppress' : shipmentPickedUpEmail(base);
+      }
+
+      default:
+        return null;
+    }
+  }
+
+  /**
+   * Sourced from whichever transport record this shipment's items are
+   * actually attached to — never invented. Two independent paths exist in
+   * this schema (see Manifest's own doc comment): ocean/RoRo items reach a
+   * manifest only *through* a Container (Container.manifestId), never via
+   * a direct ManifestItem row, so a container's own `estimatedArrival` is
+   * checked first and its assigned manifest's `estimatedArrivalAt` is the
+   * fallback; air-freight items are assigned directly to a manifest with
+   * no container at all, via ManifestItem, checked separately. Returns
+   * null (email omits the ETA entirely) unless every leg that has an
+   * estimate set agrees on exactly one date — a shipment split across legs
+   * with divergent ETAs must never show a single guessed number.
+   */
+  private async resolveShipmentEta(tenantId: string, shipmentId: string): Promise<Date | null> {
+    const [containerLegs, manifestLegs] = await Promise.all([
+      this.prisma.containerItem.findMany({
+        where: { tenantId, shipmentId, removedAt: null },
+        select: { container: { select: { estimatedArrival: true, manifest: { select: { estimatedArrivalAt: true } } } } },
+      }),
+      this.prisma.manifestItem.findMany({
+        where: { tenantId, shipmentId, removedAt: null },
+        select: { manifest: { select: { estimatedArrivalAt: true } } },
+      }),
+    ]);
+    const distinctTimes = new Set<number>();
+    for (const leg of containerLegs) {
+      const eta = leg.container.estimatedArrival ?? leg.container.manifest?.estimatedArrivalAt ?? null;
+      if (eta) distinctTimes.add(eta.getTime());
+    }
+    for (const leg of manifestLegs) {
+      if (leg.manifest.estimatedArrivalAt) distinctTimes.add(leg.manifest.estimatedArrivalAt.getTime());
+    }
+    if (distinctTimes.size !== 1) return null;
+    return new Date([...distinctTimes][0]);
+  }
+
+  /**
+   * The shipment's destination warehouse address, when one is actually
+   * assigned — never a fabricated or default location. No pickup-hours/
+   * instructions field exists anywhere in this schema today (deliberately
+   * not added for this stage — see this milestone's own design notes), so
+   * only the location itself is ever included.
+   */
+  private async resolvePickupLocation(tenantId: string, destinationWarehouseId: string | null): Promise<ShipmentEmailPickupLocation | null> {
+    if (!destinationWarehouseId) return null;
+    return this.prisma.warehouse.findFirst({
+      where: { id: destinationWarehouseId, tenantId },
+      select: { name: true, addressLine1: true, addressLine2: true, city: true, state: true, country: true, postalCode: true, phone: true },
+    });
   }
 
   async fireDocumentVisible(tenantId: string, documentId: string): Promise<void> {
@@ -376,6 +573,16 @@ export class NotificationsService {
      * this is the literal scope boundary this phase was approved for.
      */
     whatsappTemplate?: WhatsAppTemplatePayload | null;
+    /**
+     * Customer Email Redesign: only fireShipmentStatusChanged ever passes
+     * this — a richer, tenant-branded {subject,text,html} to use for the
+     * EMAIL channel specifically instead of the generic title/body above,
+     * or the literal string 'suppress' to skip EMAIL entirely for this one
+     * occurrence (see buildShipmentEmailContent's own doc comment).
+     * `undefined`/omitted (every other fire* method) keeps today's exact
+     * behavior: EMAIL uses the same generic title/body as IN_APP/SMS.
+     */
+    emailContent?: ShipmentCustomerEmail | 'suppress' | null;
   }): Promise<void> {
     const event = await this.getOrCreateEvent({
       tenantId: params.tenantId,
@@ -387,7 +594,7 @@ export class NotificationsService {
     if (!event) {
       return; // dedupe hit — already fired for this exact occurrence
     }
-    await this.notifyCustomer(event.id, params.tenantId, params.customerId, params.title, params.body, params.whatsappTemplate);
+    await this.notifyCustomer(event.id, params.tenantId, params.customerId, params.title, params.body, params.whatsappTemplate, params.emailContent);
   }
 
   /** Returns null on a dedupe hit (unique constraint violation) rather than throwing — the caller treats that as "nothing to do", not an error. */
@@ -431,6 +638,7 @@ export class NotificationsService {
     title: string,
     body: string,
     whatsappTemplate?: WhatsAppTemplatePayload | null,
+    emailContent?: ShipmentCustomerEmail | 'suppress' | null,
   ): Promise<void> {
     const customer = await this.prisma.customer.findFirst({
       where: { id: customerId, tenantId },
@@ -455,8 +663,30 @@ export class NotificationsService {
     // notification list in V1, only for the outbound provider channels.
     await this.createAndDispatch(eventId, tenantId, customerId, NotificationChannel.IN_APP, title, body, null);
 
-    if (customer.notifyByEmail) {
-      await this.createAndDispatch(eventId, tenantId, customerId, NotificationChannel.EMAIL, title, body, customer.email);
+    // Customer Email Redesign: 'suppress' skips EMAIL entirely for this
+    // occurrence (the redundant COMPLETED-after-DELIVERED case) — no
+    // Notification row created at all, same posture WhatsApp already uses
+    // for "not applicable this time." A real ShipmentCustomerEmail sends
+    // the tenant-branded rich subject/text/html instead of the generic
+    // title/body; `undefined`/null (every non-shipment-status fire* path)
+    // keeps today's exact plain-text behavior.
+    if (customer.notifyByEmail && emailContent !== 'suppress') {
+      if (emailContent) {
+        await this.createAndDispatch(
+          eventId,
+          tenantId,
+          customerId,
+          NotificationChannel.EMAIL,
+          emailContent.subject,
+          emailContent.text,
+          customer.email,
+          undefined,
+          undefined,
+          emailContent.html,
+        );
+      } else {
+        await this.createAndDispatch(eventId, tenantId, customerId, NotificationChannel.EMAIL, title, body, customer.email);
+      }
     }
     if (customer.notifyBySms) {
       await this.createAndDispatch(eventId, tenantId, customerId, NotificationChannel.SMS, title, body, customer.phone);
@@ -492,6 +722,8 @@ export class NotificationsService {
     target: string | null,
     whatsappTemplate?: WhatsAppTemplatePayload | null,
     defaultCountry?: string | null,
+    /** Customer Email Redesign: rich HTML body — only ever set (by notifyCustomer) when channel is EMAIL and a ShipmentCustomerEmail was provided; every other call site omits it, so the email provider gets no `html` and behaves exactly as before. */
+    html?: string,
   ): Promise<void> {
     const notification = await this.prisma.notification.create({
       data: { tenantId, eventId, customerId, channel, status: NotificationStatus.PENDING, title, body },
@@ -537,7 +769,7 @@ export class NotificationsService {
 
     const result =
       channel === NotificationChannel.EMAIL
-        ? await this.emailProvider.send({ to: dispatchTarget, subject: title, body })
+        ? await this.emailProvider.send({ to: dispatchTarget, subject: title, body, html })
         : channel === NotificationChannel.SMS
           ? await this.smsProvider.send({ to: dispatchTarget, body })
           : await this.whatsappProvider.send({

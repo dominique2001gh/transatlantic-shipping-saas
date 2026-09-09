@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, type FormEvent } from 'react';
+import { useSearchParams } from 'next/navigation';
+import { Suspense, useState, type FormEvent } from 'react';
 import { IconSearch } from '@/components/icons';
 import { TrackingResult } from '@/components/marketing/TrackingResult';
 import { Button } from '@/components/ui/Button';
@@ -12,9 +13,47 @@ import { lookupTrackingNumber, type TrackingLookupResult } from '@/lib/tracking'
  * state and which of three states to render (idle/error/result); it
  * never re-derives shipment status or decides what's safe to show, that
  * all comes from the API response as-is.
+ *
+ * Customer Email Redesign: wrapped in <Suspense> here (once, for every
+ * caller — the homepage widget and /track both use this same export)
+ * because reading `?tn=` requires useSearchParams(), which Next.js
+ * requires a Suspense boundary for during static generation. The fallback
+ * renders the exact same form with an empty tracking-number field — a
+ * user without JS-disabled/slow-network edge cases essentially never sees
+ * it, and even if they do, it's a fully functional form, not a spinner.
  */
-export function TrackingForm({ size = 'lg' }: { size?: 'md' | 'lg' }) {
-  const [trackingNumber, setTrackingNumber] = useState('');
+export function TrackingForm(props: { size?: 'md' | 'lg' }) {
+  return (
+    <Suspense fallback={<TrackingFormFields {...props} initialTrackingNumber="" />}>
+      <TrackingFormWithPrefill {...props} />
+    </Suspense>
+  );
+}
+
+function TrackingFormWithPrefill(props: { size?: 'md' | 'lg' }) {
+  const searchParams = useSearchParams();
+  return <TrackingFormFields {...props} initialTrackingNumber={searchParams.get('tn')?.trim() ?? ''} />;
+}
+
+/**
+ * The actual form + result rendering — no direct dependency on
+ * useSearchParams, so it can also serve as the Suspense fallback above
+ * without itself needing to be wrapped again.
+ *
+ * `?tn=` pre-fills the tracking-number field only. This is a pure
+ * convenience, not a security change: the tracking number alone was never
+ * a secret (it's printed on labels and already sent to the customer in
+ * plaintext), and the last-name field below is still required, still
+ * typed by the customer, and still the sole real gate — GET
+ * /tracking/public rejects any request missing it or getting it wrong,
+ * exactly as before. Nothing auto-submits; the customer still clicks
+ * "Track Shipment" themselves. The last name (or any other personal/
+ * security value) must never be read from the URL here — doing so would
+ * turn this two-factor lookup into a one-click link anyone who forwards
+ * the email could use.
+ */
+function TrackingFormFields({ size = 'lg', initialTrackingNumber }: { size?: 'md' | 'lg'; initialTrackingNumber: string }) {
+  const [trackingNumber, setTrackingNumber] = useState(initialTrackingNumber);
   const [lastName, setLastName] = useState('');
   const [loading, setLoading] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
