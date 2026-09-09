@@ -27,8 +27,32 @@ export interface SmsProvider {
   send(params: { to: string; body: string }): Promise<ProviderSendResult>;
 }
 
+/**
+ * WhatsApp Integration (Stage 4C): `template` carries an approved-
+ * template send (see whatsapp-template.util.ts) — WhatsApp Business
+ * Platform (Meta's own Cloud API and Twilio's WhatsApp product alike)
+ * requires a pre-approved template for any business-initiated message
+ * sent outside a customer-started 24-hour conversation window, which a
+ * shipment status update always is. `body` is kept as a plain-text
+ * fallback/log line for the console provider and for any future
+ * freeform use (e.g. replying inside an active customer-initiated
+ * session) — a real provider implementation should require `template`
+ * for the shipment-notification use case and treat its absence as a
+ * configuration error, not silently fall back to freeform text Meta
+ * would reject.
+ *
+ * `tenantId` is accepted (and currently unused beyond logging) purely so
+ * a future per-tenant-credentials phase can resolve which WhatsApp
+ * Business Account to send through without widening this interface
+ * again — see MetaWhatsAppProvider's own doc comment.
+ */
 export interface WhatsAppProvider {
-  send(params: { to: string; body: string }): Promise<ProviderSendResult>;
+  send(params: {
+    to: string;
+    body: string;
+    template?: { name: string; language: string; params: string[] };
+    tenantId: string;
+  }): Promise<ProviderSendResult>;
 }
 
 export const EMAIL_PROVIDER = Symbol('EMAIL_PROVIDER');

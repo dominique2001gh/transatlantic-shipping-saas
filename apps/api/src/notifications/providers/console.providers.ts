@@ -36,8 +36,16 @@ export class ConsoleSmsProvider implements SmsProvider {
 export class ConsoleWhatsAppProvider implements WhatsAppProvider {
   private readonly logger = new Logger('WhatsAppProvider(console)');
 
-  async send(params: { to: string; body: string }): Promise<ProviderSendResult> {
-    this.logger.log(`[SIMULATED WHATSAPP] to=${params.to} body="${params.body}"`);
+  async send(params: {
+    to: string;
+    body: string;
+    template?: { name: string; language: string; params: string[] };
+    tenantId: string;
+  }): Promise<ProviderSendResult> {
+    const templateInfo = params.template
+      ? ` template="${params.template.name}" (${params.template.language}) params=${JSON.stringify(params.template.params)}`
+      : '';
+    this.logger.log(`[SIMULATED WHATSAPP] tenant=${params.tenantId} to=${params.to} body="${params.body}"${templateInfo}`);
     return { success: true, providerMessageId: `console-whatsapp-${randomUUID()}` };
   }
 }

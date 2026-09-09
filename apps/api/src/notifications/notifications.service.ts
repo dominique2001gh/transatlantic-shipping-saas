@@ -1,15 +1,22 @@
 import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { NotificationChannel, NotificationStatus, Prisma } from '@prisma/client';
 import {
   NotificationEventType as SharedNotificationEventType,
   SHIPMENT_STATUS_MILESTONES,
+  ShipmentStatus as SharedShipmentStatus,
 } from '@transatlantic/shared';
 import type { NotificationSummary, PortalNotificationSummary } from '@transatlantic/shared';
 import type { ShipmentStatus } from '@prisma/client';
 import { formatMoney } from '../common/money/money.util';
 import { PrismaService } from '../prisma/prisma.service';
+import { normalizeToE164 } from './phone-normalization.util';
 import { EMAIL_PROVIDER, SMS_PROVIDER, WHATSAPP_PROVIDER } from './providers/provider.types';
 import type { EmailProvider, SmsProvider, WhatsAppProvider } from './providers/provider.types';
+import { buildShipmentStatusWhatsAppTemplate, type WhatsAppTemplatePayload } from './whatsapp-template.util';
+
+const WHATSAPP_DEFAULT_TEMPLATE_NAME = 'shipment_status_update';
+const WHATSAPP_DEFAULT_TEMPLATE_LANGUAGE = 'en_US';
 
 const NOTIFICATION_LIST_INCLUDE = {
   customer: { select: { firstName: true, lastName: true } },
@@ -67,6 +74,7 @@ export class NotificationsService {
 
   constructor(
     private readonly prisma: PrismaService,
+    private readonly config: ConfigService,
     @Inject(EMAIL_PROVIDER) private readonly emailProvider: EmailProvider,
     @Inject(SMS_PROVIDER) private readonly smsProvider: SmsProvider,
     @Inject(WHATSAPP_PROVIDER) private readonly whatsappProvider: WhatsAppProvider,
@@ -84,6 +92,21 @@ export class NotificationsService {
       });
       if (!shipment) return;
 
+      // WhatsApp Integration (Stage 4C) Phase 1: only a fixed, explicitly
+      // approved allow-list of milestones gets a WhatsApp attempt at all
+      // (see buildShipmentStatusWhatsAppTemplate's own doc comment) — a
+      // status outside that list (e.g. CUSTOMS_CLEARED) returns null here
+      // and WhatsApp is silently skipped for this occurrence, same as if
+      // the customer had no WhatsApp number on file. Email/SMS/IN_APP
+      // below are completely unaffected either way.
+      const whatsappTemplate = buildShipmentStatusWhatsAppTemplate(
+        status as unknown as SharedShipmentStatus,
+        shipment.trackingNumber,
+        milestone.label,
+        this.config.get<string>('META_WHATSAPP_TEMPLATE_NAME', WHATSAPP_DEFAULT_TEMPLATE_NAME),
+        this.config.get<string>('META_WHATSAPP_TEMPLATE_LANGUAGE', WHATSAPP_DEFAULT_TEMPLATE_LANGUAGE),
+      );
+
       await this.fireEventForCustomer({
         tenantId,
         eventType: SharedNotificationEventType.SHIPMENT_STATUS_CHANGED,
@@ -92,6 +115,7 @@ export class NotificationsService {
         title: `${shipment.trackingNumber} reached ${status}`,
         body: `Your shipment ${shipment.trackingNumber} status: ${milestone.label}.`,
         sourceRefs: { shipmentId },
+        whatsappTemplate,
       });
     } catch (err) {
       this.logger.error(`fireShipmentStatusChanged failed for shipment ${shipmentId}: ${err}`);
@@ -208,6 +232,81 @@ export class NotificationsService {
     }
   }
 
+  /**
+   * WhatsApp Integration (Stage 4C) Phase 2: the one entry point
+   * WhatsAppWebhookController calls for every status callback Meta sends
+   * — keeps this service the sole owner of every Notification row
+   * mutation, exactly like every fire* method above, rather than the
+   * webhook controller reaching into Prisma directly.
+   *
+   * Looked up by `providerMessageId` (Meta's own globally-unique wamid,
+   * stamped on the row at send time in createAndDispatch) — this is what
+   * makes the update inherently tenant-safe without needing a tenantId
+   * parameter here at all: a caller can only ever affect a row for a
+   * message this platform actually sent, and that row's tenantId was
+   * fixed at creation, not something this method or its caller could
+   * redirect. An unrecognized wamid (unknown message, or a webhook for
+   * something this platform never sent) is a silent no-op, never an
+   * error — Meta's webhooks fan out broadly and a handler ignoring what
+   * it doesn't recognize is the correct posture, same stance
+   * WebhooksController already takes for unhandled Stripe event types.
+   *
+   * Only `read` and `failed` ever change `status` — `sent`/`delivered`
+   * are already correctly represented by the existing `SENT` status set
+   * at initial dispatch (this schema has no distinct DELIVERED value, and
+   * adding one is out of scope for this phase); reusing `NotificationStatus.
+   * READ` for "the recipient opened the WhatsApp message" is the same
+   * concept `markRead` already uses for the portal's own in-app "read"
+   * gesture, not a new meaning grafted on. `failed` is deliberately never
+   * applied over an already-`READ` row — a message truly read by the
+   * recipient cannot retroactively have failed to arrive; this is the
+   * same forward-only, never-downgraded posture every shipment/manifest
+   * rollup in this codebase already follows.
+   *
+   * Idempotent by construction, not by a separate ledger: `readAt` is
+   * computed from the webhook payload's own `timestamp` field (never wall-
+   * clock `now()`), so redelivering the identical callback re-applies the
+   * identical value — no separate dedupe table needed, unlike Stripe's
+   * StripeWebhookEvent ledger (Meta's status callbacks don't carry a
+   * single stable per-delivery event id the way a Stripe Event does).
+   */
+  async updateWhatsAppStatusFromWebhook(
+    providerMessageId: string,
+    status: 'sent' | 'delivered' | 'read' | 'failed',
+    timestampSeconds: number,
+    errorMessage?: string,
+  ): Promise<void> {
+    if (status === 'sent' || status === 'delivered') {
+      // Already correctly represented by SENT — nothing to write. Still a
+      // successfully "handled" callback from the controller's point of
+      // view, just a no-op here.
+      return;
+    }
+
+    const notification = await this.prisma.notification.findFirst({
+      where: { providerMessageId, channel: NotificationChannel.WHATSAPP },
+      select: { id: true, status: true },
+    });
+    if (!notification) {
+      this.logger.log(`WhatsApp webhook status "${status}" for unrecognized message id — ignoring.`);
+      return;
+    }
+
+    if (status === 'failed' && notification.status === NotificationStatus.READ) {
+      this.logger.log(`Ignoring "failed" WhatsApp webhook for a message already marked READ (out-of-order delivery).`);
+      return;
+    }
+
+    const occurredAt = new Date(timestampSeconds * 1000);
+    await this.prisma.notification.update({
+      where: { id: notification.id },
+      data:
+        status === 'read'
+          ? { status: NotificationStatus.READ, readAt: occurredAt }
+          : { status: NotificationStatus.FAILED, errorMessage: errorMessage ?? 'WhatsApp delivery failed' },
+    });
+  }
+
   async findAllForTenant(
     tenantId: string,
     filters: { customerId?: string; channel?: NotificationChannel },
@@ -269,6 +368,14 @@ export class NotificationsService {
     title: string;
     body: string;
     sourceRefs: SourceRefs;
+    /**
+     * WhatsApp Integration (Stage 4C) Phase 1: only fireShipmentStatusChanged
+     * ever passes this — every other fire* method (documents, invoices,
+     * payments, the bulk disruption path) omits it, which means WhatsApp is
+     * simply never attempted for those event types yet. Not a workaround:
+     * this is the literal scope boundary this phase was approved for.
+     */
+    whatsappTemplate?: WhatsAppTemplatePayload | null;
   }): Promise<void> {
     const event = await this.getOrCreateEvent({
       tenantId: params.tenantId,
@@ -280,7 +387,7 @@ export class NotificationsService {
     if (!event) {
       return; // dedupe hit — already fired for this exact occurrence
     }
-    await this.notifyCustomer(event.id, params.tenantId, params.customerId, params.title, params.body);
+    await this.notifyCustomer(event.id, params.tenantId, params.customerId, params.title, params.body, params.whatsappTemplate);
   }
 
   /** Returns null on a dedupe hit (unique constraint violation) rather than throwing — the caller treats that as "nothing to do", not an error. */
@@ -323,6 +430,7 @@ export class NotificationsService {
     customerId: string,
     title: string,
     body: string,
+    whatsappTemplate?: WhatsAppTemplatePayload | null,
   ): Promise<void> {
     const customer = await this.prisma.customer.findFirst({
       where: { id: customerId, tenantId },
@@ -333,6 +441,12 @@ export class NotificationsService {
         notifyByEmail: true,
         notifyBySms: true,
         notifyByWhatsapp: true,
+        // WhatsApp Integration (Stage 4C) Phase 1: the tenant's own
+        // `country` (already on Tenant, no schema change) is the
+        // normalization hint for a customer's whatsappPhone when it's
+        // stored in bare local format — never a hardcoded country, so
+        // this stays correct for any tenant's own customer base.
+        tenant: { select: { country: true } },
       },
     });
     if (!customer) return;
@@ -347,7 +461,13 @@ export class NotificationsService {
     if (customer.notifyBySms) {
       await this.createAndDispatch(eventId, tenantId, customerId, NotificationChannel.SMS, title, body, customer.phone);
     }
-    if (customer.notifyByWhatsapp) {
+    // WhatsApp Integration (Stage 4C) Phase 1: no template means this
+    // event type/status isn't WhatsApp-supported yet (see
+    // buildShipmentStatusWhatsAppTemplate) — skipped entirely, no
+    // Notification row created at all for this channel, same as if the
+    // customer had never opted in. Every other channel above is
+    // unaffected either way.
+    if (customer.notifyByWhatsapp && whatsappTemplate) {
       await this.createAndDispatch(
         eventId,
         tenantId,
@@ -356,6 +476,8 @@ export class NotificationsService {
         title,
         body,
         customer.whatsappPhone,
+        whatsappTemplate,
+        customer.tenant?.country,
       );
     }
   }
@@ -368,6 +490,8 @@ export class NotificationsService {
     title: string,
     body: string,
     target: string | null,
+    whatsappTemplate?: WhatsAppTemplatePayload | null,
+    defaultCountry?: string | null,
   ): Promise<void> {
     const notification = await this.prisma.notification.create({
       data: { tenantId, eventId, customerId, channel, status: NotificationStatus.PENDING, title, body },
@@ -390,12 +514,38 @@ export class NotificationsService {
       return;
     }
 
+    // WhatsApp Integration (Stage 4C) Phase 1: normalize/validate to E.164
+    // right before dispatch — a Notification row already exists for this
+    // attempt (created above), so an unusable number is recorded as a
+    // real FAILED attempt with a clear reason, never silently dropped and
+    // never a raw/malformed value handed to the provider.
+    let dispatchTarget = target;
+    if (channel === NotificationChannel.WHATSAPP) {
+      const normalized = normalizeToE164(target, defaultCountry);
+      if (!normalized) {
+        await this.prisma.notification.update({
+          where: { id: notification.id },
+          data: {
+            status: NotificationStatus.FAILED,
+            errorMessage: `Customer's WhatsApp number ("${target}") is not a valid phone number.`,
+          },
+        });
+        return;
+      }
+      dispatchTarget = normalized;
+    }
+
     const result =
       channel === NotificationChannel.EMAIL
-        ? await this.emailProvider.send({ to: target, subject: title, body })
+        ? await this.emailProvider.send({ to: dispatchTarget, subject: title, body })
         : channel === NotificationChannel.SMS
-          ? await this.smsProvider.send({ to: target, body })
-          : await this.whatsappProvider.send({ to: target, body });
+          ? await this.smsProvider.send({ to: dispatchTarget, body })
+          : await this.whatsappProvider.send({
+              to: dispatchTarget,
+              body,
+              template: whatsappTemplate ?? undefined,
+              tenantId,
+            });
 
     await this.prisma.notification.update({
       where: { id: notification.id },
