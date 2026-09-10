@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState, type FormEvent } from 'react';
 import type { LoginResponseDto } from '@transatlantic/shared';
@@ -139,6 +140,10 @@ export default function AnanseLogixLoginPage() {
           value={password}
           onChange={(event) => setPassword(event.target.value)}
         />
+
+        <Link href="/forgot-password" className="-mt-3 self-end text-sm font-semibold text-primary-700 hover:text-primary-800">
+          Forgot password?
+        </Link>
 
         {error && (
           <p role="alert" className="text-sm text-red-600">

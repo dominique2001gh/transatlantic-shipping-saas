@@ -602,6 +602,14 @@ model User {
   role         UserRole
   isActive     Boolean   @default(true)
   lastLoginAt  DateTime?
+  /// Set on every successful password change/reset (self-service change,
+  /// or the forgot-password flow) — never on account creation itself, so
+  /// existing seeded/production accounts start with this null. JwtStrategy
+  /// rejects any JWT whose `iat` predates this timestamp, which is what
+  /// actually invalidates already-issued sessions/tokens after a reset;
+  /// see JwtStrategy's own doc comment. A null value here means "never
+  /// reset" and is never treated as later than any token's `iat`.
+  passwordChangedAt DateTime?
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
@@ -628,10 +636,45 @@ model User {
   notificationEventsTriggered   NotificationEvent[] // Stage 3H
   tenantInvitationsSent         TenantInvitation[]
   platformAuditLogsPerformed    PlatformAuditLog[]
+  accountTokens                 AccountToken[]
 
   @@unique([tenantId, email])
   @@index([tenantId])
   @@map("users")
+}
+
+/// Password-recovery/account-lifecycle purpose an AccountToken was issued
+/// for. INVITE_ACTIVATION is not yet issued by any code path (staff/
+/// customer invite-acceptance is a later stage) but is included now so
+/// that work doesn't need a second migration to reuse this same table.
+enum AccountTokenPurpose {
+  PASSWORD_RESET
+  INVITE_ACTIVATION
+}
+
+/// A single-use, expiring token proving possession of a specific User's
+/// email — the forgot-password flow's only source of truth for "is this
+/// reset request legitimate." Deliberately holds only `tokenHash` (SHA-256
+/// of the raw token emailed to the user), never the raw token itself, so a
+/// database read/leak alone can never be used to reset an account —
+/// exactly the same reasoning `User.passwordHash` already applies to
+/// passwords. `userId` (not a bare email) is what ties this to tenant/role
+/// context: resolving straight to a specific User row means every
+/// existing tenant-isolation and role check downstream needs zero changes
+/// to account for this table.
+model AccountToken {
+  id        String              @id @default(cuid())
+  userId    String
+  purpose   AccountTokenPurpose
+  tokenHash String              @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime            @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, purpose])
+  @@map("account_tokens")
 }
 
 /// A customer (shipper) belonging to a tenant. May optionally have a

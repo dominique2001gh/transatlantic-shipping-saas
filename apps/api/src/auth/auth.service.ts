@@ -1,16 +1,27 @@
-import { BadRequestException, Injectable, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
+import { AccountTokenPurpose } from '@prisma/client';
 import type { AuthenticatedUser, CustomerEntryPointResponse, JwtPayload, LoginResponseDto } from '@transatlantic/shared';
 import * as bcrypt from 'bcrypt';
+import { generateToken, hashToken } from '../common/token/token.util';
+import { passwordResetEmail } from '../notifications/templates/platform-emails';
+import { EMAIL_PROVIDER } from '../notifications/providers/provider.types';
+import type { EmailProvider } from '../notifications/providers/provider.types';
 import { PrismaService } from '../prisma/prisma.service';
+
+/** How long a forgot-password link stays valid — short by design; see AuthService.requestPasswordReset's own doc comment. */
+const PASSWORD_RESET_TTL_MINUTES = 30;
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
+    @Inject(EMAIL_PROVIDER) private readonly emailProvider: EmailProvider,
   ) {}
 
   async login(email: string, password: string): Promise<LoginResponseDto> {
@@ -190,6 +201,90 @@ export class AuthService {
     }
 
     const passwordHash = await AuthService.hashPassword(newPassword);
-    await this.prisma.user.update({ where: { id: userId }, data: { passwordHash } });
+    await this.prisma.user.update({ where: { id: userId }, data: { passwordHash, passwordChangedAt: new Date() } });
+  }
+
+  /**
+   * Forgot-password (Stage 2). Deliberately returns void, never a status
+   * the caller could branch on — AuthController.forgotPassword always
+   * responds with the same generic message regardless of what happens in
+   * here, so a mistyped email and a real one are indistinguishable from
+   * the outside (Do not reveal whether an email exists in the system).
+   *
+   * Email is unique per tenant, not globally (see `login`'s own comment) —
+   * every *active* account matching this email gets its own token and its
+   * own email, so a person holding accounts at two different tenants with
+   * the same address can reset either independently, and resetting one
+   * never touches the other. Inactive accounts are silently skipped (no
+   * token issued) rather than allowing a deactivated account back in
+   * through this door.
+   *
+   * Every failure (email send, anything) is caught and logged, never
+   * thrown — a transient provider outage must not turn into a response
+   * shape that leaks account existence, and must not block the generic
+   * "we sent it" response the controller always gives.
+   */
+  async requestPasswordReset(email: string): Promise<void> {
+    const normalizedEmail = email.toLowerCase().trim();
+    const users = await this.prisma.user.findMany({
+      where: { email: normalizedEmail, isActive: true },
+    });
+
+    for (const user of users) {
+      try {
+        const rawToken = generateToken();
+        await this.prisma.accountToken.create({
+          data: {
+            userId: user.id,
+            purpose: AccountTokenPurpose.PASSWORD_RESET,
+            tokenHash: hashToken(rawToken),
+            expiresAt: new Date(Date.now() + PASSWORD_RESET_TTL_MINUTES * 60 * 1000),
+          },
+        });
+
+        const webAppUrl = this.configService.get<string>('WEB_APP_URL', 'http://localhost:3000');
+        const resetEmail = passwordResetEmail({
+          firstName: user.firstName,
+          resetUrl: `${webAppUrl.replace(/\/$/, '')}/reset-password?token=${rawToken}`,
+          expiresInMinutes: PASSWORD_RESET_TTL_MINUTES,
+        });
+        await this.emailProvider.send({ to: user.email, subject: resetEmail.subject, body: resetEmail.body });
+      } catch (err) {
+        this.logger.error(`Failed to issue/send password reset for user ${user.id}: ${err}`);
+      }
+    }
+  }
+
+  /**
+   * Consumes a forgot-password token: validates it (exists, right
+   * purpose, unused, unexpired), then updates the password and marks the
+   * token used in one transaction so a token can never be raced into
+   * resetting a password twice. `passwordChangedAt` is set here for the
+   * exact same reason `changePassword` above sets it — see JwtStrategy's
+   * own doc comment for how that invalidates every JWT issued before now.
+   *
+   * The three failure cases (unknown/already-used/expired) get distinct
+   * messages — unlike the email-existence question forgot-password must
+   * never answer, possessing *this* token already proves the caller
+   * received the email, so telling them their link specifically expired
+   * (vs. is simply invalid) leaks nothing new.
+   */
+  async resetPassword(rawToken: string, newPassword: string): Promise<void> {
+    const tokenHash = hashToken(rawToken);
+    const accountToken = await this.prisma.accountToken.findUnique({ where: { tokenHash } });
+
+    if (!accountToken || accountToken.purpose !== AccountTokenPurpose.PASSWORD_RESET || accountToken.usedAt) {
+      throw new BadRequestException('This reset link is invalid or has already been used');
+    }
+    if (accountToken.expiresAt < new Date()) {
+      throw new BadRequestException('This reset link has expired — please request a new one');
+    }
+
+    const passwordHash = await AuthService.hashPassword(newPassword);
+    const now = new Date();
+    await this.prisma.$transaction([
+      this.prisma.user.update({ where: { id: accountToken.userId }, data: { passwordHash, passwordChangedAt: now } }),
+      this.prisma.accountToken.update({ where: { id: accountToken.id }, data: { usedAt: now } }),
+    ]);
   }
 }
