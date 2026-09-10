@@ -81,7 +81,7 @@ function SignupSuccessContent() {
           <p className="mt-3 max-w-md text-sm text-slate-600">
             Your subscription is active. Log in to continue with onboarding.
           </p>
-          <LinkButton href="/login" size="lg" className="mt-6">
+          <LinkButton href="/ananselogix/login" size="lg" className="mt-6">
             Log In {tenantSlug ? `to ${tenantSlug}` : ''}
           </LinkButton>
         </>
@@ -93,7 +93,7 @@ function SignupSuccessContent() {
             This is taking longer than expected. If you completed payment, you&rsquo;ll receive a confirmation email —
             try logging in shortly, or contact us if this persists.
           </p>
-          <Link href="/login" className="mt-6 text-sm font-medium text-primary-700">
+          <Link href="/ananselogix/login" className="mt-6 text-sm font-medium text-primary-700">
             Go to login
           </Link>
         </>

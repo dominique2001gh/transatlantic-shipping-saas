@@ -32,7 +32,7 @@ export function AnanseLogixFooter() {
             <Link href="/ananselogix/demo" className="text-primary-200 hover:text-white">
               Request a Demo
             </Link>
-            <Link href="/login" className="text-primary-200 hover:text-white">
+            <Link href="/ananselogix/login" className="text-primary-200 hover:text-white">
               Log In
             </Link>
           </nav>
