@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { isTransAtlanticHostname } from '@/lib/trans-atlantic-hostname';
+import { resolveHostnameRouting } from '@/lib/hostname-routing';
 
 /**
  * Website Launch Step 9 prep: this single Next.js deployment serves every
@@ -26,37 +26,72 @@ import { isTransAtlanticHostname } from '@/lib/trans-atlantic-hostname';
  * arrives on app.talogisticssolutions.com, which won't happen until DNS
  * cutover.
  *
- * Production-readiness follow-up: this same deployment also hosts
- * AnanseLogix's own marketing/signup/central-login/platform-admin pages
- * at /ananselogix/* (see AnanseLogixLayout's own doc comment on why — no
- * separate domain/service exists yet). Those must never be reachable on
- * any Trans Atlantic hostname — see isTransAtlanticHostname's own doc
- * comment for the full reasoning and the intended permanent fix
- * (extracting AnanseLogix into its own app/Railway service, bound to its
- * own domain). Until that lands, this middleware 404s /ananselogix/* on
- * every Trans Atlantic hostname; it stays fully reachable everywhere
- * else (localhost, this deployment's raw Railway URL, and eventually
- * ananselogix.com if DNS is ever pointed at this same deployment as an
- * interim step).
+ * AnanseLogix hostname routing (Step 2): this same deployment also hosts
+ * AnanseLogix's own marketing/signup/central-login pages at
+ * /ananselogix/* (see AnanseLogixLayout's own doc comment on why — no
+ * separate domain/service is deployed yet, though a dedicated Railway
+ * service is the intended eventual home). Those must never be reachable
+ * on any Trans Atlantic hostname (unchanged 404 rule below), and — new —
+ * on AnanseLogix's own hostname they must appear at the site root rather
+ * than under /ananselogix, without duplicating a single page: any request
+ * to ananselogix.com whose path doesn't already start with /ananselogix
+ * is rewritten (browser URL unchanged) to the /ananselogix-prefixed
+ * equivalent. `/` becomes `/ananselogix`, `/features` becomes
+ * `/ananselogix/features`, `/signup/success` becomes
+ * `/ananselogix/signup/success`, and so on for every path this matcher
+ * lists — extend the matcher, not this logic, whenever a new AnanseLogix
+ * page is added.
+ *
+ * Canonical host: the bare apex (ananselogix.com), matching this app's
+ * existing convention for Trans Atlantic (see main.ts's own www ->
+ * apex redirect). www.ananselogix.com 301s to the apex, preserving the
+ * exact path/query, before any rewrite logic below ever runs — so
+ * everything past that point only ever has to reason about one hostname
+ * for this brand, same as isTransAtlanticHostname's own suffix-matched
+ * list only ever needing to reason about one brand at a time.
+ *
+ * The actual routing decision is a plain function of (host, pathname) —
+ * see lib/hostname-routing.ts's own doc comment for why that's factored
+ * out separately (unit-testable without a Next.js runtime). This
+ * function is just the thin adapter translating that decision into a
+ * real NextResponse.
  */
-const STAFF_HOSTNAME = 'app.talogisticssolutions.com';
-
 export function middleware(request: NextRequest) {
   const host = request.headers.get('host') ?? '';
+  const { pathname } = request.nextUrl;
 
-  if (isTransAtlanticHostname(host) && request.nextUrl.pathname.startsWith('/ananselogix')) {
-    return new NextResponse(null, { status: 404 });
+  const action = resolveHostnameRouting(host, pathname);
+
+  switch (action.type) {
+    case 'redirectToAnanseLogixApex': {
+      const url = request.nextUrl.clone();
+      url.protocol = 'https:';
+      url.hostname = 'ananselogix.com';
+      url.port = '';
+      return NextResponse.redirect(url, 301);
+    }
+    case 'rewrite': {
+      const url = request.nextUrl.clone();
+      url.pathname = action.pathname;
+      return NextResponse.rewrite(url);
+    }
+    case 'notFound':
+      return new NextResponse(null, { status: 404 });
+    case 'next':
+      return NextResponse.next();
   }
-
-  if (host === STAFF_HOSTNAME && request.nextUrl.pathname === '/') {
-    const url = request.nextUrl.clone();
-    url.pathname = '/dashboard';
-    return NextResponse.rewrite(url);
-  }
-
-  return NextResponse.next();
 }
 
 export const config = {
-  matcher: ['/', '/ananselogix/:path*'],
+  matcher: [
+    '/',
+    '/ananselogix/:path*',
+    '/features',
+    '/how-it-works',
+    '/pricing',
+    '/solutions',
+    '/demo',
+    '/login',
+    '/signup/:path*',
+  ],
 };
