@@ -17,6 +17,8 @@ import {
   type IconProps,
 } from '@/components/icons';
 
+type WorkflowIcon = (props: IconProps) => JSX.Element;
+
 export interface FeatureItem {
   title: string;
   description: string;
@@ -75,20 +77,21 @@ export const solutionItems: SolutionItem[] = [
 export interface WorkflowStep {
   label: string;
   description: string;
+  icon: WorkflowIcon;
 }
 
-/** Section 3 "HOW IT WORKS" of the build brief. */
+/** Section 3 "HOW IT WORKS" of the build brief. Icons illustrate the real barcode/scan-driven workflow (Receive → Label → Inspect → Load → …), not decorative. */
 export const workflowSteps: WorkflowStep[] = [
-  { label: 'Receive', description: 'An item arrives at your origin warehouse and is scanned in.' },
-  { label: 'Label', description: 'A barcode/QR label is printed and attached to the item.' },
-  { label: 'Inspect', description: 'Condition, weight, and dimensions are recorded; exceptions are flagged.' },
-  { label: 'Consolidate', description: 'Items headed to the same destination are grouped together.' },
-  { label: 'Load', description: 'Items are loaded into a container (or onto a manifest, for air).' },
-  { label: 'Manifest', description: 'A manifest is built and finalized for the loaded group.' },
-  { label: 'Depart', description: 'The container or shipment departs origin.' },
-  { label: 'Arrive', description: 'The container or shipment arrives at destination.' },
-  { label: 'Destination Receive', description: 'Each item is scanned in again at the destination warehouse.' },
-  { label: 'Pickup/Delivery', description: 'The item reaches the customer, by pickup or dispatched delivery.' },
+  { label: 'Receive', description: 'An item arrives at your origin warehouse and is scanned in.', icon: IconWarehouse },
+  { label: 'Label', description: 'A barcode/QR label is printed and attached to the item.', icon: IconSearch },
+  { label: 'Inspect', description: 'Condition, weight, and dimensions are recorded; exceptions are flagged.', icon: IconShieldCheck },
+  { label: 'Consolidate', description: 'Items headed to the same destination are grouped together.', icon: IconLayers },
+  { label: 'Load', description: 'Items are loaded into a container (or onto a manifest, for air).', icon: IconContainer },
+  { label: 'Manifest', description: 'A manifest is built and finalized for the loaded group.', icon: IconBox },
+  { label: 'Depart', description: 'The container or shipment departs origin.', icon: IconShip },
+  { label: 'Arrive', description: 'The container or shipment arrives at destination.', icon: IconMapPin },
+  { label: 'Destination Receive', description: 'Each item is scanned in again at the destination warehouse.', icon: IconSearch },
+  { label: 'Pickup/Delivery', description: 'The item reaches the customer, by pickup or dispatched delivery.', icon: IconCar },
 ];
 
 export const serviceTypeOptions = ['Ocean', 'Air', 'RoRo', 'Consolidation', 'Warehousing', 'Local Delivery'];

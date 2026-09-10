@@ -304,6 +304,35 @@ export function IconWhatsApp(props: IconProps) {
   );
 }
 
+export function IconBell(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <path d="M6 9a6 6 0 0 1 12 0c0 3.4 1 4.9 1.6 5.8a.9.9 0 0 1-.7 1.4H5.1a.9.9 0 0 1-.7-1.4C5 13.9 6 12.4 6 9z" />
+      <path d="M9.5 19a2.5 2.5 0 0 0 5 0" />
+    </IconBase>
+  );
+}
+
+export function IconUsers(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <circle cx="9" cy="8" r="3" />
+      <path d="M3.5 20a5.5 5.5 0 0 1 11 0" />
+      <circle cx="17.5" cy="9.5" r="2.3" />
+      <path d="M15.3 13.5c2.4.4 4.1 2 5 4.3" />
+    </IconBase>
+  );
+}
+
+export function IconChartBar(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <path d="M4 20V11M10 20V4M16 20v-8" />
+      <path d="M3 20h18" />
+    </IconBase>
+  );
+}
+
 export function IconChatBubble(props: IconProps) {
   return (
     <IconBase {...props}>

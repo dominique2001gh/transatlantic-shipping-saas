@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import { IconCheckCircle } from '@/components/icons';
+import { IconCheckCircle, IconChevronDown } from '@/components/icons';
 import { PageHero } from '@/components/marketing/PageHero';
 import { LinkButton } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
@@ -15,11 +15,15 @@ const PLAN_BLURBS: Record<SaasPlanSummary['key'], string> = {
   WEBSITE_ONLY: 'A professional branded logistics website with ongoing hosting and maintenance — no operations software included.',
   SOFTWARE_ONLY: 'For logistics companies that already have a website and want the AnanseLogix operations platform.',
   WEBSITE_AND_SOFTWARE: 'The complete AnanseLogix package - the branded website and the full operations platform, together.',
-  SOFTWARE_AND_WEBSITE_BASIC: 'The complete AnanseLogix platform — branded website and full operations software together — at our lowest combined price.',
-  SOFTWARE_AND_WEBSITE_PROFESSIONAL: 'The same complete AnanseLogix platform as Basic — branded website and full operations software together.',
+  SOFTWARE_AND_WEBSITE_BASIC: 'The core AnanseLogix platform — a branded website plus everyday shipment, warehouse, and customer operations.',
+  SOFTWARE_AND_WEBSITE_PROFESSIONAL: 'Everything in Basic, plus the AI assistant, advanced analytics, and early access to what comes next.',
 };
 
-/** Everything included in the Website Only plan — hosting/maintenance-focused. */
+/**
+ * Website Only shows ONLY website-related items — never operations
+ * software, tracking, customer portal, invoices, or analytics, so this
+ * plan can never look like it includes the SaaS operations platform.
+ */
 const WEBSITE_ONLY_FEATURES: string[] = [
   'Branded, responsive logistics website',
   'Custom company branding',
@@ -33,13 +37,15 @@ const WEBSITE_ONLY_FEATURES: string[] = [
 ];
 
 /**
- * The combined website + operations-software bundle — identical for both
- * Basic and Professional today. No feature differentiation between the two
- * tiers was specified when they were introduced; a platform admin can
- * narrow either one's entitlements per-tenant later (see
- * plan-entitlements.ts's own doc comment) if a real tier split is wanted.
+ * The real, code-enforced Basic bundle — see plan-entitlements.ts's
+ * SOFTWARE_AND_WEBSITE_BASIC row. Deliberately excludes AI_AGENT and
+ * ANALYTICS (both real @RequireEntitlement()-gated features a Basic
+ * tenant's API calls are actually rejected from) and everything below that
+ * has no dedicated entitlement of its own yet — see PROFESSIONAL_ONLY_FEATURES'
+ * own comment for why those are described as "early access," not as a
+ * present, plan-gated restriction.
  */
-const SOFTWARE_AND_WEBSITE_FEATURES: string[] = [
+const BASIC_FEATURES: string[] = [
   ...WEBSITE_ONLY_FEATURES,
   'Customer management',
   'Shipment management',
@@ -50,35 +56,46 @@ const SOFTWARE_AND_WEBSITE_FEATURES: string[] = [
   'Ocean, Air, and RoRo workflows',
   'Destination receiving, pickup & delivery',
   'Public shipment tracking & customer portal',
-  'Invoices, payments & documents',
+  'Invoices & customer payments',
   'Notifications',
-  'Owner/manager analytics',
-  'Staff accounts & role-based permissions',
+  'Operational dashboard',
+  'Staff accounts & role-based access',
+];
+
+/**
+ * What Professional actually adds beyond Basic today. AI_AGENT and
+ * ANALYTICS are real, code-enforced entitlements — a Basic tenant's own
+ * API calls to those features are rejected server-side, not just hidden in
+ * the UI. "Early access to future platform capabilities" is honest
+ * forward-looking language, not a claim about anything that exists today
+ * (see AI_AGENT's own scope: Q&A only, no action-taking, in every plan).
+ *
+ * Several differentiators requested for Professional — a dedicated
+ * document center, bulk customer/disruption messaging, a narrower staff
+ * permission model, and plan-gated multi-location controls — are NOT yet
+ * backed by their own entitlement or any code-level restriction: every
+ * tenant with OPERATIONS_SOFTWARE gets the same documents, notifications,
+ * staff roles, and multi-warehouse support today. They are intentionally
+ * left off this list rather than advertised as real today; see the
+ * ADVANCED_FEATURES flag in plan-entitlements.ts, which is set for
+ * Professional but not yet checked by any guard.
+ */
+const PROFESSIONAL_ONLY_FEATURES: string[] = [
   'AI Training & Support Agent',
+  'Advanced owner/manager analytics & reports',
+  'Early access to future platform capabilities',
 ];
 
 const PLAN_FEATURES: Record<SaasPlanSummary['key'], string[]> = {
   WEBSITE_ONLY: WEBSITE_ONLY_FEATURES,
-  SOFTWARE_ONLY: [
-    'Customer management',
-    'Shipment management',
-    'Warehouse receiving & barcode/QR label workflow',
-    'Processing / inspection',
-    'Container loading & management',
-    'Manifest management',
-    'Ocean, Air, and RoRo workflows',
-    'Destination receiving, pickup & delivery',
-    'Public shipment tracking & customer portal',
-    'Invoices, payments & documents',
-    'Notifications',
-    'Owner/manager analytics',
-    'Staff accounts & role-based permissions',
-    'AI Training & Support Agent',
-  ],
-  WEBSITE_AND_SOFTWARE: ['Everything in Website Only', 'Everything in Software Only', 'One vendor, one bill, fully connected'],
-  SOFTWARE_AND_WEBSITE_BASIC: SOFTWARE_AND_WEBSITE_FEATURES,
-  SOFTWARE_AND_WEBSITE_PROFESSIONAL: SOFTWARE_AND_WEBSITE_FEATURES,
+  SOFTWARE_ONLY: BASIC_FEATURES,
+  WEBSITE_AND_SOFTWARE: [...BASIC_FEATURES, ...PROFESSIONAL_ONLY_FEATURES],
+  SOFTWARE_AND_WEBSITE_BASIC: BASIC_FEATURES,
+  SOFTWARE_AND_WEBSITE_PROFESSIONAL: [...PROFESSIONAL_ONLY_FEATURES, ...BASIC_FEATURES],
 };
+
+/** How many features each card shows before "View all features". Keeps every card approximately the same height regardless of its full list length. */
+const INITIAL_FEATURE_COUNT = 7;
 
 const PLAN_CTA_LABELS: Record<SaasPlanSummary['key'], string> = {
   WEBSITE_ONLY: 'Get Started',
@@ -125,60 +142,7 @@ export default function AnanseLogixPricingPage() {
           <>
             <div className="grid grid-cols-1 gap-6 lg:grid-cols-3 lg:items-start">
               {plans.map((plan) => (
-                <Card key={plan.id} className="flex flex-col">
-                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-accent-600">
-                    {PLAN_DISPLAY_NAMES[plan.key]}
-                  </p>
-                  <h3 className="mt-2 font-display text-xl font-bold text-slate-900">{plan.name}</h3>
-                  <p className="mt-2 text-sm text-slate-600">{plan.description ?? PLAN_BLURBS[plan.key]}</p>
-
-                  {plan.price ? (
-                    <div className="mt-6">
-                      {plan.price.isPromoCurrentlyActive && plan.price.promoLabel && (
-                        <p className="text-xs font-semibold uppercase tracking-wide text-accent-600">{plan.price.promoLabel}</p>
-                      )}
-                      <p className="mt-1 flex items-baseline gap-2">
-                        <span className="font-display text-3xl font-bold text-slate-900">
-                          {formatCents(plan.price.effectiveMonthlyAmountCents, plan.price.currency)}
-                        </span>
-                        <span className="text-sm text-slate-500">/month</span>
-                      </p>
-                      {plan.price.isPromoCurrentlyActive && (
-                        <p className="text-xs text-slate-400 line-through">
-                          {formatCents(plan.price.monthlyAmountCents, plan.price.currency)}/month
-                        </p>
-                      )}
-                      <p className="mt-1 text-xs text-slate-500">
-                        + {formatCents(plan.price.effectiveSetupFeeCents, plan.price.currency)} one-time setup fee
-                        {plan.price.isPromoCurrentlyActive && plan.price.effectiveSetupFeeCents !== plan.price.setupFeeCents && (
-                          <span className="text-slate-400 line-through"> ({formatCents(plan.price.setupFeeCents, plan.price.currency)})</span>
-                        )}
-                      </p>
-                      {plan.price.trialDays > 0 && (
-                        <p className="mt-1 flex items-center gap-1.5 text-xs font-medium text-accent-600">
-                          <IconCheckCircle className="h-4 w-4" />
-                          {plan.price.trialDays}-day free trial
-                        </p>
-                      )}
-                    </div>
-                  ) : (
-                    <p className="mt-6 text-sm text-slate-500">Pricing coming soon — contact us for details.</p>
-                  )}
-
-                  <ul className="mt-6 flex flex-col gap-2 border-t border-slate-100 pt-6 text-sm text-slate-600">
-                    {PLAN_FEATURES[plan.key].map((feature) => (
-                      <li key={feature} className="flex items-start gap-2">
-                        <IconCheckCircle className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
-                        {feature}
-                      </li>
-                    ))}
-                  </ul>
-
-                  <div className="mt-8 flex-1" />
-                  <LinkButton href={`/ananselogix/signup?plan=${plan.key}`} variant="secondary" className="justify-center">
-                    {PLAN_CTA_LABELS[plan.key]}
-                  </LinkButton>
-                </Card>
+                <PlanCard key={plan.id} plan={plan} />
               ))}
             </div>
 
@@ -190,5 +154,77 @@ export default function AnanseLogixPricingPage() {
         )}
       </Container>
     </>
+  );
+}
+
+function PlanCard({ plan }: { plan: SaasPlanSummary }) {
+  const [expanded, setExpanded] = useState(false);
+  const features = PLAN_FEATURES[plan.key];
+  const visibleFeatures = expanded ? features : features.slice(0, INITIAL_FEATURE_COUNT);
+  const hasMore = features.length > INITIAL_FEATURE_COUNT;
+
+  return (
+    <Card className="flex flex-col">
+      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-accent-600">{PLAN_DISPLAY_NAMES[plan.key]}</p>
+      <h3 className="mt-2 font-display text-xl font-bold text-slate-900">{plan.name}</h3>
+      <p className="mt-2 text-sm text-slate-600">{plan.description ?? PLAN_BLURBS[plan.key]}</p>
+
+      {plan.price ? (
+        <div className="mt-6">
+          {plan.price.isPromoCurrentlyActive && plan.price.promoLabel && (
+            <p className="text-xs font-semibold uppercase tracking-wide text-accent-600">{plan.price.promoLabel}</p>
+          )}
+          <p className="mt-1 flex items-baseline gap-2">
+            <span className="font-display text-3xl font-bold text-slate-900">
+              {formatCents(plan.price.effectiveMonthlyAmountCents, plan.price.currency)}
+            </span>
+            <span className="text-sm text-slate-500">/month</span>
+          </p>
+          {plan.price.isPromoCurrentlyActive && (
+            <p className="text-xs text-slate-400 line-through">{formatCents(plan.price.monthlyAmountCents, plan.price.currency)}/month</p>
+          )}
+          <p className="mt-1 text-xs text-slate-500">
+            + {formatCents(plan.price.effectiveSetupFeeCents, plan.price.currency)} one-time setup fee
+            {plan.price.isPromoCurrentlyActive && plan.price.effectiveSetupFeeCents !== plan.price.setupFeeCents && (
+              <span className="text-slate-400 line-through"> ({formatCents(plan.price.setupFeeCents, plan.price.currency)})</span>
+            )}
+          </p>
+          {plan.price.trialDays > 0 && (
+            <p className="mt-1 flex items-center gap-1.5 text-xs font-medium text-accent-600">
+              <IconCheckCircle className="h-4 w-4" />
+              {plan.price.trialDays}-day free trial
+            </p>
+          )}
+        </div>
+      ) : (
+        <p className="mt-6 text-sm text-slate-500">Pricing coming soon — contact us for details.</p>
+      )}
+
+      <ul className="mt-6 flex flex-col gap-2 border-t border-slate-100 pt-6 text-sm text-slate-600">
+        {visibleFeatures.map((feature) => (
+          <li key={feature} className="flex items-start gap-2">
+            <IconCheckCircle className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
+            {feature}
+          </li>
+        ))}
+      </ul>
+
+      {hasMore && (
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          aria-expanded={expanded}
+          className="mt-3 flex items-center gap-1.5 self-start text-sm font-medium text-primary-700 hover:text-primary-800"
+        >
+          {expanded ? 'Show less' : 'View all features'}
+          <IconChevronDown className={`h-4 w-4 transition-transform ${expanded ? 'rotate-180' : ''}`} />
+        </button>
+      )}
+
+      <div className="mt-6 flex-1" />
+      <LinkButton href={`/ananselogix/signup?plan=${plan.key}`} variant="secondary" className="mt-2 justify-center">
+        {PLAN_CTA_LABELS[plan.key]}
+      </LinkButton>
+    </Card>
   );
 }

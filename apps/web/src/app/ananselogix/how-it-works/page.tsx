@@ -1,7 +1,9 @@
 import type { Metadata } from 'next';
 import { CTASection } from '@/components/marketing/CTASection';
 import { PageHero } from '@/components/marketing/PageHero';
+import { ContainerManifestPreview } from '@/components/marketing/ProductPreviews';
 import { Container } from '@/components/ui/Container';
+import { SectionHeading } from '@/components/ui/SectionHeading';
 import { workflowSteps } from '@/lib/ananselogix/site-data';
 
 export const metadata: Metadata = {
@@ -22,10 +24,11 @@ export default function AnanseLogixHowItWorksPage() {
         <ol className="relative border-l border-slate-200 pl-8">
           {workflowSteps.map((step, index) => (
             <li key={step.label} className="mb-10 last:mb-0">
-              <span className="absolute -left-4 flex h-8 w-8 items-center justify-center rounded-full bg-primary-700 text-sm font-semibold text-white">
-                {index + 1}
+              <span className="absolute -left-5 flex h-10 w-10 items-center justify-center rounded-full bg-primary-700 text-white">
+                <step.icon className="h-4 w-4" />
               </span>
-              <h3 className="font-display text-lg font-semibold text-slate-900">{step.label}</h3>
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-accent-600">Step {index + 1}</p>
+              <h3 className="mt-0.5 font-display text-lg font-semibold text-slate-900">{step.label}</h3>
               <p className="mt-1 text-sm leading-relaxed text-slate-600">{step.description}</p>
             </li>
           ))}
@@ -38,6 +41,17 @@ export default function AnanseLogixHowItWorksPage() {
             owner dashboard, without needing to be physically present at any warehouse or office. Staff record what
             happened; the system makes sure the owner can always see it.
           </p>
+        </div>
+
+        <div className="mt-16">
+          <SectionHeading
+            eyebrow="Load &amp; Manifest, In Practice"
+            title="Containers and manifests, built from what was actually scanned"
+            description="Each container's status and manifest are generated from real recorded items — not a spreadsheet kept separately."
+          />
+          <div className="mt-8">
+            <ContainerManifestPreview />
+          </div>
         </div>
       </Container>
       <CTASection
