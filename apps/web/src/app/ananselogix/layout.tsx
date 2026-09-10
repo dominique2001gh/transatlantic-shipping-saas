@@ -2,14 +2,26 @@ import type { Metadata } from 'next';
 import { AnanseLogixFooter } from '@/components/ananselogix/AnanseLogixFooter';
 import { AnanseLogixHeader } from '@/components/ananselogix/AnanseLogixHeader';
 import { platformConfig } from '@/lib/platform-config';
+import { ANANSELOGIX_BASE_URL } from '@/lib/site-base-url';
 
 /**
- * Same NEXT_PUBLIC_SITE_URL convention sitemap.ts/robots.ts already use —
- * needed so relative `alternates.canonical`/`openGraph.url` values below
- * (and on every child page) resolve to real absolute URLs rather than
- * Next's own localhost fallback.
+ * AnanseLogix production site URL / canonical metadata (Step 3): needed
+ * so relative `alternates.canonical`/`openGraph.url` values below (and on
+ * every child page) resolve to real absolute URLs rather than Next's own
+ * localhost fallback. Previously read Trans Atlantic's own
+ * NEXT_PUBLIC_SITE_URL (defaulting to talogisticssolutions.com) — wrong
+ * for this brand's own pages even before Step 3, and risked cross-brand
+ * contamination if that shared variable were ever changed for either
+ * site. Now reads ANANSELOGIX_BASE_URL (see site-base-url.ts's own doc
+ * comment), a dedicated variable/default that can never be affected by
+ * anything set for Trans Atlantic, and vice versa. Fixed at build time
+ * (static metadata, unlike sitemap.ts/robots.ts's per-request host
+ * awareness) — correct for this deployment as long as AnanseLogix and
+ * Trans Atlantic share one build; the moment AnanseLogix gets its own
+ * Railway service (see this app's Step 2/3/4 plan), that service simply
+ * sets its own NEXT_PUBLIC_ANANSELOGIX_SITE_URL, with zero code change.
  */
-const BASE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://talogisticssolutions.com';
+const BASE_URL = ANANSELOGIX_BASE_URL;
 
 export const metadata: Metadata = {
   metadataBase: new URL(BASE_URL),

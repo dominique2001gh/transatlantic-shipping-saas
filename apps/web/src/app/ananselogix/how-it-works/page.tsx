@@ -9,7 +9,8 @@ import { workflowSteps } from '@/lib/ananselogix/site-data';
 export const metadata: Metadata = {
   title: 'How It Works',
   description: 'From receiving to final delivery — the operational workflow every shipment moves through on AnanseLogix, with owner-level visibility at every step.',
-  alternates: { canonical: '/ananselogix/how-it-works' },
+  // Step 3: unprefixed — see ananselogix/page.tsx's own doc comment.
+  alternates: { canonical: '/how-it-works' },
 };
 
 export default function AnanseLogixHowItWorksPage() {

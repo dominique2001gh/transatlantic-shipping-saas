@@ -9,7 +9,8 @@ import { featureItems } from '@/lib/ananselogix/site-data';
 export const metadata: Metadata = {
   title: 'Features',
   description: 'Customer management, shipment tracking, barcode scanning, container loading, invoicing, and more — the full feature list of the AnanseLogix logistics platform.',
-  alternates: { canonical: '/ananselogix/features' },
+  // Step 3: unprefixed — see ananselogix/page.tsx's own doc comment.
+  alternates: { canonical: '/features' },
 };
 
 export default function AnanseLogixFeaturesPage() {

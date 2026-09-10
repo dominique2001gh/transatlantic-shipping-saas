@@ -8,7 +8,8 @@ import { solutionItems } from '@/lib/ananselogix/site-data';
 export const metadata: Metadata = {
   title: 'Solutions',
   description: 'AnanseLogix solutions for freight forwarders, ocean and air carriers, RoRo shippers, consolidators, warehousing operators, and diaspora logistics companies.',
-  alternates: { canonical: '/ananselogix/solutions' },
+  // Step 3: unprefixed — see ananselogix/page.tsx's own doc comment.
+  alternates: { canonical: '/solutions' },
 };
 
 export default function AnanseLogixSolutionsPage() {

@@ -1,5 +1,7 @@
 import type { MetadataRoute } from 'next';
 import { headers } from 'next/headers';
+import { isAnanseLogixHostname, isAnanseLogixWwwHostname } from '@/lib/ananselogix-hostname';
+import { resolveSiteBaseUrl } from '@/lib/site-base-url';
 import { isTransAtlanticHostname } from '@/lib/trans-atlantic-hostname';
 
 /**
@@ -9,12 +11,13 @@ import { isTransAtlanticHostname } from '@/lib/trans-atlantic-hostname';
  * /dashboard, /portal, /platform (private, authenticated SaaS areas —
  * see robots.ts, which explicitly disallows crawling those regardless).
  *
- * BASE_URL defaults to the approved production domain
- * (talogisticssolutions.com) but is overridable via NEXT_PUBLIC_SITE_URL
- * so this generates correct absolute URLs in any non-production
- * environment (staging, preview deploys) without code changes.
+ * Base URL is resolved per-request host via resolveSiteBaseUrl (Step 3 —
+ * see site-base-url.ts's own doc comment): talogisticssolutions.com (or
+ * NEXT_PUBLIC_SITE_URL override) on Trans Atlantic hostnames, otherwise
+ * AnanseLogix's own base URL — correct for both brands from one shared
+ * deployment, since this file already calls headers() and renders
+ * per-request rather than once at build time.
  */
-const BASE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://talogisticssolutions.com';
 
 const TRANS_ATLANTIC_PATHS: { path: string; priority: number }[] = [
   { path: '/', priority: 1 },
@@ -32,34 +35,48 @@ const TRANS_ATLANTIC_PATHS: { path: string; priority: number }[] = [
 ];
 
 /**
- * AnanseLogix Phase 2: the platform's own marketing site, mounted at
- * /ananselogix/* in this single deployment (see AnanseLogixLayout's own
- * doc comment on why — no separate domain/DNS exists yet). Transactional
- * pages (signup wizard, its success page) are excluded, same reasoning
- * as /login and /register above.
+ * AnanseLogix Phase 2 / Step 3: the platform's own marketing site.
+ * Stored here *unprefixed* — Step 2's hostname routing means these pages
+ * resolve at the site root on ananselogix.com itself (no /ananselogix in
+ * the URL), so the sitemap must advertise the URLs a visitor/crawler
+ * actually requests there. The `/ananselogix` prefix is added back below
+ * only for the interim case (local dev, this deployment's raw Railway
+ * URL) where these pages are still reached by that literal path.
+ * Transactional pages (signup wizard, its success page) are excluded,
+ * same reasoning as /login and /register above.
  *
  * Production-readiness follow-up: never advertised in the sitemap served
  * on a Trans Atlantic hostname — see isTransAtlanticHostname's own doc
- * comment. These entries only appear when this sitemap is fetched from
- * somewhere other than Trans Atlantic's own domains (local dev, this
- * deployment's raw Railway URL, or eventually ananselogix.com).
+ * comment.
  */
 const ANANSELOGIX_PATHS: { path: string; priority: number }[] = [
-  { path: '/ananselogix', priority: 0.9 },
-  { path: '/ananselogix/features', priority: 0.7 },
-  { path: '/ananselogix/solutions', priority: 0.7 },
-  { path: '/ananselogix/how-it-works', priority: 0.7 },
-  { path: '/ananselogix/pricing', priority: 0.8 },
-  { path: '/ananselogix/demo', priority: 0.6 },
+  { path: '', priority: 0.9 },
+  { path: '/features', priority: 0.7 },
+  { path: '/solutions', priority: 0.7 },
+  { path: '/how-it-works', priority: 0.7 },
+  { path: '/pricing', priority: 0.8 },
+  { path: '/demo', priority: 0.6 },
 ];
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const host = (await headers()).get('host');
-  const paths = isTransAtlanticHostname(host) ? TRANS_ATLANTIC_PATHS : [...TRANS_ATLANTIC_PATHS, ...ANANSELOGIX_PATHS];
-
+  const baseUrl = resolveSiteBaseUrl(host);
   const now = new Date();
+
+  if (isAnanseLogixHostname(host) || isAnanseLogixWwwHostname(host)) {
+    return ANANSELOGIX_PATHS.map(({ path, priority }) => ({
+      url: `${baseUrl}${path || '/'}`,
+      lastModified: now,
+      priority,
+    }));
+  }
+
+  const paths = isTransAtlanticHostname(host)
+    ? TRANS_ATLANTIC_PATHS
+    : [...TRANS_ATLANTIC_PATHS, ...ANANSELOGIX_PATHS.map((p) => ({ path: `/ananselogix${p.path}`, priority: p.priority }))];
+
   return paths.map(({ path, priority }) => ({
-    url: `${BASE_URL}${path}`,
+    url: `${baseUrl}${path}`,
     lastModified: now,
     priority,
   }));

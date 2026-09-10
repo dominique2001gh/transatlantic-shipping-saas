@@ -14,7 +14,12 @@ import { platformConfig } from '@/lib/platform-config';
 export const metadata: Metadata = {
   description:
     'AnanseLogix gives logistics companies one system to manage packages, warehouses, containers, manifests, customers, payments, tracking and staff — from receiving to final delivery.',
-  alternates: { canonical: '/ananselogix' },
+  // Step 3: unprefixed — this page resolves at the AnanseLogix site root
+  // (see middleware.ts's hostname routing), so its one true canonical URL
+  // is https://ananselogix.com/, not the /ananselogix-prefixed internal
+  // route this same content is rewritten from. See ananselogix/layout.tsx's
+  // own doc comment for ANANSELOGIX_BASE_URL, which this resolves against.
+  alternates: { canonical: '/' },
 };
 
 /**
