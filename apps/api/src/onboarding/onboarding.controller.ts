@@ -9,6 +9,7 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { requireTenantId } from '../common/tenant/tenant.util';
 import { InviteStaffDto } from '../staff-invitations/dto/invite-staff.dto';
 import { BillingPortalDto } from './dto/billing-portal.dto';
+import { StartPaidSubscriptionDto } from './dto/start-paid-subscription.dto';
 import { UpdateBrandingDto } from './dto/update-branding.dto';
 import { UpdateNotificationsDto } from './dto/update-notifications.dto';
 import { UpdateOperationsDto } from './dto/update-operations.dto';
@@ -78,6 +79,20 @@ export class OnboardingController {
   @RequireEntitlement(EntitlementFeature.BILLING)
   createBillingPortalSession(@CurrentUser() user: AuthenticatedUser, @Body() dto: BillingPortalDto) {
     return this.onboardingService.createBillingPortalSession(requireTenantId(user.tenantId), dto);
+  }
+
+  /**
+   * Free Trial stage: the explicit "Activate Paid Billing" action — the
+   * only way a trial's TenantSubscription ever gets a real Stripe
+   * relationship. Allowed even for a SUSPENDED (expired-trial) tenant for
+   * the same reason billing/portal-session is — this *is* how they
+   * restore access.
+   */
+  @Post('billing/subscribe')
+  @AllowWhenSuspended()
+  @RequireEntitlement(EntitlementFeature.BILLING)
+  startPaidSubscription(@CurrentUser() user: AuthenticatedUser, @Body() dto: StartPaidSubscriptionDto) {
+    return this.onboardingService.startPaidSubscription(requireTenantId(user.tenantId), user.email, dto);
   }
 
   @Post('finish')

@@ -1,6 +1,6 @@
 'use client';
 
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useRef, useState, type FormEvent } from 'react';
 import type { SaasPlanSummary, SignupCompanyDetails } from '@transatlantic/shared';
 import { SelectInput, TextInput } from '@/components/forms/FormField';
@@ -40,6 +40,7 @@ export default function AnanseLogixSignupPage() {
 }
 
 function SignupWizard() {
+  const router = useRouter();
   const searchParams = useSearchParams();
 
   const [step, setStep] = useState<Step>(1);
@@ -180,7 +181,17 @@ function SignupWizard() {
         `${origin}/ananselogix/signup/success?token=${token}`,
         `${origin}/ananselogix/signup?token=${token}`,
       );
-      window.location.href = url;
+      // Free Trial stage: a trial signup has no Stripe Checkout at all —
+      // the tenant is already provisioned by the time this response
+      // returns (see SignupService.createCheckout's own doc comment), so
+      // there's no external redirect; go straight to the same success
+      // page a paid signup eventually lands on. Its own status polling
+      // already handles a synchronously-COMPLETED session correctly.
+      if (url) {
+        window.location.href = url;
+      } else {
+        router.push(`/ananselogix/signup/success?token=${token}`);
+      }
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Could not start checkout — please try again.');
       setSubmitting(false);
@@ -319,8 +330,9 @@ function SignupWizard() {
           <div>
             <h1 className="font-display text-2xl font-bold text-slate-900">Review &amp; subscribe</h1>
             <p className="mt-2 text-sm text-slate-600">
-              You&rsquo;ll be redirected to Stripe&rsquo;s secure checkout to complete your subscription. Card details are never
-              seen by AnanseLogix.
+              {selectedPlan?.price && selectedPlan.price.trialDays > 0
+                ? `Start your ${selectedPlan.price.trialDays}-day free trial now — no credit card required. You won't be charged anything today.`
+                : "You'll be redirected to Stripe's secure checkout to complete your subscription. Card details are never seen by AnanseLogix."}
             </p>
             {selectedPlan?.price && (
               <Card className="mt-6">
@@ -331,15 +343,25 @@ function SignupWizard() {
                 {selectedPlan.price.setupFeeCents > 0 && (
                   <p className="mt-1 text-sm text-slate-500">
                     + {formatCents(selectedPlan.price.setupFeeCents, selectedPlan.price.currency)} one-time setup fee
+                    {selectedPlan.price.trialDays > 0 && ' after your free trial'}
                   </p>
                 )}
                 {selectedPlan.price.trialDays > 0 && (
-                  <p className="mt-1 text-sm font-medium text-accent-600">{selectedPlan.price.trialDays}-day free trial included</p>
+                  <>
+                    <p className="mt-1 text-sm font-medium text-accent-600">{selectedPlan.price.trialDays}-Day Free Trial</p>
+                    <p className="mt-1 text-sm text-slate-500">No credit card required</p>
+                  </>
                 )}
               </Card>
             )}
             <Button onClick={handleCheckout} size="lg" disabled={submitting} className="mt-6 justify-center">
-              {submitting ? 'Redirecting…' : 'Continue to Payment'}
+              {submitting
+                ? selectedPlan?.price && selectedPlan.price.trialDays > 0
+                  ? 'Starting your trial…'
+                  : 'Redirecting…'
+                : selectedPlan?.price && selectedPlan.price.trialDays > 0
+                  ? 'Start Free Trial'
+                  : 'Continue to Payment'}
             </Button>
           </div>
         )}

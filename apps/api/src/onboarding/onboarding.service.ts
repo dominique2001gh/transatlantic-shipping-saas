@@ -2,10 +2,13 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { OnboardingStep } from '@prisma/client';
 import type { TenantOnboardingSummary } from '@transatlantic/shared';
 import { PrismaService } from '../prisma/prisma.service';
+import { effectivePrice } from '../saas-plans/promo-pricing.util';
+import { SaasPlansService } from '../saas-plans/saas-plans.service';
 import { InviteStaffDto } from '../staff-invitations/dto/invite-staff.dto';
 import { StaffInvitationsService } from '../staff-invitations/staff-invitations.service';
 import { StripeService } from '../stripe/stripe.service';
 import { BillingPortalDto } from './dto/billing-portal.dto';
+import { StartPaidSubscriptionDto } from './dto/start-paid-subscription.dto';
 import { UpdateBrandingDto } from './dto/update-branding.dto';
 import { UpdateNotificationsDto } from './dto/update-notifications.dto';
 import { UpdateOperationsDto } from './dto/update-operations.dto';
@@ -27,6 +30,7 @@ export class OnboardingService {
     private readonly prisma: PrismaService,
     private readonly stripeService: StripeService,
     private readonly staffInvitationsService: StaffInvitationsService,
+    private readonly saasPlansService: SaasPlansService,
   ) {}
 
   async getOverview(tenantId: string) {
@@ -158,8 +162,60 @@ export class OnboardingService {
     if (!subscription) {
       throw new BadRequestException('No billing account found for this tenant yet');
     }
+    // Free Trial stage: a trial tenant has no real Stripe customer yet
+    // (see TenantSubscription.stripeCustomerId's own doc comment) — the
+    // portal manages an existing Stripe billing relationship, so this
+    // must fail clearly rather than call Stripe with a null id. The
+    // frontend should show "Activate Paid Billing" (startPaidSubscription
+    // below) instead of "Manage Billing" until stripeCustomerId exists.
+    if (!subscription.stripeCustomerId) {
+      throw new BadRequestException('Activate paid billing before managing it — this tenant is still on a free trial');
+    }
     const session = await this.stripeService.createBillingPortalSession(subscription.stripeCustomerId, dto.returnUrl);
     return { url: session.url };
+  }
+
+  /**
+   * Free Trial stage: the explicit, tenant-initiated action that starts
+   * real, paid billing for a trial (or trial-expired) tenant — the first
+   * and only time Stripe is ever contacted for such a tenant. Builds a
+   * normal, non-trial Checkout Session (full setup fee + recurring price,
+   * card required now) for the plan the tenant already selected at
+   * signup — never a client-supplied plan/amount. Tagged with
+   * `activateTenantId` so SubscriptionsService.handleCheckoutCompleted
+   * updates this tenant's existing TenantSubscription row in place
+   * instead of creating a new tenant (see that method's own doc comment).
+   */
+  async startPaidSubscription(tenantId: string, ownerEmail: string, dto: StartPaidSubscriptionDto): Promise<{ url: string }> {
+    const subscription = await this.prisma.tenantSubscription.findUnique({ where: { tenantId }, include: { plan: true } });
+    if (!subscription) {
+      throw new BadRequestException('No billing account found for this tenant yet');
+    }
+    if (subscription.stripeSubscriptionId) {
+      throw new BadRequestException('Paid billing is already active for this tenant');
+    }
+
+    const price = await this.saasPlansService.findActivePriceForPlanKey(subscription.planId);
+    if (!price) {
+      throw new BadRequestException('This plan does not have active pricing configured yet — please contact us');
+    }
+    const effective = effectivePrice(price);
+
+    const checkoutSession = await this.stripeService.createSubscriptionCheckoutSession({
+      metadata: { activateTenantId: tenantId },
+      customerEmail: ownerEmail,
+      planName: subscription.plan.name,
+      currency: price.currency,
+      monthlyAmountCents: effective.monthlyAmountCents,
+      setupFeeCents: effective.setupFeeCents,
+      trialDays: 0,
+      successUrl: dto.successUrl,
+      cancelUrl: dto.cancelUrl,
+    });
+    if (!checkoutSession.url) {
+      throw new BadRequestException('Unable to start checkout — please try again');
+    }
+    return { url: checkoutSession.url };
   }
 
   async finish(tenantId: string): Promise<TenantOnboardingSummary> {

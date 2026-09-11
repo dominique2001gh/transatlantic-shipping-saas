@@ -1,12 +1,13 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma, SignupSessionStatus } from '@prisma/client';
-import type { SignupCompanyDetails, SignupStatusResponse, StartSignupResponse } from '@transatlantic/shared';
+import type { SignupCheckoutResponse, SignupCompanyDetails, SignupStatusResponse, StartSignupResponse } from '@transatlantic/shared';
 import { AuthService } from '../auth/auth.service';
 import { generateToken } from '../common/token/token.util';
 import { PrismaService } from '../prisma/prisma.service';
 import { effectivePrice } from '../saas-plans/promo-pricing.util';
 import { SaasPlansService } from '../saas-plans/saas-plans.service';
 import { StripeService } from '../stripe/stripe.service';
+import { TenantProvisioningService } from '../tenant-provisioning/tenant-provisioning.service';
 import { SignupCheckoutDto } from './dto/signup-checkout.dto';
 import { SignupCompanyDto } from './dto/signup-company.dto';
 import { SignupOwnerDto } from './dto/signup-owner.dto';
@@ -30,6 +31,7 @@ export class SignupService {
     private readonly prisma: PrismaService,
     private readonly saasPlansService: SaasPlansService,
     private readonly stripeService: StripeService,
+    private readonly tenantProvisioningService: TenantProvisioningService,
   ) {}
 
   async start(dto: StartSignupDto): Promise<StartSignupResponse> {
@@ -93,14 +95,25 @@ export class SignupService {
   }
 
   /**
-   * Builds the Stripe subscription Checkout Session from whatever the
-   * plan's currently-active SaasPlanPrice says (never a client-supplied
-   * amount) and stamps the resulting session id back onto the
-   * SignupSession — the pairing SubscriptionsService.handleCheckoutCompleted
-   * relies on to find its way back here (alongside the metadata token,
-   * belt-and-suspenders).
+   * Free Trial stage: if the plan's active price has a free trial
+   * (trialDays > 0), Stripe is never involved at all — no Checkout
+   * Session, no Customer, no card collected or charged. The tenant is
+   * provisioned directly and synchronously right here (see
+   * TenantProvisioningService.provisionTrialFromSignupSession), and
+   * `url: null` tells the frontend to go straight to the success page
+   * instead of redirecting to Stripe — that page's existing status
+   * polling (getStatus, below) already handles a synchronously-COMPLETED
+   * session correctly, no different from the webhook-driven path's
+   * eventual consistency.
+   *
+   * Otherwise (no trial), builds the Stripe subscription Checkout Session
+   * from whatever the plan's currently-active SaasPlanPrice says (never a
+   * client-supplied amount) and stamps the resulting session id back onto
+   * the SignupSession — the pairing SubscriptionsService.
+   * handleCheckoutCompleted relies on to find its way back here (alongside
+   * the metadata token, belt-and-suspenders).
    */
-  async createCheckout(token: string, dto: SignupCheckoutDto): Promise<{ url: string }> {
+  async createCheckout(token: string, dto: SignupCheckoutDto): Promise<SignupCheckoutResponse> {
     const session = await this.requireEditableSession(token);
     if (!session.ownerEmail || !session.ownerPasswordHash) {
       throw new BadRequestException('Complete the owner account step first');
@@ -118,6 +131,11 @@ export class SignupService {
       throw new BadRequestException('This plan does not have active pricing configured yet — please contact us');
     }
 
+    if (price.trialDays > 0) {
+      await this.tenantProvisioningService.provisionTrialFromSignupSession(session.id, price.trialDays);
+      return { url: null };
+    }
+
     // Same isPromoActive/effectivePrice util SaasPlansService uses for
     // display and TenantProvisioningService uses for redemption counting —
     // see that function's own doc comment for why this must never be
@@ -125,7 +143,7 @@ export class SignupService {
     const effective = effectivePrice(price);
 
     const checkoutSession = await this.stripeService.createSubscriptionCheckoutSession({
-      signupSessionToken: session.token,
+      metadata: { signupSessionToken: session.token },
       customerEmail: session.ownerEmail,
       planName: plan.name,
       currency: price.currency,

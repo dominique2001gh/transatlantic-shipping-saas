@@ -2019,8 +2019,14 @@ model TenantSubscription {
   id       String @id @default(cuid())
   tenantId String @unique
 
-  stripeCustomerId     String
-  stripeSubscriptionId String             @unique
+  /// Both nullable: a trial tenant (see provisionTrialFromSignupSession)
+  /// has no Stripe relationship at all until they explicitly activate
+  /// paid billing (see activateTrialSubscription) — Stripe is never
+  /// contacted, and no card is ever collected or charged, for the
+  /// duration of the trial. A unique column allows any number of NULLs
+  /// in Postgres, so multiple simultaneous trial tenants are safe.
+  stripeCustomerId     String?
+  stripeSubscriptionId String?            @unique
   planId               String
   /// Which specific SaasPlanPrice row (standard or promo) this tenant
   /// actually signed up under — an audit trail distinct from `planId`

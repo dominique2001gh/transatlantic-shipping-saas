@@ -72,6 +72,11 @@ export function createBillingPortalSession(returnUrl: string): Promise<{ url: st
   return authedFetch('/onboarding/billing/portal-session', { method: 'POST', body: JSON.stringify({ returnUrl }) });
 }
 
+/** Free Trial stage: the "Activate Paid Billing" action — the only time a trial tenant's own browser ever talks to Stripe. */
+export function startPaidSubscription(successUrl: string, cancelUrl: string): Promise<{ url: string }> {
+  return authedFetch('/onboarding/billing/subscribe', { method: 'POST', body: JSON.stringify({ successUrl, cancelUrl }) });
+}
+
 export function finishOnboarding(): Promise<TenantOnboardingSummary> {
   return authedFetch('/onboarding/finish', { method: 'POST' });
 }

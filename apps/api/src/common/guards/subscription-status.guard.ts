@@ -65,12 +65,29 @@ export class SubscriptionStatusGuard implements CanActivate {
    * comment for why Phase 1 checks this on-request instead of via cron.
    * CANCELED is treated the same as SUSPENDED for access purposes — a
    * canceled subscription has no active billing relationship either.
+   *
+   * Free Trial stage: a TRIALING subscription past its own `trialEndsAt`
+   * is lazily flipped to SUSPENDED the exact same way — this is the
+   * server-side enforcement that a trial genuinely ends after its
+   * `trialDays`, whether or not the tenant ever activates paid billing.
+   * Reaching this branch requires no card and no Stripe relationship to
+   * have ever existed (see TenantProvisioningService.
+   * provisionTrialFromSignupSession); the only way out of SUSPENDED here
+   * is the same @AllowWhenSuspended()-gated billing-activation route a
+   * PAST_DUE tenant already uses to recover.
    */
-  private async resolveIsSuspended(subscription: { id: string; status: SubscriptionStatus; gracePeriodEndsAt: Date | null }): Promise<boolean> {
+  private async resolveIsSuspended(subscription: { id: string; status: SubscriptionStatus; gracePeriodEndsAt: Date | null; trialEndsAt: Date | null }): Promise<boolean> {
     if (subscription.status === SubscriptionStatus.SUSPENDED || subscription.status === SubscriptionStatus.CANCELED) {
       return true;
     }
     if (subscription.status === SubscriptionStatus.PAST_DUE && subscription.gracePeriodEndsAt && subscription.gracePeriodEndsAt < new Date()) {
+      await this.prisma.tenantSubscription.update({
+        where: { id: subscription.id },
+        data: { status: SubscriptionStatus.SUSPENDED },
+      });
+      return true;
+    }
+    if (subscription.status === SubscriptionStatus.TRIALING && subscription.trialEndsAt && subscription.trialEndsAt < new Date()) {
       await this.prisma.tenantSubscription.update({
         where: { id: subscription.id },
         data: { status: SubscriptionStatus.SUSPENDED },

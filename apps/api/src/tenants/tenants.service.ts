@@ -102,12 +102,33 @@ export class TenantsService {
   }
 
   /** Used by tenant staff to fetch only their own tenant (GET /tenants/me). */
+  /**
+   * Free Trial stage: also carries a minimal, non-sensitive subscription
+   * summary (status/trialEndsAt/planName only — never Stripe IDs) so the
+   * dashboard's persistent trial banner can render for *any* authenticated
+   * role (this endpoint is @AnyAuthenticatedRole() + @AllowWhenSuspended())
+   * without needing the ONBOARDING_ROLES-gated GET /onboarding at all.
+   */
   async findOwnTenant(tenantId: string) {
-    const tenant = await this.prisma.tenant.findUnique({ where: { id: tenantId } });
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id: tenantId },
+      include: { subscription: { include: { plan: true } } },
+    });
     if (!tenant) {
       throw new NotFoundException('Tenant not found');
     }
-    return tenant;
+    const { subscription, ...rest } = tenant;
+    return {
+      ...rest,
+      subscription: subscription
+        ? {
+            status: subscription.status,
+            trialEndsAt: subscription.trialEndsAt,
+            planName: subscription.plan.name,
+            setupFeeStatus: subscription.setupFeeStatus,
+          }
+        : null,
+    };
   }
 
   /**

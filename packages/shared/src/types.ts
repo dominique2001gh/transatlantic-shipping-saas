@@ -1401,7 +1401,16 @@ export interface SignupCheckoutRequest {
 }
 
 export interface SignupCheckoutResponse {
-  url: string;
+  /**
+   * Null when the selected plan's active price has a free trial — no
+   * Stripe involvement at all for a trial signup (see SignupService.
+   * createCheckout's own doc comment), so there is no Checkout URL to
+   * redirect to. The tenant is already provisioned by the time this
+   * response returns; the frontend should go straight to the signup
+   * success page, whose existing status-polling already handles a
+   * synchronously-COMPLETED session correctly.
+   */
+  url: string | null;
 }
 
 /**

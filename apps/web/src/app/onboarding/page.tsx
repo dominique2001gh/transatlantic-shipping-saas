@@ -16,6 +16,7 @@ import {
   finishOnboarding,
   getOnboardingOverview,
   inviteStaff,
+  startPaidSubscription,
   updateBranding,
   updateNotifications,
   updateOperations,
@@ -338,7 +339,13 @@ function NotificationsStep({ submitting, onSubmit }: { submitting: boolean; onSu
 
 function BillingStep({ overview, submitting, onFinish }: { overview: OnboardingOverview; submitting: boolean; onFinish: () => void }) {
   const [portalLoading, setPortalLoading] = useState(false);
+  const [activateLoading, setActivateLoading] = useState(false);
+  const [activateError, setActivateError] = useState<string | null>(null);
   const sub = overview.subscription;
+  const isTrialing = sub?.status === 'TRIALING';
+  const trialDaysRemaining = sub?.trialEndsAt
+    ? Math.max(0, Math.ceil((new Date(sub.trialEndsAt).getTime() - Date.now()) / (24 * 60 * 60 * 1000)))
+    : null;
 
   async function openBillingPortal() {
     setPortalLoading(true);
@@ -350,17 +357,37 @@ function BillingStep({ overview, submitting, onFinish }: { overview: OnboardingO
     }
   }
 
+  async function activateBilling() {
+    setActivateError(null);
+    setActivateLoading(true);
+    try {
+      const { url } = await startPaidSubscription(window.location.href, window.location.href);
+      window.location.href = url;
+    } catch (err) {
+      setActivateError(err instanceof ApiError ? err.message : 'Could not start checkout — please try again.');
+      setActivateLoading(false);
+    }
+  }
+
   return (
     <StepCard title="Billing" description="Your current plan and subscription status.">
       {sub ? (
         <div className="flex flex-col gap-2 text-sm text-slate-700">
           <p>
             <span className="font-semibold">Plan:</span> {sub.planName}
+            {isTrialing && <span className="ml-1 font-semibold text-accent-600">— Free Trial</span>}
           </p>
           <p>
             <span className="font-semibold">Status:</span> {sub.status}
           </p>
-          {sub.currentPeriodEnd && (
+          {isTrialing && sub.trialEndsAt && (
+            <p className="rounded-lg bg-accent-500/10 px-3 py-2 text-accent-700">
+              Your free trial {trialDaysRemaining === 0 ? 'ends today' : `ends in ${trialDaysRemaining} day${trialDaysRemaining === 1 ? '' : 's'}`} (
+              {new Date(sub.trialEndsAt).toLocaleDateString()}). Activate paid billing any time to continue without interruption — you
+              won&apos;t be charged until you do.
+            </p>
+          )}
+          {!isTrialing && sub.currentPeriodEnd && (
             <p>
               <span className="font-semibold">Next billing date:</span> {new Date(sub.currentPeriodEnd).toLocaleDateString()}
             </p>
@@ -369,9 +396,18 @@ function BillingStep({ overview, submitting, onFinish }: { overview: OnboardingO
       ) : (
         <p className="text-sm text-slate-500">No billing account on file.</p>
       )}
-      <Button onClick={openBillingPortal} disabled={portalLoading} variant="secondary" className="mt-4 justify-center">
-        {portalLoading ? 'Opening…' : 'Manage Billing'}
-      </Button>
+      {activateError && <p className="mt-3 text-sm text-red-600">{activateError}</p>}
+      {isTrialing ? (
+        <Button onClick={activateBilling} disabled={activateLoading} variant="secondary" className="mt-4 justify-center">
+          {activateLoading ? 'Redirecting…' : 'Activate Paid Billing'}
+        </Button>
+      ) : (
+        sub && (
+          <Button onClick={openBillingPortal} disabled={portalLoading} variant="secondary" className="mt-4 justify-center">
+            {portalLoading ? 'Opening…' : 'Manage Billing'}
+          </Button>
+        )
+      )}
       <Button onClick={onFinish} disabled={submitting} className="mt-3 justify-center">
         {submitting ? 'Finishing…' : 'Finish Setup'}
       </Button>

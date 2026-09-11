@@ -188,12 +188,19 @@ function PlanCard({ plan }: { plan: SaasPlanSummary }) {
             {plan.price.isPromoCurrentlyActive && plan.price.effectiveSetupFeeCents !== plan.price.setupFeeCents && (
               <span className="text-slate-400 line-through"> ({formatCents(plan.price.setupFeeCents, plan.price.currency)})</span>
             )}
+            {plan.price.trialDays > 0 && ' after your free trial'}
           </p>
           {plan.price.trialDays > 0 && (
-            <p className="mt-1 flex items-center gap-1.5 text-xs font-medium text-accent-600">
-              <IconCheckCircle className="h-4 w-4" />
-              {plan.price.trialDays}-day free trial
-            </p>
+            <>
+              <p className="mt-1 flex items-center gap-1.5 text-xs font-medium text-accent-600">
+                <IconCheckCircle className="h-4 w-4" />
+                {plan.price.trialDays}-Day Free Trial
+              </p>
+              <p className="mt-1 flex items-center gap-1.5 text-xs text-slate-500">
+                <IconCheckCircle className="h-4 w-4 text-accent-600" />
+                No credit card required
+              </p>
+            </>
           )}
         </div>
       ) : (

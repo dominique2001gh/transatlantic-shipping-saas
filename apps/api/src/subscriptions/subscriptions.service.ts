@@ -58,17 +58,46 @@ export class SubscriptionsService {
   ) {}
 
   /**
-   * A subscription-mode Checkout Session completed. Resolves back to the
-   * SignupSession that staged this signup via `metadata.signupSessionToken`
-   * (falling back to stripeCheckoutSessionId, set by SignupService right
-   * after creating the session) and hands off to
-   * TenantProvisioningService — this method owns nothing about *how* a
-   * tenant gets created, only *finding the right SignupSession* and
-   * fetching the setup-fee amount actually configured at signup time.
+   * A subscription-mode Checkout Session completed. Branches on which
+   * metadata key is present — the only two ways this app ever creates a
+   * `mode: 'subscription'` Checkout Session:
+   *
+   *  - `metadata.activateTenantId` — an *existing* trial (or trial-
+   *    expired) tenant activating real, paid billing (see
+   *    OnboardingService.startPaidSubscription). Updates that tenant's
+   *    existing TenantSubscription row in place — never creates a new
+   *    Tenant. Checked first since it's the narrower, unambiguous case.
+   *  - `metadata.signupSessionToken` (or falling back to
+   *    stripeCheckoutSessionId) — a brand-new, non-trial signup. Hands off
+   *    to TenantProvisioningService.provisionFromSignupSession exactly as
+   *    before.
+   *
+   * A trial signup (Free Trial stage) never reaches this handler at all —
+   * SignupService.createCheckout provisions it directly, with no Stripe
+   * Checkout Session ever created for it.
    */
   async handleCheckoutCompleted(session: Stripe.Checkout.Session): Promise<void> {
     if (!session.subscription) {
       this.logger.warn(`Subscription-mode checkout ${session.id} completed with no subscription id — ignoring`);
+      return;
+    }
+
+    const subscriptionId = typeof session.subscription === 'string' ? session.subscription : session.subscription.id;
+    const stripeSubscription = await this.stripeService.retrieveSubscription(subscriptionId);
+
+    const activateTenantId = session.metadata?.activateTenantId;
+    if (activateTenantId) {
+      const tenant = await this.prisma.tenant.findUnique({ where: { id: activateTenantId }, include: { subscription: { include: { plan: { include: { prices: true } } } } } });
+      if (!tenant?.subscription) {
+        this.logger.warn(`Activation checkout ${session.id} completed for tenant ${activateTenantId} but no TenantSubscription row was found — ignoring`);
+        return;
+      }
+      const activePrice = tenant.subscription.plan.prices.find((p) => p.isActive);
+      const effective = activePrice ? effectivePrice(activePrice) : { isPromoActive: false };
+      await this.tenantProvisioningService.activateTrialSubscription(activateTenantId, stripeSubscription, {
+        priceId: activePrice?.id,
+        isPromoRedemption: effective.isPromoActive,
+      });
       return;
     }
 
@@ -84,9 +113,6 @@ export class SubscriptionsService {
       this.logger.warn(`Checkout session ${session.id} completed but no matching SignupSession was found — ignoring`);
       return;
     }
-
-    const subscriptionId = typeof session.subscription === 'string' ? session.subscription : session.subscription.id;
-    const stripeSubscription = await this.stripeService.retrieveSubscription(subscriptionId);
 
     // Same effectivePrice() util SaasPlansService/SignupService use — the
     // setup fee actually charged (and whether this counts as a promo

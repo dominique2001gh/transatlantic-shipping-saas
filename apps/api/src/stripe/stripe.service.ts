@@ -6,10 +6,20 @@ import Stripe from 'stripe';
  * Stage 3F: the only place the `stripe` SDK/API surface is touched
  * directly — every other service talks to this wrapper, never to Stripe
  * itself, the same delegation principle TrackingService/InvoicesService
- * already establish for their own single-owner concerns. `STRIPE_SECRET_KEY`
- * is read once at construction via `getOrThrow` — a missing key fails
- * fast at boot (module init), not on the first customer's checkout
- * attempt.
+ * already establish for their own single-owner concerns.
+ *
+ * `PLATFORM_STRIPE_SECRET_KEY`/`PLATFORM_STRIPE_WEBHOOK_SECRET` name this
+ * explicitly as AnanseLogix's own platform account — the one that bills
+ * every tenant's SaaS subscription (createSubscriptionCheckoutSession,
+ * retrieveSubscription, createBillingPortalSession) — as distinct from a
+ * tenant's own customer-invoice payments (see
+ * TenantPaymentsStripeService, which reuses this same client rather than
+ * a separate key: Stripe Connect makes every call, platform or connected,
+ * with the platform's own secret key, adding only a `Stripe-Account`
+ * request option for a connected tenant — there is no parallel "tenant"
+ * secret key to configure). Read once at construction via `getOrThrow` —
+ * a missing key fails fast at boot (module init), not on the first
+ * customer's checkout attempt.
  */
 @Injectable()
 export class StripeService {
@@ -17,7 +27,7 @@ export class StripeService {
   readonly client: Stripe;
 
   constructor(private readonly config: ConfigService) {
-    const secretKey = this.config.getOrThrow<string>('STRIPE_SECRET_KEY');
+    const secretKey = this.config.getOrThrow<string>('PLATFORM_STRIPE_SECRET_KEY');
     this.client = new Stripe(secretKey);
   }
 
@@ -89,16 +99,19 @@ export class StripeService {
    * natively supports mixing one non-recurring price with a recurring one
    * in a single subscription-mode session.
    *
-   * `metadata.signupSessionToken` is how the webhook handler
-   * (SubscriptionsService.handleCheckoutCompleted) finds its way back to
-   * the SignupSession row that staged this signup — the same
-   * "metadata for traceability, never for authorization" posture
-   * createCheckoutSession's own doc comment establishes (the authoritative
-   * link is SignupSession.stripeCheckoutSessionId, set by the caller
-   * immediately after this returns).
+   * `metadata` is how the webhook handler (SubscriptionsService.
+   * handleCheckoutCompleted) finds its way back to what this session is
+   * for — the same "metadata for traceability, never for authorization"
+   * posture createCheckoutSession's own doc comment establishes. Two
+   * distinct callers use this today: a brand-new signup (`{
+   * signupSessionToken }`, the authoritative link is also
+   * SignupSession.stripeCheckoutSessionId, set by the caller immediately
+   * after this returns) and an existing trial tenant activating paid
+   * billing (`{ activateTenantId }`) — see handleCheckoutCompleted's own
+   * doc comment for how it branches on which key is present.
    */
   async createSubscriptionCheckoutSession(params: {
-    signupSessionToken: string;
+    metadata: Record<string, string>;
     customerEmail: string;
     planName: string;
     currency: string;
@@ -135,7 +148,7 @@ export class StripeService {
       customer_email: params.customerEmail,
       line_items: lineItems,
       subscription_data: params.trialDays > 0 ? { trial_period_days: params.trialDays } : undefined,
-      metadata: { signupSessionToken: params.signupSessionToken },
+      metadata: params.metadata,
       success_url: params.successUrl,
       cancel_url: params.cancelUrl,
     });
@@ -167,17 +180,17 @@ export class StripeService {
   }
 
   /**
-   * Verifies a webhook payload's signature against `STRIPE_WEBHOOK_SECRET`
-   * and returns the parsed event. This is the entire security boundary
-   * for the unauthenticated /webhooks/stripe route — throws on any
-   * mismatch (wrong secret, tampered payload, expired timestamp), which
-   * the controller turns into a 400. Must be called with the *raw*
-   * request body bytes (see main.ts's `rawBody: true`); a JSON-parsed and
-   * reserialized body cannot reproduce the signature Stripe computed over
-   * what it actually sent.
+   * Verifies a webhook payload's signature against
+   * `PLATFORM_STRIPE_WEBHOOK_SECRET` and returns the parsed event. This is
+   * the entire security boundary for the unauthenticated /webhooks/stripe
+   * route — throws on any mismatch (wrong secret, tampered payload,
+   * expired timestamp), which the controller turns into a 400. Must be
+   * called with the *raw* request body bytes (see main.ts's
+   * `rawBody: true`); a JSON-parsed and reserialized body cannot reproduce
+   * the signature Stripe computed over what it actually sent.
    */
   constructWebhookEvent(rawBody: Buffer, signature: string): Stripe.Event {
-    const webhookSecret = this.config.getOrThrow<string>('STRIPE_WEBHOOK_SECRET');
+    const webhookSecret = this.config.getOrThrow<string>('PLATFORM_STRIPE_WEBHOOK_SECRET');
     return this.client.webhooks.constructEvent(rawBody, signature, webhookSecret);
   }
 }
