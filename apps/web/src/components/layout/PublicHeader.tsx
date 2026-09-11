@@ -169,7 +169,8 @@ export function PublicHeader() {
                 <div>
                   <p className="text-xs text-slate-500">Our Location</p>
                   <p className="font-semibold text-slate-900">
-                    {siteConfig.locations[0].city}, {siteConfig.locations[0].region}
+                    {siteConfig.locations[0].streetAddress}, {siteConfig.locations[0].city}, {siteConfig.locations[0].region}{' '}
+                    {siteConfig.locations[0].postalCode}
                   </p>
                 </div>
               </div>

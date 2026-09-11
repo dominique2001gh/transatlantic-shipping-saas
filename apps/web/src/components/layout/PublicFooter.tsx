@@ -93,7 +93,7 @@ export function PublicFooter() {
               {siteConfig.locations.map((location) => (
                 <span key={location.label} className="flex items-center gap-2">
                   <IconMapPin className="h-4 w-4 shrink-0" />
-                  {location.label} — {location.city}, {location.region}
+                  {location.streetAddress}, {location.city}, {location.region} {location.postalCode}
                 </span>
               ))}
             </div>

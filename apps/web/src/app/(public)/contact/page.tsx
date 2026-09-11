@@ -53,7 +53,11 @@ export default function ContactPage() {
                   </span>
                   <h3 className="mt-4 font-display text-base font-semibold text-slate-900">{location.label}</h3>
                   <p className="mt-1 text-sm text-slate-600">
-                    {location.city}, {location.region}, {location.country}
+                    {location.streetAddress}
+                    <br />
+                    {location.city}, {location.region} {location.postalCode}
+                    <br />
+                    {location.country}
                   </p>
                 </div>
               ))}

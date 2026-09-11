@@ -21,8 +21,10 @@ export interface SiteContact {
 
 export interface SiteLocation {
   label: string;
+  streetAddress: string;
   city: string;
   region: string;
+  postalCode: string;
   country: string;
 }
 
@@ -63,10 +65,20 @@ export const siteConfig = {
     phone: '+1 (214) 493-7745',
     phoneHref: '+12144937745',
   } as SiteContact,
-  // Operational location on file, not necessarily a public-facing HQ
-  // address — shown as a location, not billed as company headquarters.
+  // The company's real, public business/contact address — shown on the
+  // Contact page, header, and footer. Deliberately separate from any
+  // Warehouse DB record's operational address (see Warehouse model in
+  // schema.prisma) — updating this never touches warehouse codes,
+  // shipment origin/destination data, or any operational location.
   locations: [
-    { label: 'Origin Warehouse', city: 'Dallas-Fort Worth', region: 'TX', country: 'United States' },
+    {
+      label: 'Address',
+      streetAddress: '4564 J D Mouser Pkwy Ste 108',
+      city: 'Alvarado',
+      region: 'TX',
+      postalCode: '76009',
+      country: 'United States',
+    },
   ] as SiteLocation[],
   socialLinks: {
     facebook: null,
