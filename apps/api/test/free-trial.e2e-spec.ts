@@ -35,10 +35,10 @@ describe('AnanseLogix Free Trial (e2e)', () => {
   beforeAll(async () => {
     app = await createTestApp();
 
-    const secretKey = process.env.PLATFORM_STRIPE_SECRET_KEY;
-    webhookSecret = process.env.PLATFORM_STRIPE_WEBHOOK_SECRET ?? '';
+    const secretKey = process.env.STRIPE_SECRET_KEY;
+    webhookSecret = process.env.STRIPE_WEBHOOK_SECRET ?? '';
     if (!secretKey || !webhookSecret) {
-      throw new Error('PLATFORM_STRIPE_SECRET_KEY and PLATFORM_STRIPE_WEBHOOK_SECRET must be configured in apps/api/.env to run this suite.');
+      throw new Error('STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET must be configured in apps/api/.env to run this suite.');
     }
     stripe = new Stripe(secretKey);
 

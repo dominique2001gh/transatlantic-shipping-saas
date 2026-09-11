@@ -6,20 +6,10 @@ import Stripe from 'stripe';
  * Stage 3F: the only place the `stripe` SDK/API surface is touched
  * directly — every other service talks to this wrapper, never to Stripe
  * itself, the same delegation principle TrackingService/InvoicesService
- * already establish for their own single-owner concerns.
- *
- * `PLATFORM_STRIPE_SECRET_KEY`/`PLATFORM_STRIPE_WEBHOOK_SECRET` name this
- * explicitly as AnanseLogix's own platform account — the one that bills
- * every tenant's SaaS subscription (createSubscriptionCheckoutSession,
- * retrieveSubscription, createBillingPortalSession) — as distinct from a
- * tenant's own customer-invoice payments (see
- * TenantPaymentsStripeService, which reuses this same client rather than
- * a separate key: Stripe Connect makes every call, platform or connected,
- * with the platform's own secret key, adding only a `Stripe-Account`
- * request option for a connected tenant — there is no parallel "tenant"
- * secret key to configure). Read once at construction via `getOrThrow` —
- * a missing key fails fast at boot (module init), not on the first
- * customer's checkout attempt.
+ * already establish for their own single-owner concerns. `STRIPE_SECRET_KEY`
+ * is read once at construction via `getOrThrow` — a missing key fails
+ * fast at boot (module init), not on the first customer's checkout
+ * attempt.
  */
 @Injectable()
 export class StripeService {
@@ -27,7 +17,7 @@ export class StripeService {
   readonly client: Stripe;
 
   constructor(private readonly config: ConfigService) {
-    const secretKey = this.config.getOrThrow<string>('PLATFORM_STRIPE_SECRET_KEY');
+    const secretKey = this.config.getOrThrow<string>('STRIPE_SECRET_KEY');
     this.client = new Stripe(secretKey);
   }
 
@@ -181,7 +171,7 @@ export class StripeService {
 
   /**
    * Verifies a webhook payload's signature against
-   * `PLATFORM_STRIPE_WEBHOOK_SECRET` and returns the parsed event. This is
+   * `STRIPE_WEBHOOK_SECRET` and returns the parsed event. This is
    * the entire security boundary for the unauthenticated /webhooks/stripe
    * route — throws on any mismatch (wrong secret, tampered payload,
    * expired timestamp), which the controller turns into a 400. Must be
@@ -190,7 +180,7 @@ export class StripeService {
    * the signature Stripe computed over what it actually sent.
    */
   constructWebhookEvent(rawBody: Buffer, signature: string): Stripe.Event {
-    const webhookSecret = this.config.getOrThrow<string>('PLATFORM_STRIPE_WEBHOOK_SECRET');
+    const webhookSecret = this.config.getOrThrow<string>('STRIPE_WEBHOOK_SECRET');
     return this.client.webhooks.constructEvent(rawBody, signature, webhookSecret);
   }
 }
