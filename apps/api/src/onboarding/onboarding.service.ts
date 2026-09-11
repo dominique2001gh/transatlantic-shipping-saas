@@ -1,21 +1,15 @@
-import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { OnboardingStep } from '@prisma/client';
 import type { TenantOnboardingSummary } from '@transatlantic/shared';
-import { generateToken } from '../common/token/token.util';
-import { staffInvitationEmail } from '../notifications/templates/platform-emails';
-import { EMAIL_PROVIDER } from '../notifications/providers/provider.types';
-import type { EmailProvider } from '../notifications/providers/provider.types';
 import { PrismaService } from '../prisma/prisma.service';
+import { InviteStaffDto } from '../staff-invitations/dto/invite-staff.dto';
+import { StaffInvitationsService } from '../staff-invitations/staff-invitations.service';
 import { StripeService } from '../stripe/stripe.service';
 import { BillingPortalDto } from './dto/billing-portal.dto';
-import { InviteStaffDto } from './dto/invite-staff.dto';
 import { UpdateBrandingDto } from './dto/update-branding.dto';
 import { UpdateNotificationsDto } from './dto/update-notifications.dto';
 import { UpdateOperationsDto } from './dto/update-operations.dto';
 import { UpdateTrackingDto } from './dto/update-tracking.dto';
-
-const INVITATION_TTL_DAYS = 7;
 
 /**
  * AnanseLogix Phase 1: drives a newly-provisioned tenant through the
@@ -29,13 +23,10 @@ const INVITATION_TTL_DAYS = 7;
  */
 @Injectable()
 export class OnboardingService {
-  private readonly logger = new Logger(OnboardingService.name);
-
   constructor(
     private readonly prisma: PrismaService,
     private readonly stripeService: StripeService,
-    private readonly config: ConfigService,
-    @Inject(EMAIL_PROVIDER) private readonly emailProvider: EmailProvider,
+    private readonly staffInvitationsService: StaffInvitationsService,
   ) {}
 
   async getOverview(tenantId: string) {
@@ -43,7 +34,7 @@ export class OnboardingService {
       this.prisma.tenant.findUniqueOrThrow({ where: { id: tenantId } }),
       this.requireOnboarding(tenantId),
       this.prisma.warehouse.findMany({ where: { tenantId }, orderBy: { createdAt: 'asc' } }),
-      this.prisma.tenantInvitation.findMany({ where: { tenantId }, orderBy: { createdAt: 'desc' } }),
+      this.staffInvitationsService.listForTenant(tenantId),
       this.prisma.tenantSubscription.findUnique({ where: { tenantId }, include: { plan: true } }),
     ]);
 
@@ -59,14 +50,7 @@ export class OnboardingService {
       },
       onboarding: this.toSummary(onboarding),
       warehouses: warehouses.map((w) => ({ id: w.id, name: w.name, code: w.code, isOriginWarehouse: w.isOriginWarehouse, isDestinationWarehouse: w.isDestinationWarehouse })),
-      invitations: invitations.map((i) => ({
-        id: i.id,
-        email: i.email,
-        role: i.role,
-        status: i.status,
-        expiresAt: i.expiresAt.toISOString(),
-        createdAt: i.createdAt.toISOString(),
-      })),
+      invitations,
       subscription: subscription
         ? {
             tenantId,
@@ -128,51 +112,22 @@ export class OnboardingService {
   }
 
   /**
-   * Creates a TenantInvitation and best-effort emails it — accepting one
-   * (a separate, later endpoint outside onboarding's own scope, reusing
-   * the existing account-creation path) is what actually creates the
-   * User row; this never creates a User directly.
+   * Staff Invitations stage: delegates the actual invitation creation to
+   * StaffInvitationsService — the same code path the permanent staff-
+   * management page uses (see that service's own doc comment) — and
+   * layers on this wizard's own onboarding-progress bookkeeping
+   * (staffInvitedAt) on top. Never creates a User directly; accepting the
+   * invitation is what does that.
    */
   async inviteStaff(tenantId: string, invitedByUserId: string, invitedByName: string, dto: InviteStaffDto) {
-    const tenant = await this.prisma.tenant.findUniqueOrThrow({ where: { id: tenantId } });
-    const invitation = await this.prisma.tenantInvitation.create({
-      data: {
-        tenantId,
-        email: dto.email.toLowerCase().trim(),
-        role: dto.role,
-        token: generateToken(),
-        invitedByUserId,
-        expiresAt: new Date(Date.now() + INVITATION_TTL_DAYS * 24 * 60 * 60 * 1000),
-      },
-    });
-
-    try {
-      const webAppUrl = this.config.get<string>('WEB_APP_URL', 'http://localhost:3000');
-      const email = staffInvitationEmail({
-        inviteeEmail: invitation.email,
-        tenantName: tenant.name,
-        inviterName: invitedByName,
-        acceptUrl: `${webAppUrl.replace(/\/$/, '')}/accept-invite?token=${invitation.token}`,
-        expiresAt: invitation.expiresAt,
-      });
-      await this.emailProvider.send({ to: invitation.email, subject: email.subject, body: email.body });
-    } catch (err) {
-      this.logger.error(`Failed to send staff invitation email for tenant ${tenantId}: ${err}`);
-    }
+    const invitation = await this.staffInvitationsService.invite(tenantId, invitedByUserId, invitedByName, dto);
 
     const onboarding = await this.requireOnboarding(tenantId);
     if (!onboarding.staffInvitedAt) {
       await this.prisma.tenantOnboarding.update({ where: { tenantId }, data: { staffInvitedAt: new Date() } });
     }
 
-    return {
-      id: invitation.id,
-      email: invitation.email,
-      role: invitation.role,
-      status: invitation.status,
-      expiresAt: invitation.expiresAt.toISOString(),
-      createdAt: invitation.createdAt.toISOString(),
-    };
+    return invitation;
   }
 
   /** Advances past the Staff step even with zero invitations sent — inviting staff during onboarding is optional, not mandatory. */

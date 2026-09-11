@@ -1486,9 +1486,23 @@ export interface PlatformTenantListItem {
   onboardingCompleted: boolean;
 }
 
+/** GET /users/staff — matches UsersService.findStaffForTenant's select shape exactly. */
+export interface StaffMemberSummary {
+  id: string;
+  email: string;
+  firstName: string;
+  lastName: string;
+  role: UserRole;
+  isActive: boolean;
+  lastLoginAt: string | null;
+  createdAt: string;
+}
+
 export interface TenantInvitationSummary {
   id: string;
   email: string;
+  firstName: string;
+  lastName: string;
   role: UserRole;
   status: TenantInvitationStatus;
   expiresAt: string;
@@ -1496,8 +1510,20 @@ export interface TenantInvitationSummary {
 }
 
 export interface CreateTenantInvitationRequest {
+  firstName: string;
+  lastName: string;
   email: string;
   role: UserRole;
+}
+
+/** GET /auth/accept-invite/:token — lets the acceptance page show who/where before rendering the password form, or a clear invalid/expired message if not. */
+export interface AcceptInvitePreview {
+  valid: boolean;
+  email?: string;
+  firstName?: string;
+  lastName?: string;
+  tenantName?: string;
+  reason?: 'not_found' | 'expired' | 'already_used';
 }
 
 export interface AiAgentAskRequest {

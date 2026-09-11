@@ -2104,15 +2104,26 @@ model TenantOnboarding {
 }
 
 /// An outstanding invitation for someone to join a tenant's staff, created
-/// from the onboarding wizard's Staff step (or later from tenant settings).
-/// Accepting one creates a real User row through the existing account-
-/// creation path — this table never bypasses that.
+/// from the onboarding wizard's Staff step or the permanent staff
+/// management page (Staff Invitations stage). Accepting one creates a
+/// real User row through the existing account-creation path — this table
+/// never bypasses that. `firstName`/`lastName` are entered by the
+/// inviter (owner/admin) — the employee never re-types their own name at
+/// accept time, only sets a password.
+///
+/// `tokenHash` (SHA-256 of the raw token emailed to the invitee) — never
+/// the raw token itself, matching AccountToken's own reasoning exactly
+/// (a database read/leak alone can never be replayed as a valid invite
+/// link). Resending overwrites this same row's tokenHash/expiresAt in
+/// place, which is what makes the previous link stop working immediately.
 model TenantInvitation {
   id              String                 @id @default(cuid())
   tenantId        String
   email           String
+  firstName       String
+  lastName        String
   role            UserRole
-  token           String                 @unique
+  tokenHash       String                 @unique
   status          TenantInvitationStatus @default(PENDING)
   invitedByUserId String
 
@@ -2124,7 +2135,6 @@ model TenantInvitation {
   invitedByUser User   @relation(fields: [invitedByUserId], references: [id])
 
   @@index([tenantId])
-  @@index([token])
   @@map("tenant_invitations")
 }
 

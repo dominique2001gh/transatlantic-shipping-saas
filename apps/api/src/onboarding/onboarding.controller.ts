@@ -1,14 +1,14 @@
 import { Body, Controller, Get, Post } from '@nestjs/common';
 import { EntitlementFeature } from '@prisma/client';
 import type { AuthenticatedUser } from '@transatlantic/shared';
-import { ONBOARDING_ROLES } from '@transatlantic/shared';
+import { ONBOARDING_ROLES, UserRole } from '@transatlantic/shared';
 import { AllowWhenSuspended } from '../common/decorators/allow-when-suspended.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { RequireEntitlement } from '../common/decorators/require-entitlement.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { requireTenantId } from '../common/tenant/tenant.util';
+import { InviteStaffDto } from '../staff-invitations/dto/invite-staff.dto';
 import { BillingPortalDto } from './dto/billing-portal.dto';
-import { InviteStaffDto } from './dto/invite-staff.dto';
 import { UpdateBrandingDto } from './dto/update-branding.dto';
 import { UpdateNotificationsDto } from './dto/update-notifications.dto';
 import { UpdateOperationsDto } from './dto/update-operations.dto';
@@ -43,7 +43,16 @@ export class OnboardingController {
     return this.onboardingService.updateOperations(requireTenantId(user.tenantId), dto);
   }
 
+  /**
+   * Staff Invitations stage: overrides the class-level ONBOARDING_ROLES
+   * (TENANT_OWNER/TENANT_ADMIN) for this one route only — inviting staff
+   * is scoped to TENANT_OWNER/WAREHOUSE_MANAGER specifically, matching
+   * the same rule the permanent staff-management page enforces (see
+   * UsersController). Every other onboarding route keeps its original
+   * ONBOARDING_ROLES gate, unchanged.
+   */
   @Post('staff/invite')
+  @Roles(UserRole.TENANT_OWNER, UserRole.WAREHOUSE_MANAGER)
   inviteStaff(@CurrentUser() user: AuthenticatedUser, @Body() dto: InviteStaffDto) {
     return this.onboardingService.inviteStaff(requireTenantId(user.tenantId), user.id, `${user.firstName} ${user.lastName}`, dto);
   }

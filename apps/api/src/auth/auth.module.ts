@@ -4,6 +4,7 @@ import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { NotificationProvidersModule } from '../notifications/providers/notification-providers.module';
+import { StaffInvitationsModule } from '../staff-invitations/staff-invitations.module';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { JwtStrategy } from './strategies/jwt.strategy';
@@ -28,6 +29,10 @@ import { JwtStrategy } from './strategies/jwt.strategy';
     // EMAIL_PROVIDER, the same token OnboardingService already injects
     // for staff invitation email.
     NotificationProvidersModule,
+    // Staff Invitations stage: AuthController's accept-invite routes
+    // delegate to StaffInvitationsService (a leaf module — no circular
+    // dependency).
+    StaffInvitationsModule,
   ],
   controllers: [AuthController],
   providers: [AuthService, JwtStrategy],

@@ -239,18 +239,29 @@ function StaffStep({
 }: {
   overview: OnboardingOverview;
   submitting: boolean;
-  onInvite: (input: { email: string; role: UserRole }) => void;
+  onInvite: (input: { firstName: string; lastName: string; email: string; role: UserRole }) => void;
   onContinue: () => void;
 }) {
   function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const form = new FormData(e.currentTarget);
-    onInvite({ email: String(form.get('email') ?? ''), role: String(form.get('role') ?? '') as UserRole });
+    onInvite({
+      firstName: String(form.get('firstName') ?? ''),
+      lastName: String(form.get('lastName') ?? ''),
+      email: String(form.get('email') ?? ''),
+      role: String(form.get('role') ?? '') as UserRole,
+    });
     e.currentTarget.reset();
   }
   return (
-    <StepCard title="Invite your team" description="Invite initial staff now, or skip and do this later.">
-      <form onSubmit={handleSubmit} className="flex flex-col gap-4 sm:flex-row sm:items-end">
+    <StepCard title="Invite your team" description="Invite initial staff now, or skip and do this later. They'll set their own password from the invitation email.">
+      <form onSubmit={handleSubmit} className="flex flex-col gap-4 sm:flex-row sm:items-end sm:flex-wrap">
+        <div className="w-full sm:w-40">
+          <TextInput label="First name" id="firstName" name="firstName" required />
+        </div>
+        <div className="w-full sm:w-40">
+          <TextInput label="Last name" id="lastName" name="lastName" required />
+        </div>
         <div className="flex-1">
           <TextInput label="Email" id="email" name="email" type="email" required />
         </div>
@@ -272,7 +283,9 @@ function StaffStep({
         <ul className="mt-6 flex flex-col gap-2 text-sm text-slate-600">
           {overview.invitations.map((inv) => (
             <li key={inv.id} className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2">
-              <span>{inv.email}</span>
+              <span>
+                {inv.firstName} {inv.lastName} &middot; {inv.email}
+              </span>
               <span className="text-xs uppercase text-slate-400">{inv.status}</span>
             </li>
           ))}

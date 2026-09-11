@@ -52,7 +52,7 @@ export function updateOperations(input: {
   return authedFetch('/onboarding/operations', { method: 'POST', body: JSON.stringify(input) });
 }
 
-export function inviteStaff(input: { email: string; role: UserRole }): Promise<TenantInvitationSummary> {
+export function inviteStaff(input: { firstName: string; lastName: string; email: string; role: UserRole }): Promise<TenantInvitationSummary> {
   return authedFetch('/onboarding/staff/invite', { method: 'POST', body: JSON.stringify(input) });
 }
 
