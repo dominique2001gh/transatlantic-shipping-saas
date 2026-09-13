@@ -5,6 +5,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import type { CustomerSummary } from '@transatlantic/shared';
 import { ShipmentItemType, ShipmentMode, WeightUnit } from '@transatlantic/shared';
 import { SelectInput, TextArea, TextInput } from '@/components/forms/FormField';
+import { SearchableSelect } from '@/components/forms/SearchableSelect';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { ApiError } from '@/lib/api';
@@ -83,20 +84,21 @@ export default function NewShipmentPage() {
       <Card className="mt-6">
         <form className="flex flex-col gap-6" onSubmit={handleSubmit} noValidate>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <SelectInput
+            <SearchableSelect
               label="Customer"
               id="customerId"
               required
+              placeholder="Search by name, customer number, email, or phone…"
+              items={customers}
               value={customerId}
-              onChange={(event) => setCustomerId(event.target.value)}
-            >
-              <option value="">Select a customer…</option>
-              {customers.map((customer) => (
-                <option key={customer.id} value={customer.id}>
-                  {customer.customerNumber} — {customer.firstName} {customer.lastName}
-                </option>
-              ))}
-            </SelectInput>
+              onChange={(id) => setCustomerId(id)}
+              getOptionId={(customer) => customer.id}
+              getOptionLabel={(customer) => `${customer.customerNumber} — ${customer.firstName} ${customer.lastName}`}
+              getOptionSearchText={(customer) =>
+                `${customer.customerNumber} ${customer.firstName} ${customer.lastName} ${customer.email} ${customer.phone ?? ''}`
+              }
+              emptyMessage="No customers match your search."
+            />
             <SelectInput
               label="Shipping method"
               id="shipmentMode"

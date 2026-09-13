@@ -1,9 +1,10 @@
 import type { InputHTMLAttributes, ReactNode, SelectHTMLAttributes, TextareaHTMLAttributes } from 'react';
 
-const fieldClasses =
+/** Exported so other field-shaped components (e.g. SearchableSelect) that aren't a plain <input>/<select>/<textarea> can still match this exact look instead of drifting their own copy of these classes. */
+export const fieldClasses =
   'mt-1.5 w-full rounded-lg border border-slate-300 px-3.5 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500';
 
-function FieldLabel({
+export function FieldLabel({
   htmlFor,
   children,
   required,
