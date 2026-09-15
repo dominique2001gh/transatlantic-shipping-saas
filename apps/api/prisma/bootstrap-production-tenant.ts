@@ -73,7 +73,7 @@ async function main() {
       passwordHash,
       firstName: 'Trans Atlantic',
       lastName: 'Team',
-      role: UserRole.TENANT_OWNER,
+      role: UserRole.OWNER,
       isActive: true,
     },
   });

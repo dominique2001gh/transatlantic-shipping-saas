@@ -33,17 +33,17 @@ describe('Destination Receive (e2e)', () => {
 
   beforeAll(async () => {
     app = await createTestApp();
-    tenantA = await createTestTenant(prisma, 'DrA', UserRole.WAREHOUSE_MANAGER);
-    tenantB = await createTestTenant(prisma, 'DrB', UserRole.WAREHOUSE_MANAGER);
-    const staffUser = await createUserInTenant(prisma, tenantA.tenantId, 'Staff', UserRole.WAREHOUSE_STAFF);
+    tenantA = await createTestTenant(prisma, 'DrA', UserRole.MANAGER);
+    tenantB = await createTestTenant(prisma, 'DrB', UserRole.MANAGER);
+    const staffUser = await createUserInTenant(prisma, tenantA.tenantId, 'Staff', UserRole.STAFF);
     const destinationAgentUser = await createUserInTenant(
       prisma,
       tenantA.tenantId,
       'DestAgent',
-      UserRole.DESTINATION_AGENT,
+      UserRole.STAFF,
     );
     const customerUser = await createUserInTenant(prisma, tenantA.tenantId, 'Cust', UserRole.CUSTOMER);
-    const accountantUser = await createUserInTenant(prisma, tenantA.tenantId, 'Acct', UserRole.ACCOUNTANT);
+    const accountantUser = await createUserInTenant(prisma, tenantA.tenantId, 'Acct', UserRole.FINANCE);
 
     tokenA = await login(app, tenantA.user.email, tenantA.user.password);
     tokenB = await login(app, tenantB.user.email, tenantB.user.password);
@@ -231,9 +231,9 @@ describe('Destination Receive (e2e)', () => {
     });
 
     describe('RBAC', () => {
-      it('rejects WAREHOUSE_STAFF, ACCOUNTANT, and CUSTOMER from arriving a manifest', async () => {
+      it('rejects FINANCE and CUSTOMER from arriving a manifest', async () => {
         const m1 = await createDepartedAirManifest(app, tokenA, tenantA, [tenantA.customerId]);
-        for (const token of [staffToken, accountantToken, customerToken]) {
+        for (const token of [accountantToken, customerToken]) {
           const res = await request(app.getHttpServer())
             .post(`/manifests/${m1.manifestId}/arrive`)
             .set('Authorization', `Bearer ${token}`)
@@ -242,7 +242,7 @@ describe('Destination Receive (e2e)', () => {
         }
       });
 
-      it('allows WAREHOUSE_MANAGER and DESTINATION_AGENT to arrive a manifest', async () => {
+      it('allows MANAGER and STAFF to arrive a manifest', async () => {
         const m1 = await createDepartedAirManifest(app, tokenA, tenantA, [tenantA.customerId]);
         const res1 = await request(app.getHttpServer())
           .post(`/manifests/${m1.manifestId}/arrive`)
@@ -309,7 +309,15 @@ describe('Destination Receive (e2e)', () => {
     });
 
     describe('RBAC', () => {
-      it('allows WAREHOUSE_STAFF to open but not close; WAREHOUSE_MANAGER can do both', async () => {
+      /**
+       * RBAC V1: open and close are both OPERATIONS_ROLES (OWNER/MANAGER/
+       * STAFF) — STAFF (the merged successor of both the old
+       * WAREHOUSE_STAFF and DESTINATION_AGENT roles) can do both now. The
+       * old open-yes/close-no split for plain WAREHOUSE_STAFF existed only
+       * because DESTINATION_AGENT was a separate, narrower role that alone
+       * could close; both collapse into STAFF now.
+       */
+      it('allows STAFF and MANAGER to both open and close', async () => {
         const manifest = await createArrivedOceanManifest(app, tokenA, tenantA, 1);
         const openRes = await request(app.getHttpServer())
           .post(`/containers/${manifest.containerId}/open`)
@@ -321,16 +329,10 @@ describe('Destination Receive (e2e)', () => {
           .post(`/containers/${manifest.containerId}/close`)
           .set('Authorization', `Bearer ${staffToken}`)
           .send();
-        expect(closeRes.status).toBe(403);
-
-        const managerCloseRes = await request(app.getHttpServer())
-          .post(`/containers/${manifest.containerId}/close`)
-          .set('Authorization', `Bearer ${tokenA}`)
-          .send();
-        expect(managerCloseRes.status).toBe(201);
+        expect(closeRes.status).toBe(201);
       });
 
-      it('allows DESTINATION_AGENT to both open and close', async () => {
+      it('allows STAFF to both open and close', async () => {
         const manifest = await createArrivedOceanManifest(app, tokenA, tenantA, 1);
         const openRes = await request(app.getHttpServer())
           .post(`/containers/${manifest.containerId}/open`)
@@ -502,7 +504,7 @@ describe('Destination Receive (e2e)', () => {
     });
 
     describe('RBAC', () => {
-      it('rejects ACCOUNTANT and CUSTOMER from destination-receiving an item', async () => {
+      it('rejects FINANCE and CUSTOMER from destination-receiving an item', async () => {
         const manifest = await createArrivedOceanManifest(app, tokenA, tenantA, 1);
         for (const token of [accountantToken, customerToken]) {
           const res = await destinationReceive(app, token, manifest.itemId, tenantA.warehouseId, {
@@ -512,7 +514,7 @@ describe('Destination Receive (e2e)', () => {
         }
       });
 
-      it('allows WAREHOUSE_STAFF and DESTINATION_AGENT to destination-receive an item', async () => {
+      it('allows STAFF to destination-receive an item', async () => {
         const m1 = await createArrivedOceanManifest(app, tokenA, tenantA, 1);
         const staffRes = await destinationReceive(app, staffToken, m1.itemId, tenantA.warehouseId, {
           condition: 'GOOD',

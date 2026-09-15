@@ -16,15 +16,13 @@ import { useRequireAuth } from '@/lib/useRequireAuth';
  * deliberately not ANALYTICS_ROLES-gated like the rest of Stage 4). The
  * deeper financial/operational analytics live at /dashboard/reports.
  *
- * Executive Dashboard upgrade: ANALYTICS_ROLES (Owner/Admin/Manager) get
- * the richer <ExecutiveDashboard/> instead of these four tiles — the API
+ * Executive Dashboard upgrade: ANALYTICS_ROLES (OWNER/MANAGER) get the
+ * richer <ExecutiveDashboard/> instead of these four tiles — the API
  * would 403 them out of most of that page's data anyway (its financial
  * figures require ANALYTICS_ROLES, same as /dashboard/reports), so this
- * is a UX routing choice, not the security boundary; every other staff
- * role (WAREHOUSE_STAFF, DRIVER, CUSTOMER_SERVICE, ACCOUNTANT,
- * DESTINATION_AGENT) keeps exactly this original operational-only
- * Overview, unchanged, since they were never entitled to tenant-wide
- * financial data.
+ * is a UX routing choice, not the security boundary; STAFF and FINANCE
+ * keep exactly this original operational-only Overview, unchanged, since
+ * neither is entitled to tenant-wide financial/cross-warehouse data.
  *
  * `useRequireAuth` is already called once by DashboardLayout — calling it
  * again here is cheap (localStorage read only, no network) and is the

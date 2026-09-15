@@ -39,29 +39,29 @@ describe('Invoice foundation: RBAC, isolation, ownership, money (e2e)', () => {
   beforeAll(async () => {
     app = await createTestApp();
 
-    tenantA = await createTestTenant(prisma, 'InvA', UserRole.WAREHOUSE_MANAGER);
-    // WAREHOUSE_MANAGER (not ACCOUNTANT) so tenantB's default user can
+    tenantA = await createTestTenant(prisma, 'InvA', UserRole.MANAGER);
+    // MANAGER (not FINANCE) so tenantB's default user can
     // create a shipment via the staff shipments API (OPERATIONS_ROLES) —
-    // the ACCOUNTANT needed for invoice cross-tenant checks is a separate
+    // the FINANCE needed for invoice cross-tenant checks is a separate
     // user below, exactly like tenantA's setup.
-    tenantB = await createTestTenant(prisma, 'InvB', UserRole.WAREHOUSE_MANAGER);
+    tenantB = await createTestTenant(prisma, 'InvB', UserRole.MANAGER);
 
-    const accountantA = await createUserInTenant(prisma, tenantA.tenantId, 'Accountant', UserRole.ACCOUNTANT);
-    const accountantB = await createUserInTenant(prisma, tenantB.tenantId, 'Accountant', UserRole.ACCOUNTANT);
-    const tenantAdminA = await createUserInTenant(prisma, tenantA.tenantId, 'TenantAdmin', UserRole.TENANT_ADMIN);
+    const accountantA = await createUserInTenant(prisma, tenantA.tenantId, 'Accountant', UserRole.FINANCE);
+    const accountantB = await createUserInTenant(prisma, tenantB.tenantId, 'Accountant', UserRole.FINANCE);
+    const tenantAdminA = await createUserInTenant(prisma, tenantA.tenantId, 'TenantAdmin', UserRole.OWNER);
     const customerServiceA = await createUserInTenant(
       prisma,
       tenantA.tenantId,
       'CustomerService',
-      UserRole.CUSTOMER_SERVICE,
+      UserRole.STAFF,
     );
     const warehouseStaffA = await createUserInTenant(
       prisma,
       tenantA.tenantId,
       'WarehouseStaff',
-      UserRole.WAREHOUSE_STAFF,
+      UserRole.STAFF,
     );
-    const driverA = await createUserInTenant(prisma, tenantA.tenantId, 'Driver', UserRole.DRIVER);
+    const driverA = await createUserInTenant(prisma, tenantA.tenantId, 'Driver', UserRole.STAFF);
 
     accountantTokenA = await login(app, accountantA.email, accountantA.password);
     tenantAdminTokenA = await login(app, tenantAdminA.email, tenantAdminA.password);
@@ -115,30 +115,33 @@ describe('Invoice foundation: RBAC, isolation, ownership, money (e2e)', () => {
     await prisma.$disconnect();
   }, 30_000);
 
-  describe('RBAC: warehouse-only operational roles never get invoice access, by product decision', () => {
-    it('WAREHOUSE_MANAGER gets 403 on GET /invoices', async () => {
-      const res = await request(app.getHttpServer())
-        .get('/invoices')
-        .set('Authorization', `Bearer ${warehouseManagerTokenA}`);
-      expect(res.status).toBe(403);
-    });
-
-    it('WAREHOUSE_MANAGER gets 403 on POST /invoices', async () => {
-      const res = await request(app.getHttpServer())
-        .post('/invoices')
-        .set('Authorization', `Bearer ${warehouseManagerTokenA}`)
-        .send(validInvoicePayload(customer1IdA, shipment1A.id));
-      expect(res.status).toBe(403);
-    });
-
-    it('WAREHOUSE_STAFF gets 403 on GET /invoices', async () => {
+  /**
+   * RBAC V1: INVOICE_MANAGE_ROLES is now OWNER/MANAGER/FINANCE. MANAGER
+   * moved here from "never get access" — the approved V1 role definitions
+   * explicitly give MANAGER invoices/payments ("broad operational and
+   * reporting access, including ... invoices/payments"), unlike the old
+   * WAREHOUSE_MANAGER role it replaces. STAFF (the merged successor of
+   * WAREHOUSE_STAFF, CUSTOMER_SERVICE, and DESTINATION_AGENT) is
+   * deliberately excluded — CUSTOMER_SERVICE used to have invoice access;
+   * STAFF's V1 scope does not.
+   */
+  describe('RBAC: operational-only roles never get invoice access, by product decision', () => {
+    it('STAFF gets 403 on GET /invoices', async () => {
       const res = await request(app.getHttpServer())
         .get('/invoices')
         .set('Authorization', `Bearer ${warehouseStaffTokenA}`);
       expect(res.status).toBe(403);
     });
 
-    it('DRIVER gets 403 on GET /invoices', async () => {
+    it('STAFF gets 403 on POST /invoices (the merged former CUSTOMER_SERVICE role no longer has invoice access)', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/invoices')
+        .set('Authorization', `Bearer ${customerServiceTokenA}`)
+        .send(validInvoicePayload(customer1IdA, shipment1A.id));
+      expect(res.status).toBe(403);
+    });
+
+    it('STAFF gets 403 on GET /invoices (second STAFF account)', async () => {
       const res = await request(app.getHttpServer()).get('/invoices').set('Authorization', `Bearer ${driverTokenA}`);
       expect(res.status).toBe(403);
     });
@@ -156,8 +159,8 @@ describe('Invoice foundation: RBAC, isolation, ownership, money (e2e)', () => {
     });
   });
 
-  describe('RBAC: Tenant Owner/Admin and office/accounting staff can manage invoices', () => {
-    it('ACCOUNTANT can create an invoice', async () => {
+  describe('RBAC: OWNER, MANAGER, and FINANCE can manage invoices', () => {
+    it('FINANCE can create an invoice', async () => {
       const res = await request(app.getHttpServer())
         .post('/invoices')
         .set('Authorization', `Bearer ${accountantTokenA}`)
@@ -166,7 +169,7 @@ describe('Invoice foundation: RBAC, isolation, ownership, money (e2e)', () => {
       expect(res.body.status).toBe('DRAFT');
     });
 
-    it('TENANT_ADMIN can create an invoice', async () => {
+    it('OWNER can create an invoice', async () => {
       const res = await request(app.getHttpServer())
         .post('/invoices')
         .set('Authorization', `Bearer ${tenantAdminTokenA}`)
@@ -174,12 +177,17 @@ describe('Invoice foundation: RBAC, isolation, ownership, money (e2e)', () => {
       expect(res.status).toBe(201);
     });
 
-    it('CUSTOMER_SERVICE can create an invoice', async () => {
-      const res = await request(app.getHttpServer())
+    it('MANAGER can view and create invoices', async () => {
+      const getRes = await request(app.getHttpServer())
+        .get('/invoices')
+        .set('Authorization', `Bearer ${warehouseManagerTokenA}`);
+      expect(getRes.status).toBe(200);
+
+      const postRes = await request(app.getHttpServer())
         .post('/invoices')
-        .set('Authorization', `Bearer ${customerServiceTokenA}`)
+        .set('Authorization', `Bearer ${warehouseManagerTokenA}`)
         .send(validInvoicePayload(customer1IdA, shipment1A.id));
-      expect(res.status).toBe(201);
+      expect(postRes.status).toBe(201);
     });
   });
 

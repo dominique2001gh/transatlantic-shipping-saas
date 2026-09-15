@@ -195,7 +195,7 @@ async function main() {
       console.log(`>>> CONFIRM the above is the intended tenant before this proceeds. <<<\n`);
 
       const owner = await prisma.user.findFirst({
-        where: { tenantId: tenantId, role: { in: [UserRole.TENANT_OWNER, UserRole.TENANT_ADMIN] } },
+        where: { tenantId: tenantId, role: UserRole.OWNER },
         orderBy: { createdAt: 'asc' },
       });
       if (!owner) {

@@ -1,7 +1,7 @@
 import { Body, Controller, Delete, Get, Param, Post, Query } from '@nestjs/common';
 import { EntitlementFeature } from '@prisma/client';
 import type { AuthenticatedUser } from '@transatlantic/shared';
-import { ContainerStatus, UserRole } from '@transatlantic/shared';
+import { ContainerStatus, MANAGER_UP_ROLES, OPERATIONS_ROLES } from '@transatlantic/shared';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { RequireEntitlement } from '../common/decorators/require-entitlement.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -12,37 +12,18 @@ import { FinalizeContainerDto } from './dto/finalize-container.dto';
 import { LoadItemDto } from './dto/load-item.dto';
 import { UnloadItemDto } from './dto/unload-item.dto';
 
-/** Booking/planning a container is an admin/office task, same set as ShipmentsController's OPERATIONS_ROLES. */
-const OPERATIONS_ROLES = [
-  UserRole.TENANT_OWNER,
-  UserRole.TENANT_ADMIN,
-  UserRole.WAREHOUSE_MANAGER,
-  UserRole.WAREHOUSE_STAFF,
-  UserRole.CUSTOMER_SERVICE,
-];
-const VIEW_ROLES = [...OPERATIONS_ROLES, UserRole.ACCOUNTANT, UserRole.DESTINATION_AGENT];
-
-/** Physically scanning items in/out is floor work — same narrower set WarehouseController uses for receive/process. */
-const WAREHOUSE_ROLES = [
-  UserRole.TENANT_OWNER,
-  UserRole.TENANT_ADMIN,
-  UserRole.WAREHOUSE_MANAGER,
-  UserRole.WAREHOUSE_STAFF,
-];
-
-/** Sealing a container is a bigger, harder-to-reverse action — supervisor-level only, staff excluded. */
-const FINALIZE_ROLES = [UserRole.TENANT_OWNER, UserRole.TENANT_ADMIN, UserRole.WAREHOUSE_MANAGER];
-
 /**
- * Milestone 3F: opening an arrived container for unloading is destination
- * floor work — same shape as WAREHOUSE_ROLES, plus DESTINATION_AGENT
- * (view-only everywhere until now; this is exactly the action that role
- * exists for). Additive only — nothing narrowed.
+ * RBAC V1: view, book, load/unload, and open/close-for-unloading are all
+ * OPERATIONS_ROLES (OWNER/MANAGER/STAFF) — the old split between
+ * "office task" OPERATIONS_ROLES/VIEW_ROLES and "floor work" WAREHOUSE_ROLES/
+ * DESTINATION_ROLES existed only because CUSTOMER_SERVICE/ACCOUNTANT/
+ * DESTINATION_AGENT were once separate roles with different scopes; all of
+ * that collapses to the single STAFF tier now, so one role list covers
+ * every non-finalize route. Sealing a container closed (`finalize`) stays
+ * the one supervisor-level, harder-to-reverse action — MANAGER_UP_ROLES
+ * (OWNER/MANAGER), STAFF excluded, matching prior behavior exactly.
+ * FINANCE has no container access at all, not even view.
  */
-const DESTINATION_ROLES = [...WAREHOUSE_ROLES, UserRole.DESTINATION_AGENT];
-/** Closing out unloading is the destination-side equivalent of FINALIZE_ROLES — supervisor-level, staff excluded. */
-const CLOSE_ROLES = [...FINALIZE_ROLES, UserRole.DESTINATION_AGENT];
-
 const VALID_CONTAINER_STATUSES = new Set<string>(Object.values(ContainerStatus));
 
 @Controller('containers')
@@ -51,7 +32,7 @@ export class ContainersController {
   constructor(private readonly containersService: ContainersService) {}
 
   @Get()
-  @Roles(...VIEW_ROLES)
+  @Roles(...OPERATIONS_ROLES)
   findAll(
     @CurrentUser() user: AuthenticatedUser,
     @Query('status') status?: string,
@@ -62,7 +43,7 @@ export class ContainersController {
   }
 
   @Get(':id')
-  @Roles(...VIEW_ROLES)
+  @Roles(...OPERATIONS_ROLES)
   findOne(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
     return this.containersService.findById(requireTenantId(user.tenantId), id);
   }
@@ -74,7 +55,7 @@ export class ContainersController {
   }
 
   @Post(':id/items/:itemId')
-  @Roles(...WAREHOUSE_ROLES)
+  @Roles(...OPERATIONS_ROLES)
   loadItem(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id') containerId: string,
@@ -85,7 +66,7 @@ export class ContainersController {
   }
 
   @Delete(':id/items/:itemId')
-  @Roles(...WAREHOUSE_ROLES)
+  @Roles(...OPERATIONS_ROLES)
   unloadItem(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id') containerId: string,
@@ -96,19 +77,19 @@ export class ContainersController {
   }
 
   @Post(':id/finalize')
-  @Roles(...FINALIZE_ROLES)
+  @Roles(...MANAGER_UP_ROLES)
   finalize(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Body() dto: FinalizeContainerDto) {
     return this.containersService.finalize(requireTenantId(user.tenantId), user.id, id, dto);
   }
 
   @Post(':id/open')
-  @Roles(...DESTINATION_ROLES)
+  @Roles(...OPERATIONS_ROLES)
   openForUnloading(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
     return this.containersService.openForUnloading(requireTenantId(user.tenantId), id);
   }
 
   @Post(':id/close')
-  @Roles(...CLOSE_ROLES)
+  @Roles(...OPERATIONS_ROLES)
   closeUnloading(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
     return this.containersService.closeUnloading(requireTenantId(user.tenantId), id);
   }

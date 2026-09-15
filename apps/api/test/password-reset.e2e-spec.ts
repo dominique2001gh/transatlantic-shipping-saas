@@ -56,8 +56,8 @@ describe('Password recovery: forgot/reset password (e2e)', () => {
     app.useGlobalPipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }));
     await app.init();
 
-    tenantA = await createTestTenant(prisma, 'PwResetA', UserRole.WAREHOUSE_MANAGER);
-    tenantB = await createTestTenant(prisma, 'PwResetB', UserRole.WAREHOUSE_MANAGER);
+    tenantA = await createTestTenant(prisma, 'PwResetA', UserRole.MANAGER);
+    tenantB = await createTestTenant(prisma, 'PwResetB', UserRole.MANAGER);
   });
 
   afterAll(async () => {
@@ -219,10 +219,10 @@ describe('Password recovery: forgot/reset password (e2e)', () => {
     const passwordHash = await bcrypt.hash('OriginalSharedPass1!', 10);
 
     const userInA = await prisma.user.create({
-      data: { tenantId: tenantA.tenantId, email: sharedEmail, passwordHash, firstName: 'Shared', lastName: 'A', role: UserRole.WAREHOUSE_STAFF },
+      data: { tenantId: tenantA.tenantId, email: sharedEmail, passwordHash, firstName: 'Shared', lastName: 'A', role: UserRole.STAFF },
     });
     const userInB = await prisma.user.create({
-      data: { tenantId: tenantB.tenantId, email: sharedEmail, passwordHash, firstName: 'Shared', lastName: 'B', role: UserRole.WAREHOUSE_STAFF },
+      data: { tenantId: tenantB.tenantId, email: sharedEmail, passwordHash, firstName: 'Shared', lastName: 'B', role: UserRole.STAFF },
     });
 
     await request(app.getHttpServer()).post('/auth/forgot-password').send({ email: sharedEmail }).expect(200);
@@ -275,7 +275,7 @@ describe('Password recovery: forgot-password is rate-limited (e2e)', () => {
     app.useGlobalPipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }));
     await app.init();
 
-    tenant = await createTestTenant(prisma, 'PwResetThrottle', UserRole.WAREHOUSE_MANAGER);
+    tenant = await createTestTenant(prisma, 'PwResetThrottle', UserRole.MANAGER);
   });
 
   afterAll(async () => {

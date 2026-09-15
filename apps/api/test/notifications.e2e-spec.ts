@@ -40,10 +40,10 @@ describe('Notifications & disruptions: firing rules, isolation, bulk fan-out (e2
   beforeAll(async () => {
     app = await createTestApp();
 
-    tenantA = await createTestTenant(prisma, 'NotifA', UserRole.WAREHOUSE_MANAGER);
-    tenantB = await createTestTenant(prisma, 'NotifB', UserRole.WAREHOUSE_MANAGER);
+    tenantA = await createTestTenant(prisma, 'NotifA', UserRole.MANAGER);
+    tenantB = await createTestTenant(prisma, 'NotifB', UserRole.MANAGER);
 
-    const tenantAdminA = await createUserInTenant(prisma, tenantA.tenantId, 'TenantAdmin', UserRole.TENANT_ADMIN);
+    const tenantAdminA = await createUserInTenant(prisma, tenantA.tenantId, 'TenantAdmin', UserRole.OWNER);
     tenantAdminTokenA = await login(app, tenantAdminA.email, tenantAdminA.password);
 
     customer1A = await createCustomerWithPortalUser(prisma, tenantA.tenantId, 'C1');

@@ -25,11 +25,11 @@ describe('Manifest departure (e2e)', () => {
 
   beforeAll(async () => {
     app = await createTestApp();
-    tenantA = await createTestTenant(prisma, 'DepA', UserRole.WAREHOUSE_MANAGER);
-    tenantB = await createTestTenant(prisma, 'DepB', UserRole.WAREHOUSE_MANAGER);
-    const staffUser = await createUserInTenant(prisma, tenantA.tenantId, 'Staff', UserRole.WAREHOUSE_STAFF);
+    tenantA = await createTestTenant(prisma, 'DepA', UserRole.MANAGER);
+    tenantB = await createTestTenant(prisma, 'DepB', UserRole.MANAGER);
+    const staffUser = await createUserInTenant(prisma, tenantA.tenantId, 'Staff', UserRole.STAFF);
     const customerUser = await createUserInTenant(prisma, tenantA.tenantId, 'Cust', UserRole.CUSTOMER);
-    const accountantUser = await createUserInTenant(prisma, tenantA.tenantId, 'Acct', UserRole.ACCOUNTANT);
+    const accountantUser = await createUserInTenant(prisma, tenantA.tenantId, 'Acct', UserRole.FINANCE);
 
     tokenA = await login(app, tenantA.user.email, tenantA.user.password);
     tokenB = await login(app, tenantB.user.email, tenantB.user.password);
@@ -128,7 +128,7 @@ describe('Manifest departure (e2e)', () => {
   });
 
   describe('RBAC', () => {
-    it('rejects WAREHOUSE_STAFF, ACCOUNTANT, and CUSTOMER from departing', async () => {
+    it('rejects STAFF, FINANCE, and CUSTOMER from departing', async () => {
       const m1 = await createFinalizedAirManifest(app, tokenA, tenantA, [tenantA.customerId]);
       const staffRes = await request(app.getHttpServer())
         .post(`/manifests/${m1.manifestId}/depart`)
@@ -149,7 +149,7 @@ describe('Manifest departure (e2e)', () => {
       expect(custRes.status).toBe(403);
     });
 
-    it('allows WAREHOUSE_MANAGER to depart', async () => {
+    it('allows MANAGER to depart', async () => {
       const manifest = await createFinalizedAirManifest(app, tokenA, tenantA, [tenantA.customerId]);
       const res = await request(app.getHttpServer())
         .post(`/manifests/${manifest.manifestId}/depart`)

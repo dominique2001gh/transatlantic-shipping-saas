@@ -47,14 +47,14 @@ describe('Manifest print/PDF documents (e2e)', () => {
 
   beforeAll(async () => {
     app = await createTestApp();
-    tenantA = await createTestTenant(prisma, 'DocA', UserRole.WAREHOUSE_MANAGER);
-    tenantB = await createTestTenant(prisma, 'DocB', UserRole.WAREHOUSE_MANAGER);
+    tenantA = await createTestTenant(prisma, 'DocA', UserRole.MANAGER);
+    tenantB = await createTestTenant(prisma, 'DocB', UserRole.MANAGER);
     tokenA = await login(app, tenantA.user.email, tenantA.user.password);
     tokenB = await login(app, tenantB.user.email, tenantB.user.password);
 
-    const accountant = await createUserInTenant(prisma, tenantA.tenantId, 'Acct', UserRole.ACCOUNTANT);
+    const accountant = await createUserInTenant(prisma, tenantA.tenantId, 'Acct', UserRole.FINANCE);
     accountantToken = await login(app, accountant.email, accountant.password);
-    const driver = await createUserInTenant(prisma, tenantA.tenantId, 'Driver', UserRole.DRIVER);
+    const driver = await createUserInTenant(prisma, tenantA.tenantId, 'Driver', UserRole.STAFF);
     driverToken = await login(app, driver.email, driver.password);
   });
 
@@ -278,7 +278,15 @@ describe('Manifest print/PDF documents (e2e)', () => {
     expect(pdfRes.status).toBe(404);
   });
 
-  it('6. permissions — ACCOUNTANT (VIEW_ROLES) can access; DRIVER (outside VIEW_ROLES) gets 403', async () => {
+  /**
+   * RBAC V1: manifest view (including print/PDF) is OPERATIONS_ROLES
+   * (OWNER/MANAGER/STAFF) now — STAFF (the old DRIVER role's successor)
+   * can reach both. FINANCE (the old ACCOUNTANT role's successor) has no
+   * manifest access at all, not even view — its V1 scope is a closed list
+   * that doesn't include manifests. Both assertions are the inverse of
+   * this test's pre-RBAC-V1 version, reflecting that deliberate change.
+   */
+  it('6. permissions — STAFF (OPERATIONS_ROLES) can access; FINANCE (no manifest access) gets 403', async () => {
     const manifest = await createManifest(app, tokenA, {
       shipmentMode: 'AIR',
       carrierName: 'Delta',
@@ -287,20 +295,20 @@ describe('Manifest print/PDF documents (e2e)', () => {
       destinationLocation: 'B',
     });
 
-    const accountantRes = await request(app.getHttpServer())
-      .get(`/manifests/${manifest.id}/print`)
-      .set('Authorization', `Bearer ${accountantToken}`);
-    expect(accountantRes.status).toBe(200);
-
-    const driverPrintRes = await request(app.getHttpServer())
+    const staffPrintRes = await request(app.getHttpServer())
       .get(`/manifests/${manifest.id}/print`)
       .set('Authorization', `Bearer ${driverToken}`);
-    expect(driverPrintRes.status).toBe(403);
+    expect(staffPrintRes.status).toBe(200);
 
-    const driverPdfRes = await request(app.getHttpServer())
+    const staffPdfRes = await request(app.getHttpServer())
       .get(`/manifests/${manifest.id}/pdf`)
       .set('Authorization', `Bearer ${driverToken}`);
-    expect(driverPdfRes.status).toBe(403);
+    expect(staffPdfRes.status).toBe(200);
+
+    const financeRes = await request(app.getHttpServer())
+      .get(`/manifests/${manifest.id}/print`)
+      .set('Authorization', `Bearer ${accountantToken}`);
+    expect(financeRes.status).toBe(403);
   });
 
   it('7. GET /manifests/:id/pdf returns a real PDF file', async () => {

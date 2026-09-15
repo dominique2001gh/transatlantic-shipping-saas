@@ -14,8 +14,8 @@ import { AI_AGENT_SYSTEM_PROMPT } from './system-prompt';
  * without it set only breaks this one feature at first use, not app boot.
  *
  * The user's role/name/tenant are included in the request only to let the
- * model tailor tone (e.g. addressing a WAREHOUSE_STAFF employee
- * differently than a TENANT_OWNER) — never as an authorization signal;
+ * model tailor tone (e.g. addressing a STAFF employee
+ * differently than an OWNER) — never as an authorization signal;
  * RolesGuard/EntitlementsGuard already gated the request before this
  * service is reached, and the model has no tool access that could act on
  * that context even if it wanted to.

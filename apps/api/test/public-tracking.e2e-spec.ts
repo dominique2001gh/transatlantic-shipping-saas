@@ -23,8 +23,8 @@ describe('Public Tracking (e2e)', () => {
 
   beforeAll(async () => {
     app = await createTestApp();
-    tenantA = await createTestTenant(prisma, 'PtA', UserRole.WAREHOUSE_MANAGER);
-    tenantB = await createTestTenant(prisma, 'PtB', UserRole.WAREHOUSE_MANAGER);
+    tenantA = await createTestTenant(prisma, 'PtA', UserRole.MANAGER);
+    tenantB = await createTestTenant(prisma, 'PtB', UserRole.MANAGER);
     tokenA = await login(app, tenantA.user.email, tenantA.user.password);
   });
 

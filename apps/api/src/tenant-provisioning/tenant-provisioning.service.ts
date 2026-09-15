@@ -5,6 +5,7 @@ import type { SignupCompanyDetails } from '@transatlantic/shared';
 import type Stripe from 'stripe';
 import { slugify } from '../common/slug/slugify.util';
 import { signupCompleteEmail, tenantActivatedEmail } from '../notifications/templates/platform-emails';
+import { resolvePlatformEmailSender } from '../notifications/providers/platform-email-sender.util';
 import { EMAIL_PROVIDER } from '../notifications/providers/provider.types';
 import type { EmailProvider } from '../notifications/providers/provider.types';
 import { PrismaService } from '../prisma/prisma.service';
@@ -242,10 +243,15 @@ export class TenantProvisioningService {
 
     try {
       const tenant = await this.prisma.tenant.findUniqueOrThrow({ where: { id: tenantId } });
-      const owner = await this.prisma.user.findFirst({ where: { tenantId, role: UserRole.TENANT_OWNER } });
+      const owner = await this.prisma.user.findFirst({ where: { tenantId, role: UserRole.OWNER } });
       if (owner) {
         const email = tenantActivatedEmail({ ownerFirstName: owner.firstName, tenantName: tenant.name });
-        await this.emailProvider.send({ to: owner.email, subject: email.subject, body: email.body });
+        await this.emailProvider.send({
+          to: owner.email,
+          subject: email.subject,
+          body: email.body,
+          ...resolvePlatformEmailSender(this.config),
+        });
       }
     } catch (err) {
       this.logger.error(`Failed to send activation email for tenant ${tenantId}: ${err}`);
@@ -290,7 +296,7 @@ export class TenantProvisioningService {
         firstName: signupSession.ownerFirstName!,
         lastName: signupSession.ownerLastName!,
         phone: signupSession.ownerPhone,
-        role: UserRole.TENANT_OWNER,
+        role: UserRole.OWNER,
         isActive: true,
       },
     });
@@ -352,7 +358,12 @@ export class TenantProvisioningService {
         tenantName,
         loginUrl: `${webAppUrl.replace(/\/$/, '')}/login`,
       });
-      await this.emailProvider.send({ to: signupSession.ownerEmail!, subject: email.subject, body: email.body });
+      await this.emailProvider.send({
+        to: signupSession.ownerEmail!,
+        subject: email.subject,
+        body: email.body,
+        ...resolvePlatformEmailSender(this.config),
+      });
     } catch (err) {
       this.logger.error(`Failed to send signup-complete email for tenant ${tenantId}: ${err}`);
     }

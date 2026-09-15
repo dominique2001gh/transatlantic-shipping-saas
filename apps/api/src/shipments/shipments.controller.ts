@@ -1,7 +1,7 @@
 import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { EntitlementFeature } from '@prisma/client';
 import type { AuthenticatedUser } from '@transatlantic/shared';
-import { ShipmentStatus, UserRole } from '@transatlantic/shared';
+import { OPERATIONS_ROLES, ShipmentStatus } from '@transatlantic/shared';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { RequireEntitlement } from '../common/decorators/require-entitlement.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -13,19 +13,9 @@ import { UpdateShipmentDto } from './dto/update-shipment.dto';
 import { UpdateShipmentItemDto } from './dto/update-shipment-item.dto';
 import { ShipmentsService } from './shipments.service';
 
-/**
- * Shipment/item/tracking-event mutation is core warehouse-floor work, so
- * WAREHOUSE_STAFF is included here (unlike CustomersController's
- * MANAGE_ROLES, which is more of a front-office task).
- */
-const OPERATIONS_ROLES = [
-  UserRole.TENANT_OWNER,
-  UserRole.TENANT_ADMIN,
-  UserRole.WAREHOUSE_MANAGER,
-  UserRole.WAREHOUSE_STAFF,
-  UserRole.CUSTOMER_SERVICE,
-];
-const VIEW_ROLES = [...OPERATIONS_ROLES, UserRole.ACCOUNTANT, UserRole.DESTINATION_AGENT];
+// RBAC V1: view and mutate are both OPERATIONS_ROLES (OWNER/MANAGER/STAFF) —
+// FINANCE has no shipment access at all (not even view; its remit is
+// closed-list: customers, invoices, payments, financial reporting only).
 
 const VALID_STATUSES = new Set<string>(Object.values(ShipmentStatus));
 
@@ -35,7 +25,7 @@ export class ShipmentsController {
   constructor(private readonly shipmentsService: ShipmentsService) {}
 
   @Get()
-  @Roles(...VIEW_ROLES)
+  @Roles(...OPERATIONS_ROLES)
   findAll(
     @CurrentUser() user: AuthenticatedUser,
     @Query('customerId') customerId?: string,
@@ -50,13 +40,13 @@ export class ShipmentsController {
   // routes in declaration order, so 'search' would otherwise be swallowed
   // as an :id value.
   @Get('search')
-  @Roles(...VIEW_ROLES)
+  @Roles(...OPERATIONS_ROLES)
   search(@CurrentUser() user: AuthenticatedUser, @Query('query') query?: string) {
     return this.shipmentsService.search(requireTenantId(user.tenantId), query ?? '');
   }
 
   @Get(':id')
-  @Roles(...VIEW_ROLES)
+  @Roles(...OPERATIONS_ROLES)
   findOne(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
     return this.shipmentsService.findById(requireTenantId(user.tenantId), id);
   }
@@ -99,7 +89,7 @@ export class ShipmentsController {
   }
 
   @Get(':id/tracking-events')
-  @Roles(...VIEW_ROLES)
+  @Roles(...OPERATIONS_ROLES)
   listTrackingEvents(@CurrentUser() user: AuthenticatedUser, @Param('id') shipmentId: string) {
     return this.shipmentsService.listTrackingEvents(requireTenantId(user.tenantId), shipmentId);
   }

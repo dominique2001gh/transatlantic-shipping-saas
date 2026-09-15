@@ -26,12 +26,12 @@ describe('Process/Inspect workflow (e2e)', () => {
 
   beforeAll(async () => {
     app = await createTestApp();
-    tenantA = await createTestTenant(prisma, 'ProcA', UserRole.WAREHOUSE_MANAGER);
-    tenantB = await createTestTenant(prisma, 'ProcB', UserRole.WAREHOUSE_MANAGER);
+    tenantA = await createTestTenant(prisma, 'ProcA', UserRole.MANAGER);
+    tenantB = await createTestTenant(prisma, 'ProcB', UserRole.MANAGER);
 
     const customerUser = await createUserInTenant(prisma, tenantA.tenantId, 'Cust', UserRole.CUSTOMER);
-    const staffUser = await createUserInTenant(prisma, tenantA.tenantId, 'Staff', UserRole.WAREHOUSE_STAFF);
-    const adminUser = await createUserInTenant(prisma, tenantA.tenantId, 'Admin', UserRole.TENANT_ADMIN);
+    const staffUser = await createUserInTenant(prisma, tenantA.tenantId, 'Staff', UserRole.STAFF);
+    const adminUser = await createUserInTenant(prisma, tenantA.tenantId, 'Admin', UserRole.OWNER);
 
     tokenA = await login(app, tenantA.user.email, tenantA.user.password);
     tokenB = await login(app, tenantB.user.email, tenantB.user.password);
@@ -270,7 +270,7 @@ describe('Process/Inspect workflow (e2e)', () => {
   });
 
   describe('RBAC', () => {
-    it('allows WAREHOUSE_STAFF and TENANT_ADMIN to process', async () => {
+    it('allows STAFF and OWNER to process', async () => {
       const staffItem = await createAndOptionallyReceiveItem(app, tokenA, tenantA);
       const staffRes = await request(app.getHttpServer())
         .post(`/warehouse/items/${staffItem.id}/process`)

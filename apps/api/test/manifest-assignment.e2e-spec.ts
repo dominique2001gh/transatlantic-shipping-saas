@@ -26,11 +26,11 @@ describe('Manifest assignment (e2e)', () => {
 
   beforeAll(async () => {
     app = await createTestApp();
-    tenantA = await createTestTenant(prisma, 'MfA', UserRole.WAREHOUSE_MANAGER);
-    tenantB = await createTestTenant(prisma, 'MfB', UserRole.WAREHOUSE_MANAGER);
+    tenantA = await createTestTenant(prisma, 'MfA', UserRole.MANAGER);
+    tenantB = await createTestTenant(prisma, 'MfB', UserRole.MANAGER);
     const customerUser = await createUserInTenant(prisma, tenantA.tenantId, 'Cust', UserRole.CUSTOMER);
-    const accountantUser = await createUserInTenant(prisma, tenantA.tenantId, 'Acct', UserRole.ACCOUNTANT);
-    const customerServiceUser = await createUserInTenant(prisma, tenantA.tenantId, 'CS', UserRole.CUSTOMER_SERVICE);
+    const accountantUser = await createUserInTenant(prisma, tenantA.tenantId, 'Acct', UserRole.FINANCE);
+    const customerServiceUser = await createUserInTenant(prisma, tenantA.tenantId, 'CS', UserRole.STAFF);
 
     tokenA = await login(app, tenantA.user.email, tenantA.user.password);
     tokenB = await login(app, tenantB.user.email, tenantB.user.password);
@@ -351,7 +351,7 @@ describe('Manifest assignment (e2e)', () => {
       expect(assignRes.status).toBe(403);
     });
 
-    it('15b. rejects ACCOUNTANT from assigning (read-only)', async () => {
+    it('15b. rejects FINANCE from assigning (no manifest access at all)', async () => {
       const manifest = await createManifest(app, tokenA, { shipmentMode: 'AIR', originWarehouseId: tenantA.warehouseId });
       const item = await createReadyItem(app, tokenA, tenantA);
 
@@ -362,7 +362,16 @@ describe('Manifest assignment (e2e)', () => {
       expect(res.status).toBe(403);
     });
 
-    it('15c. CUSTOMER_SERVICE can assign a container (OPERATIONS_ROLES) but not a direct air item (WAREHOUSE_ROLES only)', async () => {
+    /**
+     * RBAC V1: assigning a container and assigning a direct air item are
+     * both OPERATIONS_ROLES (OWNER/MANAGER/STAFF) now — the old split
+     * between "office task" OPERATIONS_ROLES and "scan-based floor work"
+     * WAREHOUSE_ROLES existed only because CUSTOMER_SERVICE was a
+     * narrower, separate role; its successor STAFF has both, per STAFF's
+     * approved V1 definition ("containers, manifests" without further
+     * qualification).
+     */
+    it('15c. STAFF can assign both a container and a direct air item', async () => {
       const oceanManifest = await createManifest(app, tokenA, { shipmentMode: 'OCEAN_FCL', originWarehouseId: tenantA.warehouseId });
       const container = await createAndFinalizeContainer(app, tokenA, tenantA, 1);
       const containerRes = await request(app.getHttpServer())
@@ -377,10 +386,10 @@ describe('Manifest assignment (e2e)', () => {
         .post(`/manifests/${airManifest.id}/items/${item.itemId}`)
         .set('Authorization', `Bearer ${customerServiceToken}`)
         .send({ scanned: false });
-      expect(itemRes.status).toBe(403);
+      expect(itemRes.status).toBe(201);
     });
 
-    it('15d. WAREHOUSE_MANAGER (in both role sets) can assign both containers and items', async () => {
+    it('15d. MANAGER (in both role sets) can assign both containers and items', async () => {
       const oceanManifest = await createManifest(app, tokenA, { shipmentMode: 'OCEAN_FCL', originWarehouseId: tenantA.warehouseId });
       const container = await createAndFinalizeContainer(app, tokenA, tenantA, 1);
       const containerRes = await assignContainer(app, tokenA, oceanManifest.id, container.id);

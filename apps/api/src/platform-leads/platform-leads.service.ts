@@ -1,7 +1,9 @@
 import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { PlatformLeadSource, PlatformLeadStatus } from '@prisma/client';
 import type { PlatformLeadSummary } from '@transatlantic/shared';
 import { demoRequestConfirmationEmail } from '../notifications/templates/platform-emails';
+import { resolvePlatformEmailSender } from '../notifications/providers/platform-email-sender.util';
 import { EMAIL_PROVIDER } from '../notifications/providers/provider.types';
 import type { EmailProvider } from '../notifications/providers/provider.types';
 import { PrismaService } from '../prisma/prisma.service';
@@ -22,6 +24,7 @@ export class PlatformLeadsService {
 
   constructor(
     private readonly prisma: PrismaService,
+    private readonly config: ConfigService,
     @Inject(EMAIL_PROVIDER) private readonly emailProvider: EmailProvider,
   ) {}
 
@@ -44,7 +47,12 @@ export class PlatformLeadsService {
 
     try {
       const email = demoRequestConfirmationEmail({ contactName: dto.contactName, companyName: dto.companyName });
-      await this.emailProvider.send({ to: dto.email, subject: email.subject, body: email.body });
+      await this.emailProvider.send({
+        to: dto.email,
+        subject: email.subject,
+        body: email.body,
+        ...resolvePlatformEmailSender(this.config),
+      });
     } catch (err) {
       this.logger.error(`Failed to send demo-request confirmation email for lead ${lead.id}: ${err}`);
     }

@@ -6,6 +6,7 @@ import type { AuthenticatedUser, CustomerEntryPointResponse, JwtPayload, LoginRe
 import * as bcrypt from 'bcrypt';
 import { generateToken, hashToken } from '../common/token/token.util';
 import { passwordResetEmail } from '../notifications/templates/platform-emails';
+import { resolvePlatformEmailSender } from '../notifications/providers/platform-email-sender.util';
 import { EMAIL_PROVIDER } from '../notifications/providers/provider.types';
 import type { EmailProvider } from '../notifications/providers/provider.types';
 import { PrismaService } from '../prisma/prisma.service';
@@ -248,7 +249,12 @@ export class AuthService {
           resetUrl: `${webAppUrl.replace(/\/$/, '')}/reset-password?token=${rawToken}`,
           expiresInMinutes: PASSWORD_RESET_TTL_MINUTES,
         });
-        await this.emailProvider.send({ to: user.email, subject: resetEmail.subject, body: resetEmail.body });
+        await this.emailProvider.send({
+          to: user.email,
+          subject: resetEmail.subject,
+          body: resetEmail.body,
+          ...resolvePlatformEmailSender(this.configService),
+        });
       } catch (err) {
         this.logger.error(`Failed to issue/send password reset for user ${user.id}: ${err}`);
       }

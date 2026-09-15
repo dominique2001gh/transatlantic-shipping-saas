@@ -27,9 +27,19 @@ export interface ProviderSendResult {
  * shipment-customer-email templates pass both `body` (the plain-text
  * fallback) and `html` together. `subject`/`body` remain required so no
  * existing call site needs to change.
+ *
+ * Sender-identity fix (2026-09, platform-branding): `fromName`/`fromAddress`
+ * are optional per-send overrides of the provider's own configured default
+ * (EMAIL_FROM_NAME/EMAIL_FROM_ADDRESS) — added so platform-lifecycle mail
+ * (staff invitations, password resets, billing/signup emails — see
+ * platform-emails.ts) can always identify itself as AnanseLogix, regardless
+ * of what the shared global default is configured to for a given
+ * environment. Every caller that omits them keeps today's exact behavior
+ * (the global default) unchanged — see resolvePlatformEmailSender for the
+ * one place platform-lifecycle callers should get these from.
  */
 export interface EmailProvider {
-  send(params: { to: string; subject: string; body: string; html?: string }): Promise<ProviderSendResult>;
+  send(params: { to: string; subject: string; body: string; html?: string; fromName?: string; fromAddress?: string }): Promise<ProviderSendResult>;
 }
 
 export interface SmsProvider {

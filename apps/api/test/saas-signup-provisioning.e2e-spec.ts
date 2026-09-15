@@ -43,10 +43,10 @@ describe('AnanseLogix SaaS signup + provisioning (e2e)', () => {
   beforeAll(async () => {
     app = await createTestApp();
 
-    const secretKey = process.env.STRIPE_SECRET_KEY;
-    webhookSecret = process.env.STRIPE_WEBHOOK_SECRET ?? '';
+    const secretKey = process.env.PLATFORM_STRIPE_SECRET_KEY;
+    webhookSecret = process.env.PLATFORM_STRIPE_WEBHOOK_SECRET ?? '';
     if (!secretKey || !webhookSecret) {
-      throw new Error('STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET must be configured in apps/api/.env to run this suite.');
+      throw new Error('PLATFORM_STRIPE_SECRET_KEY and PLATFORM_STRIPE_WEBHOOK_SECRET must be configured in apps/api/.env to run this suite.');
     }
     stripe = new Stripe(secretKey);
 
@@ -191,7 +191,7 @@ describe('AnanseLogix SaaS signup + provisioning (e2e)', () => {
       expect(tenant?.isActive).toBe(true);
 
       const owner = await prisma.user.findFirst({ where: { tenantId, email: ownerEmail.toLowerCase() } });
-      expect(owner?.role).toBe('TENANT_OWNER');
+      expect(owner?.role).toBe('OWNER');
       expect(owner?.isActive).toBe(true);
 
       const subscription = await prisma.tenantSubscription.findUnique({ where: { tenantId } });
@@ -254,7 +254,7 @@ describe('AnanseLogix SaaS signup + provisioning (e2e)', () => {
       expect(tenantCount).toBe(1);
       const subCount = await prisma.tenantSubscription.count({ where: { stripeSubscriptionId } });
       expect(subCount).toBe(1);
-      const userCount = await prisma.user.count({ where: { tenantId, role: 'TENANT_OWNER' } });
+      const userCount = await prisma.user.count({ where: { tenantId, role: 'OWNER' } });
       expect(userCount).toBe(1);
     });
 

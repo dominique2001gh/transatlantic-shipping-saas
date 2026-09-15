@@ -6,31 +6,42 @@
  * package without depending on `@prisma/client` (which is Node-only).
  */
 
-/** Platform + tenant-scoped roles. PLATFORM_ADMIN operates across tenants. */
+/**
+ * Platform + tenant-scoped roles. PLATFORM_ADMIN operates across tenants
+ * (tenantId always null — see RolesGuard, which enforces that pairing).
+ *
+ * RBAC V1 (2026-09): this replaces the earlier 8-value granular tenant-staff
+ * taxonomy (TENANT_OWNER/TENANT_ADMIN/WAREHOUSE_MANAGER/WAREHOUSE_STAFF/
+ * CUSTOMER_SERVICE/ACCOUNTANT/DESTINATION_AGENT/DRIVER) with 4 tiers, each a
+ * closed list of capabilities (see the shared `*_ROLES` constants in
+ * constants.ts for exactly which tier can reach which endpoint):
+ *   - OWNER: full tenant control, including staff administration and the
+ *     AnanseLogix subscription/billing plan. Absorbs the old TENANT_OWNER
+ *     and TENANT_ADMIN (which had near-identical power already).
+ *   - MANAGER: broad day-to-day operational + reporting access; cannot
+ *     administer staff (view-only) or touch billing/subscription/sensitive
+ *     settings. Absorbs the old WAREHOUSE_MANAGER.
+ *   - STAFF: hands-on operational work (customers, shipments, warehouse,
+ *   containers, manifests, tracking, operational documents); no
+ *     invoices/payments, no billing, no staff administration. Absorbs the
+ *     old WAREHOUSE_STAFF, CUSTOMER_SERVICE, DESTINATION_AGENT, and DRIVER.
+ *   - FINANCE: customers (view) plus invoices/payments/financial reporting
+ *     only — no warehouse/container/manifest access at all, even to view.
+ *     Absorbs the old ACCOUNTANT.
+ * A data migration backfills every existing User.role to its successor
+ * tier — see apps/api/prisma/migrations for the exact mapping.
+ */
 export enum UserRole {
   PLATFORM_ADMIN = 'PLATFORM_ADMIN',
-  TENANT_OWNER = 'TENANT_OWNER',
-  TENANT_ADMIN = 'TENANT_ADMIN',
-  WAREHOUSE_MANAGER = 'WAREHOUSE_MANAGER',
-  WAREHOUSE_STAFF = 'WAREHOUSE_STAFF',
-  CUSTOMER_SERVICE = 'CUSTOMER_SERVICE',
-  ACCOUNTANT = 'ACCOUNTANT',
-  DESTINATION_AGENT = 'DESTINATION_AGENT',
-  DRIVER = 'DRIVER',
+  OWNER = 'OWNER',
+  MANAGER = 'MANAGER',
+  STAFF = 'STAFF',
+  FINANCE = 'FINANCE',
   CUSTOMER = 'CUSTOMER',
 }
 
-/** Roles that represent tenant staff (as opposed to a CUSTOMER end-user). */
-export const STAFF_ROLES: UserRole[] = [
-  UserRole.TENANT_OWNER,
-  UserRole.TENANT_ADMIN,
-  UserRole.WAREHOUSE_MANAGER,
-  UserRole.WAREHOUSE_STAFF,
-  UserRole.CUSTOMER_SERVICE,
-  UserRole.ACCOUNTANT,
-  UserRole.DESTINATION_AGENT,
-  UserRole.DRIVER,
-];
+/** Every role that represents tenant staff (as opposed to a CUSTOMER end-user) — also exactly who may sign in to /dashboard. */
+export const STAFF_ROLES: UserRole[] = [UserRole.OWNER, UserRole.MANAGER, UserRole.STAFF, UserRole.FINANCE];
 
 export enum ShipmentMode {
   AIR = 'AIR',

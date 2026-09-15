@@ -1,7 +1,7 @@
 import { Body, Controller, Delete, Get, Param, Post, Query, Res } from '@nestjs/common';
 import { EntitlementFeature } from '@prisma/client';
 import type { AuthenticatedUser } from '@transatlantic/shared';
-import { ManifestStatus, ShipmentMode, UserRole } from '@transatlantic/shared';
+import { MANAGER_UP_ROLES, ManifestStatus, OPERATIONS_ROLES, ShipmentMode } from '@transatlantic/shared';
 import type { Response } from 'express';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { RequireEntitlement } from '../common/decorators/require-entitlement.decorator';
@@ -14,41 +14,19 @@ import { UnassignDto } from './dto/unassign.dto';
 import { renderManifestPdf } from './manifest-pdf.util';
 import { ManifestsService } from './manifests.service';
 
-/** Planning task, same set ContainersController uses for booking/assigning a container — no scanning involved. */
-const OPERATIONS_ROLES = [
-  UserRole.TENANT_OWNER,
-  UserRole.TENANT_ADMIN,
-  UserRole.WAREHOUSE_MANAGER,
-  UserRole.WAREHOUSE_STAFF,
-  UserRole.CUSTOMER_SERVICE,
-];
-const VIEW_ROLES = [...OPERATIONS_ROLES, UserRole.ACCOUNTANT, UserRole.DESTINATION_AGENT];
-
-/** Direct (air) item assignment is a scan-based floor action — same narrower set WarehouseController uses. */
-const WAREHOUSE_ROLES = [
-  UserRole.TENANT_OWNER,
-  UserRole.TENANT_ADMIN,
-  UserRole.WAREHOUSE_MANAGER,
-  UserRole.WAREHOUSE_STAFF,
-];
-
 /**
- * Finalizing and departing are both bigger, harder-to-reverse actions —
- * same narrower set, staff excluded. Departing in particular is the most
- * consequential action in the whole manifest lifecycle (it's real,
- * physical movement), so it deliberately isn't opened up any wider than
- * finalize.
+ * RBAC V1: view/print, create/assign-unassign (both planning and direct-item
+ * scan-based assignment), and arrive are all OPERATIONS_ROLES (OWNER/
+ * MANAGER/STAFF) — the old OPERATIONS_ROLES/VIEW_ROLES vs. WAREHOUSE_ROLES
+ * split existed only because CUSTOMER_SERVICE/ACCOUNTANT/DESTINATION_AGENT
+ * were once separate roles with different scopes; all of that collapses to
+ * the single STAFF tier now. Finalize and depart remain the two
+ * supervisor-level, harder-to-reverse actions — MANAGER_UP_ROLES (OWNER/
+ * MANAGER), STAFF excluded, matching prior behavior exactly (departing in
+ * particular is real physical movement, the most consequential action in
+ * the manifest lifecycle). FINANCE has no manifest access at all, not even
+ * view.
  */
-const FINALIZE_ROLES = [UserRole.TENANT_OWNER, UserRole.TENANT_ADMIN, UserRole.WAREHOUSE_MANAGER];
-const DEPART_ROLES = FINALIZE_ROLES;
-/**
- * Milestone 3F: marking a movement arrived is exactly the action
- * DESTINATION_AGENT exists for — a deliberate, additive widening (this
- * role has been view-only everywhere until now). Everyone already in
- * FINALIZE_ROLES/DEPART_ROLES keeps the same access; nothing is narrowed.
- */
-const ARRIVE_ROLES = [...FINALIZE_ROLES, UserRole.DESTINATION_AGENT];
-
 const VALID_STATUSES = new Set<string>(Object.values(ManifestStatus));
 const VALID_MODES = new Set<string>(Object.values(ShipmentMode));
 
@@ -64,7 +42,7 @@ export class ManifestsController {
   constructor(private readonly manifestsService: ManifestsService) {}
 
   @Get()
-  @Roles(...VIEW_ROLES)
+  @Roles(...OPERATIONS_ROLES)
   findAll(
     @CurrentUser() user: AuthenticatedUser,
     @Query('status') status?: string,
@@ -79,13 +57,13 @@ export class ManifestsController {
   }
 
   @Get(':id')
-  @Roles(...VIEW_ROLES)
+  @Roles(...OPERATIONS_ROLES)
   findOne(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
     return this.manifestsService.findById(requireTenantId(user.tenantId), id);
   }
 
   /**
-   * Print Manifest / Download PDF — read-only, same VIEW_ROLES and same
+   * Print Manifest / Download PDF — read-only, same OPERATIONS_ROLES and same
    * tenant-scoped lookup as findOne above (getPrintDocument uses the
    * identical `findFirst({ where: { id, tenantId } })` pattern), so a
    * user can no more retrieve another tenant's manifest document by
@@ -94,13 +72,13 @@ export class ManifestsController {
    * PDF endpoint below renders the exact same document.
    */
   @Get(':id/print')
-  @Roles(...VIEW_ROLES)
+  @Roles(...OPERATIONS_ROLES)
   getPrintDocument(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
     return this.manifestsService.getPrintDocument(requireTenantId(user.tenantId), id);
   }
 
   @Get(':id/pdf')
-  @Roles(...VIEW_ROLES)
+  @Roles(...OPERATIONS_ROLES)
   async getPdf(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Res() res: Response) {
     const doc = await this.manifestsService.getPrintDocument(requireTenantId(user.tenantId), id);
     const pdf = renderManifestPdf(doc);
@@ -142,7 +120,7 @@ export class ManifestsController {
   }
 
   @Post(':id/items/:itemId')
-  @Roles(...WAREHOUSE_ROLES)
+  @Roles(...OPERATIONS_ROLES)
   assignItem(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id') manifestId: string,
@@ -153,7 +131,7 @@ export class ManifestsController {
   }
 
   @Delete(':id/items/:itemId')
-  @Roles(...WAREHOUSE_ROLES)
+  @Roles(...OPERATIONS_ROLES)
   unassignItem(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id') manifestId: string,
@@ -164,19 +142,19 @@ export class ManifestsController {
   }
 
   @Post(':id/finalize')
-  @Roles(...FINALIZE_ROLES)
+  @Roles(...MANAGER_UP_ROLES)
   finalize(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
     return this.manifestsService.finalize(requireTenantId(user.tenantId), user.id, id);
   }
 
   @Post(':id/depart')
-  @Roles(...DEPART_ROLES)
+  @Roles(...MANAGER_UP_ROLES)
   depart(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
     return this.manifestsService.depart(requireTenantId(user.tenantId), user.id, id);
   }
 
   @Post(':id/arrive')
-  @Roles(...ARRIVE_ROLES)
+  @Roles(...OPERATIONS_ROLES)
   arrive(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
     return this.manifestsService.arrive(requireTenantId(user.tenantId), user.id, id);
   }

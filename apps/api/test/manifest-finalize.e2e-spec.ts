@@ -26,11 +26,11 @@ describe('Manifest finalization (e2e)', () => {
 
   beforeAll(async () => {
     app = await createTestApp();
-    tenantA = await createTestTenant(prisma, 'FinA', UserRole.WAREHOUSE_MANAGER);
-    tenantB = await createTestTenant(prisma, 'FinB', UserRole.WAREHOUSE_MANAGER);
-    const staffUser = await createUserInTenant(prisma, tenantA.tenantId, 'Staff', UserRole.WAREHOUSE_STAFF);
+    tenantA = await createTestTenant(prisma, 'FinA', UserRole.MANAGER);
+    tenantB = await createTestTenant(prisma, 'FinB', UserRole.MANAGER);
+    const staffUser = await createUserInTenant(prisma, tenantA.tenantId, 'Staff', UserRole.STAFF);
     const customerUser = await createUserInTenant(prisma, tenantA.tenantId, 'Cust', UserRole.CUSTOMER);
-    const accountantUser = await createUserInTenant(prisma, tenantA.tenantId, 'Acct', UserRole.ACCOUNTANT);
+    const accountantUser = await createUserInTenant(prisma, tenantA.tenantId, 'Acct', UserRole.FINANCE);
 
     tokenA = await login(app, tenantA.user.email, tenantA.user.password);
     tokenB = await login(app, tenantB.user.email, tenantB.user.password);
@@ -174,7 +174,7 @@ describe('Manifest finalization (e2e)', () => {
   });
 
   describe('7. RBAC', () => {
-    it('rejects WAREHOUSE_STAFF from finalizing', async () => {
+    it('rejects STAFF from finalizing', async () => {
       const manifest = await createManifest(app, tokenA, {
         shipmentMode: 'AIR',
         originWarehouseId: tenantA.warehouseId,
@@ -193,7 +193,7 @@ describe('Manifest finalization (e2e)', () => {
       expect(res.status).toBe(403);
     });
 
-    it('rejects ACCOUNTANT (read-only) from finalizing', async () => {
+    it('rejects FINANCE (no manifest access at all) from finalizing', async () => {
       const manifest = await createManifest(app, tokenA, { shipmentMode: 'AIR' });
       const res = await request(app.getHttpServer())
         .post(`/manifests/${manifest.id}/finalize`)
@@ -211,7 +211,7 @@ describe('Manifest finalization (e2e)', () => {
       expect(res.status).toBe(403);
     });
 
-    it('allows WAREHOUSE_MANAGER to finalize', async () => {
+    it('allows MANAGER to finalize', async () => {
       const manifest = await createManifest(app, tokenA, {
         shipmentMode: 'AIR',
         originWarehouseId: tenantA.warehouseId,

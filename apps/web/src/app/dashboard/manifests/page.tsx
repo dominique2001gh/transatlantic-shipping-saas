@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import type { ManifestDetail, WarehouseSummary } from '@transatlantic/shared';
-import { ManifestStatus, ShipmentMode, UserRole } from '@transatlantic/shared';
+import { MANAGER_UP_ROLES, ManifestStatus, OPERATIONS_ROLES, ShipmentMode } from '@transatlantic/shared';
 import { StatusBadge } from '@/components/dashboard/StatusBadge';
 import { CreateManifestForm } from '@/components/manifests/CreateManifestForm';
 import { ManifestContainerAssignment } from '@/components/manifests/ManifestContainerAssignment';
@@ -15,25 +15,17 @@ import { formatDateTime, humanizeEnumValue } from '@/lib/format';
 import { arriveManifest, departManifest, downloadManifestPdf, finalizeManifest, getManifest, listManifests } from '@/lib/manifests';
 import { listWarehouseLocations } from '@/lib/warehouse';
 
-/** Same role sets ManifestsController enforces server-side — see manifests.controller.ts. */
-const OPERATIONS_ROLES = new Set<UserRole>([
-  UserRole.TENANT_OWNER,
-  UserRole.TENANT_ADMIN,
-  UserRole.WAREHOUSE_MANAGER,
-  UserRole.WAREHOUSE_STAFF,
-  UserRole.CUSTOMER_SERVICE,
-]);
-const VIEW_ROLES = new Set<UserRole>([...OPERATIONS_ROLES, UserRole.ACCOUNTANT, UserRole.DESTINATION_AGENT]);
-const WAREHOUSE_ROLES = new Set<UserRole>([
-  UserRole.TENANT_OWNER,
-  UserRole.TENANT_ADMIN,
-  UserRole.WAREHOUSE_MANAGER,
-  UserRole.WAREHOUSE_STAFF,
-]);
-const FINALIZE_ROLES = new Set<UserRole>([UserRole.TENANT_OWNER, UserRole.TENANT_ADMIN, UserRole.WAREHOUSE_MANAGER]);
+/**
+ * Same role tiers ManifestsController enforces server-side — see that
+ * controller's own doc comment. View/create/assign/arrive are all
+ * OPERATIONS_ROLES (OWNER/MANAGER/STAFF); finalize/depart stay the two
+ * supervisor-level MANAGER_UP_ROLES (OWNER/MANAGER) actions.
+ */
+const VIEW_ROLES = new Set(OPERATIONS_ROLES);
+const WAREHOUSE_ROLES = new Set(OPERATIONS_ROLES);
+const FINALIZE_ROLES = new Set(MANAGER_UP_ROLES);
 const DEPART_ROLES = FINALIZE_ROLES;
-/** Milestone 3F: marking a movement arrived is exactly the action DESTINATION_AGENT exists for — additive only. */
-const ARRIVE_ROLES = new Set<UserRole>([...FINALIZE_ROLES, UserRole.DESTINATION_AGENT]);
+const ARRIVE_ROLES = new Set(OPERATIONS_ROLES);
 
 const OCEAN_MODES = new Set<ShipmentMode>([ShipmentMode.OCEAN_LCL, ShipmentMode.OCEAN_FCL, ShipmentMode.RORO]);
 
@@ -42,8 +34,8 @@ const STATUS_FILTERS = ['ALL', ...Object.values(ManifestStatus)] as const;
 export default function ManifestsPage() {
   const currentUser = getStoredUser();
   const canView = !!currentUser && VIEW_ROLES.has(currentUser.role);
-  const canCreate = !!currentUser && OPERATIONS_ROLES.has(currentUser.role);
-  const canAssignContainer = !!currentUser && OPERATIONS_ROLES.has(currentUser.role);
+  const canCreate = !!currentUser && VIEW_ROLES.has(currentUser.role);
+  const canAssignContainer = !!currentUser && VIEW_ROLES.has(currentUser.role);
   const canAssignItem = !!currentUser && WAREHOUSE_ROLES.has(currentUser.role);
   const canFinalize = !!currentUser && FINALIZE_ROLES.has(currentUser.role);
   const canDepart = !!currentUser && DEPART_ROLES.has(currentUser.role);

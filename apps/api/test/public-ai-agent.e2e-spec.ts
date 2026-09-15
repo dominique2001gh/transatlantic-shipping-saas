@@ -44,8 +44,8 @@ describe('Public AI Agent (e2e)', () => {
     app.useGlobalPipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }));
     await app.init();
 
-    tenantA = await createTestTenant(prisma, 'PubAgentA', UserRole.WAREHOUSE_MANAGER);
-    tenantB = await createTestTenant(prisma, 'PubAgentB', UserRole.WAREHOUSE_MANAGER);
+    tenantA = await createTestTenant(prisma, 'PubAgentA', UserRole.MANAGER);
+    tenantB = await createTestTenant(prisma, 'PubAgentB', UserRole.MANAGER);
 
     await prisma.tenantAgentKnowledgeEntry.create({
       data: {

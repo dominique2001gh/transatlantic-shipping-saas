@@ -12,15 +12,14 @@ import { CreateInvoiceDto } from './dto/create-invoice.dto';
 import { InvoicesService } from './invoices.service';
 
 /**
- * Invoices are a financial/customer-account document, not warehouse-floor
- * work — unlike ShipmentsController's OPERATIONS_ROLES (which deliberately
- * includes WAREHOUSE_MANAGER/WAREHOUSE_STAFF), warehouse-only operational
- * roles get no access here at all. This is a deliberate product decision,
- * not an oversight: staff status alone must never imply invoice access.
- * Sourced from the shared INVOICE_MANAGE_ROLES constant (Stage 3D) since
- * the frontend now needs the identical list for nav visibility — kept as
- * local aliases here so the rest of this file reads exactly as it did
- * before. No broader read-only tier exists.
+ * Invoices are a financial/customer-account document, not operational
+ * work — unlike ShipmentsController's OPERATIONS_ROLES (OWNER/MANAGER/
+ * STAFF), STAFF gets no access here at all. This is a deliberate product
+ * decision, not an oversight: staff status alone must never imply invoice
+ * access. Sourced from the shared INVOICE_MANAGE_ROLES constant (OWNER/
+ * MANAGER/FINANCE) since the frontend now needs the identical list for nav
+ * visibility — kept as local aliases here so the rest of this file reads
+ * exactly as it did before. No broader read-only tier exists.
  */
 const MANAGE_ROLES = INVOICE_MANAGE_ROLES;
 const VIEW_ROLES = MANAGE_ROLES;

@@ -29,7 +29,7 @@ describe('Customer notification emails: branding, tracking link, ETA/pickup deta
 
   beforeAll(async () => {
     app = await createTestApp();
-    tenantA = await createTestTenant(prisma, 'EmailRedesign', UserRole.WAREHOUSE_MANAGER);
+    tenantA = await createTestTenant(prisma, 'EmailRedesign', UserRole.MANAGER);
     tokenA = await login(app, tenantA.user.email, tenantA.user.password);
 
     // Real branding, distinct from Trans Atlantic's, to prove tenant-aware

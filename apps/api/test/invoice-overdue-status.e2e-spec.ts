@@ -43,7 +43,7 @@ describe('Invoice overdue status: live-computed, applied everywhere (e2e)', () =
   beforeAll(async () => {
     app = await createTestApp();
 
-    tenant = await createTestTenant(prisma, 'OverdueStatus', UserRole.TENANT_ADMIN);
+    tenant = await createTestTenant(prisma, 'OverdueStatus', UserRole.OWNER);
     staffToken = await login(app, tenant.user.email, tenant.user.password);
     customer = await createCustomerWithPortalUser(prisma, tenant.tenantId, 'OverdueCust');
     customerToken = await login(app, customer.user.email, customer.user.password);

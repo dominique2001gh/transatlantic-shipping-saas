@@ -37,25 +37,25 @@ describe('Payment foundation: RBAC, isolation, balance/status derivation, money 
   beforeAll(async () => {
     app = await createTestApp();
 
-    tenantA = await createTestTenant(prisma, 'PayA', UserRole.WAREHOUSE_MANAGER);
-    tenantB = await createTestTenant(prisma, 'PayB', UserRole.WAREHOUSE_MANAGER);
+    tenantA = await createTestTenant(prisma, 'PayA', UserRole.MANAGER);
+    tenantB = await createTestTenant(prisma, 'PayB', UserRole.MANAGER);
 
-    const accountantA = await createUserInTenant(prisma, tenantA.tenantId, 'Accountant', UserRole.ACCOUNTANT);
-    const tenantAdminA = await createUserInTenant(prisma, tenantA.tenantId, 'TenantAdmin', UserRole.TENANT_ADMIN);
+    const accountantA = await createUserInTenant(prisma, tenantA.tenantId, 'Accountant', UserRole.FINANCE);
+    const tenantAdminA = await createUserInTenant(prisma, tenantA.tenantId, 'TenantAdmin', UserRole.OWNER);
     const customerServiceA = await createUserInTenant(
       prisma,
       tenantA.tenantId,
       'CustomerService',
-      UserRole.CUSTOMER_SERVICE,
+      UserRole.STAFF,
     );
     const warehouseStaffA = await createUserInTenant(
       prisma,
       tenantA.tenantId,
       'WarehouseStaff',
-      UserRole.WAREHOUSE_STAFF,
+      UserRole.STAFF,
     );
-    const driverA = await createUserInTenant(prisma, tenantA.tenantId, 'Driver', UserRole.DRIVER);
-    const accountantB = await createUserInTenant(prisma, tenantB.tenantId, 'Accountant', UserRole.ACCOUNTANT);
+    const driverA = await createUserInTenant(prisma, tenantA.tenantId, 'Driver', UserRole.STAFF);
+    const accountantB = await createUserInTenant(prisma, tenantB.tenantId, 'Accountant', UserRole.FINANCE);
 
     accountantTokenA = await login(app, accountantA.email, accountantA.password);
     tenantAdminTokenA = await login(app, tenantAdminA.email, tenantAdminA.password);
@@ -96,21 +96,15 @@ describe('Payment foundation: RBAC, isolation, balance/status derivation, money 
     await prisma.$disconnect();
   }, 30_000);
 
-  describe('RBAC: warehouse-only operational roles never get payment access', () => {
-    it('WAREHOUSE_MANAGER gets 403 on both GET and POST payments', async () => {
-      const invoice = await createIssuedInvoice(app, accountantTokenA, customer1IdA, shipment1A.id, 100);
-      const getRes = await request(app.getHttpServer())
-        .get(`/invoices/${invoice.id}/payments`)
-        .set('Authorization', `Bearer ${warehouseManagerTokenA}`);
-      expect(getRes.status).toBe(403);
-      const postRes = await request(app.getHttpServer())
-        .post(`/invoices/${invoice.id}/payments`)
-        .set('Authorization', `Bearer ${warehouseManagerTokenA}`)
-        .send(validPaymentPayload(50));
-      expect(postRes.status).toBe(403);
-    });
-
-    it('WAREHOUSE_STAFF gets 403', async () => {
+  /**
+   * RBAC V1: INVOICE_MANAGE_ROLES (also gating per-invoice payments) is
+   * now OWNER/MANAGER/FINANCE. STAFF (the merged successor of
+   * WAREHOUSE_STAFF, CUSTOMER_SERVICE, and DESTINATION_AGENT) is
+   * deliberately excluded — CUSTOMER_SERVICE used to have payment access;
+   * STAFF's V1 scope does not.
+   */
+  describe('RBAC: operational-only roles never get payment access', () => {
+    it('STAFF gets 403', async () => {
       const invoice = await createIssuedInvoice(app, accountantTokenA, customer1IdA, shipment1A.id, 100);
       const res = await request(app.getHttpServer())
         .get(`/invoices/${invoice.id}/payments`)
@@ -118,11 +112,20 @@ describe('Payment foundation: RBAC, isolation, balance/status derivation, money 
       expect(res.status).toBe(403);
     });
 
-    it('DRIVER gets 403', async () => {
+    it('STAFF gets 403 (second STAFF account)', async () => {
       const invoice = await createIssuedInvoice(app, accountantTokenA, customer1IdA, shipment1A.id, 100);
       const res = await request(app.getHttpServer())
         .get(`/invoices/${invoice.id}/payments`)
         .set('Authorization', `Bearer ${driverTokenA}`);
+      expect(res.status).toBe(403);
+    });
+
+    it('STAFF gets 403 recording a payment (the merged former CUSTOMER_SERVICE role no longer has payment access)', async () => {
+      const invoice = await createIssuedInvoice(app, accountantTokenA, customer1IdA, shipment1A.id, 100);
+      const res = await request(app.getHttpServer())
+        .post(`/invoices/${invoice.id}/payments`)
+        .set('Authorization', `Bearer ${customerServiceTokenA}`)
+        .send(validPaymentPayload(50));
       expect(res.status).toBe(403);
     });
 
@@ -142,11 +145,11 @@ describe('Payment foundation: RBAC, isolation, balance/status derivation, money 
     });
   });
 
-  describe('RBAC: office/accounting staff can record payments', () => {
+  describe('RBAC: OWNER, MANAGER, and FINANCE can record payments', () => {
     it.each([
-      ['ACCOUNTANT', () => accountantTokenA],
-      ['TENANT_ADMIN', () => tenantAdminTokenA],
-      ['CUSTOMER_SERVICE', () => customerServiceTokenA],
+      ['FINANCE', () => accountantTokenA],
+      ['OWNER', () => tenantAdminTokenA],
+      ['MANAGER', () => warehouseManagerTokenA],
     ])('%s can record a payment', async (_label, getToken) => {
       const invoice = await createIssuedInvoice(app, accountantTokenA, customer1IdA, shipment1A.id, 100);
       const res = await request(app.getHttpServer())
@@ -155,6 +158,14 @@ describe('Payment foundation: RBAC, isolation, balance/status derivation, money 
         .send(validPaymentPayload(50));
       expect(res.status).toBe(201);
       expect(res.body.status).toBe('COMPLETED');
+    });
+
+    it('MANAGER can also view payments for an invoice', async () => {
+      const invoice = await createIssuedInvoice(app, accountantTokenA, customer1IdA, shipment1A.id, 100);
+      const res = await request(app.getHttpServer())
+        .get(`/invoices/${invoice.id}/payments`)
+        .set('Authorization', `Bearer ${warehouseManagerTokenA}`);
+      expect(res.status).toBe(200);
     });
   });
 
@@ -381,10 +392,10 @@ describe('Payment foundation: RBAC, isolation, balance/status derivation, money 
   });
 
   describe('Stage 3D: tenant-wide payment list (GET /payments)', () => {
-    it('WAREHOUSE_MANAGER gets 403', async () => {
+    it('STAFF gets 403 — the merged former CUSTOMER_SERVICE role no longer has payment access', async () => {
       const res = await request(app.getHttpServer())
         .get('/payments')
-        .set('Authorization', `Bearer ${warehouseManagerTokenA}`);
+        .set('Authorization', `Bearer ${customerServiceTokenA}`);
       expect(res.status).toBe(403);
     });
 
@@ -400,11 +411,11 @@ describe('Payment foundation: RBAC, isolation, balance/status derivation, money 
       expect(res.status).toBe(401);
     });
 
-    it('ACCOUNTANT/TENANT_ADMIN/CUSTOMER_SERVICE can list tenant-wide payments, enriched with invoiceNumber/customerName', async () => {
+    it('FINANCE/OWNER/MANAGER can list tenant-wide payments, enriched with invoiceNumber/customerName', async () => {
       const invoice = await createIssuedInvoice(app, accountantTokenA, customer1IdA, shipment1A.id, 100);
       await postPayment(app, accountantTokenA, invoice.id, 60);
 
-      for (const token of [accountantTokenA, tenantAdminTokenA, customerServiceTokenA]) {
+      for (const token of [accountantTokenA, tenantAdminTokenA, warehouseManagerTokenA]) {
         const res = await request(app.getHttpServer()).get('/payments').set('Authorization', `Bearer ${token}`);
         expect(res.status).toBe(200);
         const row = res.body.find((p: { invoiceId: string }) => p.invoiceId === invoice.id);

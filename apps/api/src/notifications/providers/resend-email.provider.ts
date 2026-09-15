@@ -54,6 +54,14 @@ export function formatFromHeader(address: string, displayName?: string | null): 
  * construct every provider eagerly regardless of which one is actually
  * selected by env var, so reading RESEND_API_KEY in the constructor would
  * break any environment that doesn't set it, including local dev).
+ *
+ * Sender-identity fix (2026-09, platform-branding): `params.fromName`/
+ * `params.fromAddress`, when given, override EMAIL_FROM_NAME/
+ * EMAIL_FROM_ADDRESS for this one send — see EmailProvider's own doc
+ * comment for why (platform-lifecycle mail must always say AnanseLogix,
+ * independent of whatever EMAIL_FROM_NAME is configured to for a tenant's
+ * own customer-facing notifications). Omitting them keeps today's exact
+ * behavior.
  */
 @Injectable()
 export class ResendEmailProvider implements EmailProvider {
@@ -62,9 +70,9 @@ export class ResendEmailProvider implements EmailProvider {
 
   constructor(private readonly config: ConfigService) {}
 
-  async send(params: { to: string; subject: string; body: string; html?: string }): Promise<ProviderSendResult> {
-    const fromAddress = this.config.get<string>('EMAIL_FROM_ADDRESS', 'onboarding@resend.dev');
-    const fromName = this.config.get<string>('EMAIL_FROM_NAME');
+  async send(params: { to: string; subject: string; body: string; html?: string; fromName?: string; fromAddress?: string }): Promise<ProviderSendResult> {
+    const fromAddress = params.fromAddress ?? this.config.get<string>('EMAIL_FROM_ADDRESS', 'onboarding@resend.dev');
+    const fromName = params.fromName ?? this.config.get<string>('EMAIL_FROM_NAME');
     const from = formatFromHeader(fromAddress, fromName);
 
     try {

@@ -33,17 +33,17 @@ describe('Customer Pickup (e2e)', () => {
 
   beforeAll(async () => {
     app = await createTestApp();
-    tenantA = await createTestTenant(prisma, 'CpA', UserRole.WAREHOUSE_MANAGER);
-    tenantB = await createTestTenant(prisma, 'CpB', UserRole.WAREHOUSE_MANAGER);
-    const staffUser = await createUserInTenant(prisma, tenantA.tenantId, 'Staff', UserRole.WAREHOUSE_STAFF);
+    tenantA = await createTestTenant(prisma, 'CpA', UserRole.MANAGER);
+    tenantB = await createTestTenant(prisma, 'CpB', UserRole.MANAGER);
+    const staffUser = await createUserInTenant(prisma, tenantA.tenantId, 'Staff', UserRole.STAFF);
     const destinationAgentUser = await createUserInTenant(
       prisma,
       tenantA.tenantId,
       'DestAgent',
-      UserRole.DESTINATION_AGENT,
+      UserRole.STAFF,
     );
     const customerUser = await createUserInTenant(prisma, tenantA.tenantId, 'Cust', UserRole.CUSTOMER);
-    const accountantUser = await createUserInTenant(prisma, tenantA.tenantId, 'Acct', UserRole.ACCOUNTANT);
+    const accountantUser = await createUserInTenant(prisma, tenantA.tenantId, 'Acct', UserRole.FINANCE);
 
     tokenA = await login(app, tenantA.user.email, tenantA.user.password);
     tokenB = await login(app, tenantB.user.email, tenantB.user.password);
@@ -171,7 +171,7 @@ describe('Customer Pickup (e2e)', () => {
   });
 
   describe('RBAC', () => {
-    it('rejects ACCOUNTANT and CUSTOMER from picking up an item', async () => {
+    it('rejects FINANCE and CUSTOMER from picking up an item', async () => {
       const manifest = await createReceivedOceanManifest(app, tokenA, tenantA, 1);
       for (const token of [accountantToken, customerToken]) {
         const res = await pickup(app, token, manifest.itemId, tenantA.warehouseId, { recipientName: 'Someone' });
@@ -179,7 +179,7 @@ describe('Customer Pickup (e2e)', () => {
       }
     });
 
-    it('allows WAREHOUSE_STAFF and DESTINATION_AGENT to pick up an item', async () => {
+    it('allows STAFF and STAFF to pick up an item', async () => {
       const m1 = await createReceivedOceanManifest(app, tokenA, tenantA, 1);
       const staffRes = await pickup(app, staffToken, m1.itemId, tenantA.warehouseId, { recipientName: 'Someone' });
       expect(staffRes.status).toBe(201);

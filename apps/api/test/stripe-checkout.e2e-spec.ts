@@ -19,13 +19,13 @@ jest.setTimeout(30_000);
  * Checkout Session creation (POST /portal/invoices/:id/checkout-session)
  * and the Stripe webhook (POST /webhooks/stripe) that confirms it.
  *
- * This hits Stripe's real test-mode API using the STRIPE_SECRET_KEY
+ * This hits Stripe's real test-mode API using the PLATFORM_STRIPE_SECRET_KEY
  * already configured in apps/api/.env — the same "no mocking layer,
  * exercise the real thing" convention every other e2e spec in this suite
  * already follows for Postgres (see test-app.ts's own doc comment).
  * Webhook events are constructed and signed locally with
  * Stripe.webhooks.generateTestHeaderString (the SDK's own supported
- * testing utility) against the real STRIPE_WEBHOOK_SECRET, so these tests
+ * testing utility) against the real PLATFORM_STRIPE_WEBHOOK_SECRET, so these tests
  * never depend on the `stripe listen` CLI actually running.
  */
 describe('Stripe Checkout: online invoice payments (e2e)', () => {
@@ -55,17 +55,17 @@ describe('Stripe Checkout: online invoice payments (e2e)', () => {
     // these here (never logging them) is how this file signs webhook
     // payloads with the exact same secret the running app verifies
     // against, without ever hard-coding or printing a secret value.
-    const secretKey = process.env.STRIPE_SECRET_KEY;
-    webhookSecret = process.env.STRIPE_WEBHOOK_SECRET ?? '';
+    const secretKey = process.env.PLATFORM_STRIPE_SECRET_KEY;
+    webhookSecret = process.env.PLATFORM_STRIPE_WEBHOOK_SECRET ?? '';
     if (!secretKey || !webhookSecret) {
-      throw new Error('STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET must be configured in apps/api/.env to run this suite.');
+      throw new Error('PLATFORM_STRIPE_SECRET_KEY and PLATFORM_STRIPE_WEBHOOK_SECRET must be configured in apps/api/.env to run this suite.');
     }
     stripe = new Stripe(secretKey);
 
-    tenantA = await createTestTenant(prisma, 'StripeA', UserRole.WAREHOUSE_MANAGER);
-    tenantB = await createTestTenant(prisma, 'StripeB', UserRole.WAREHOUSE_MANAGER);
+    tenantA = await createTestTenant(prisma, 'StripeA', UserRole.MANAGER);
+    tenantB = await createTestTenant(prisma, 'StripeB', UserRole.MANAGER);
 
-    const tenantAdminA = await createUserInTenant(prisma, tenantA.tenantId, 'TenantAdmin', UserRole.TENANT_ADMIN);
+    const tenantAdminA = await createUserInTenant(prisma, tenantA.tenantId, 'TenantAdmin', UserRole.OWNER);
     tenantAdminTokenA = await login(app, tenantAdminA.email, tenantAdminA.password);
 
     customer1A = await createCustomerWithPortalUser(prisma, tenantA.tenantId, 'C1');

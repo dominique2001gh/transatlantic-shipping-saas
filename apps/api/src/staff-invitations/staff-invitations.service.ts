@@ -1,10 +1,13 @@
 import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { TenantInvitationStatus } from '@prisma/client';
+import { Prisma, TenantInvitationStatus } from '@prisma/client';
 import type { AcceptInvitePreview, TenantInvitationSummary } from '@transatlantic/shared';
+import { STAFF_ROLES } from '@transatlantic/shared';
 import { AuthService } from '../auth/auth.service';
+import { resolveTenantWebAppUrl, type TenantForWebAppUrl } from '../common/tenant/tenant-web-app-url.util';
 import { generateToken, hashToken } from '../common/token/token.util';
 import { staffInvitationEmail } from '../notifications/templates/platform-emails';
+import { resolvePlatformEmailSender } from '../notifications/providers/platform-email-sender.util';
 import { EMAIL_PROVIDER } from '../notifications/providers/provider.types';
 import type { EmailProvider } from '../notifications/providers/provider.types';
 import { PrismaService } from '../prisma/prisma.service';
@@ -40,8 +43,27 @@ export class StaffInvitationsService {
    * an active User or a still-live invitation already exists for this
    * email under this tenant: the two duplicate-prevention rules the
    * Staff Invitations stage requires.
+   *
+   * Staff invitation UI fix (2026-09): the existingLiveInvitation check
+   * above is a fast, friendly-message shortcut, not the actual guarantee —
+   * two concurrent calls (a double form submission, or any other race)
+   * could both pass it before either commits. The real guarantee is the
+   * partial unique index migration 20260915000000 adds on
+   * (tenantId, email) WHERE status = 'PENDING'; the try/catch around
+   * `create` below translates that index's violation (Prisma P2002) into
+   * the exact same user-facing message the pre-check already returns in
+   * the common, non-racing case.
    */
   async invite(tenantId: string, invitedByUserId: string, invitedByName: string, dto: InviteStaffDto): Promise<TenantInvitationSummary> {
+    // Defense-in-depth beyond InviteStaffDto's own @IsIn(STAFF_ROLES) check
+    // — never trust a single validation layer for something as
+    // consequential as "what role can this invite create." PLATFORM_ADMIN
+    // and CUSTOMER (the only UserRole values not in STAFF_ROLES) must never
+    // be reachable through this staff-only invite flow.
+    if (!(STAFF_ROLES as string[]).includes(dto.role)) {
+      throw new BadRequestException('Invalid role for a staff invitation.');
+    }
+
     const email = dto.email.toLowerCase().trim();
 
     const existingUser = await this.prisma.user.findFirst({ where: { tenantId, email } });
@@ -58,20 +80,28 @@ export class StaffInvitationsService {
 
     const tenant = await this.prisma.tenant.findUniqueOrThrow({ where: { id: tenantId } });
     const rawToken = generateToken();
-    const invitation = await this.prisma.tenantInvitation.create({
-      data: {
-        tenantId,
-        email,
-        firstName: dto.firstName.trim(),
-        lastName: dto.lastName.trim(),
-        role: dto.role,
-        tokenHash: hashToken(rawToken),
-        invitedByUserId,
-        expiresAt: new Date(Date.now() + INVITATION_TTL_DAYS * 24 * 60 * 60 * 1000),
-      },
-    });
+    let invitation;
+    try {
+      invitation = await this.prisma.tenantInvitation.create({
+        data: {
+          tenantId,
+          email,
+          firstName: dto.firstName.trim(),
+          lastName: dto.lastName.trim(),
+          role: dto.role,
+          tokenHash: hashToken(rawToken),
+          invitedByUserId,
+          expiresAt: new Date(Date.now() + INVITATION_TTL_DAYS * 24 * 60 * 60 * 1000),
+        },
+      });
+    } catch (err) {
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+        throw new BadRequestException('An invitation is already pending for this email. Use Resend instead of creating a new one.');
+      }
+      throw err;
+    }
 
-    await this.sendInvitationEmail(invitation.email, tenant.name, invitedByName, rawToken, invitation.expiresAt);
+    await this.sendInvitationEmail(invitation.email, tenant, invitedByName, rawToken, invitation.expiresAt);
 
     return this.toSummary(invitation);
   }
@@ -99,7 +129,7 @@ export class StaffInvitationsService {
       data: { tokenHash: hashToken(rawToken), expiresAt: new Date(Date.now() + INVITATION_TTL_DAYS * 24 * 60 * 60 * 1000) },
     });
 
-    await this.sendInvitationEmail(updated.email, tenant.name, invitedByName, rawToken, updated.expiresAt);
+    await this.sendInvitationEmail(updated.email, tenant, invitedByName, rawToken, updated.expiresAt);
 
     return this.toSummary(updated);
   }
@@ -182,21 +212,26 @@ export class StaffInvitationsService {
 
   private async sendInvitationEmail(
     email: string,
-    tenantName: string,
+    tenant: TenantForWebAppUrl & { name: string },
     inviterName: string,
     rawToken: string,
     expiresAt: Date,
   ): Promise<void> {
     try {
-      const webAppUrl = this.config.get<string>('WEB_APP_URL', 'http://localhost:3000');
+      const webAppUrl = resolveTenantWebAppUrl(tenant, this.config);
       const emailContent = staffInvitationEmail({
         inviteeEmail: email,
-        tenantName,
+        tenantName: tenant.name,
         inviterName,
         acceptUrl: `${webAppUrl.replace(/\/$/, '')}/accept-invite?token=${rawToken}`,
         expiresAt,
       });
-      await this.emailProvider.send({ to: email, subject: emailContent.subject, body: emailContent.body });
+      await this.emailProvider.send({
+        to: email,
+        subject: emailContent.subject,
+        body: emailContent.body,
+        ...resolvePlatformEmailSender(this.config),
+      });
     } catch (err) {
       this.logger.error(`Failed to send staff invitation email to ${email}: ${err}`);
     }

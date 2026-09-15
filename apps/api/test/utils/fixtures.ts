@@ -34,7 +34,7 @@ export interface TestTenantFixture {
 export async function createTestTenant(
   prisma: PrismaClient,
   label: string,
-  role: UserRole = UserRole.WAREHOUSE_MANAGER,
+  role: UserRole = UserRole.MANAGER,
 ): Promise<TestTenantFixture> {
   const runId = randomUUID().slice(0, 8);
   const slug = `e2e-${label}-${runId}`.toLowerCase();

@@ -55,8 +55,8 @@ describe('WhatsApp final-mile notifications (e2e)', () => {
     app.useGlobalPipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }));
     await app.init();
 
-    tenantA = await createTestTenant(prisma, 'WaFinalA', UserRole.WAREHOUSE_MANAGER);
-    tenantB = await createTestTenant(prisma, 'WaFinalB', UserRole.WAREHOUSE_MANAGER);
+    tenantA = await createTestTenant(prisma, 'WaFinalA', UserRole.MANAGER);
+    tenantB = await createTestTenant(prisma, 'WaFinalB', UserRole.MANAGER);
     tokenA = await login(app, tenantA.user.email, tenantA.user.password);
 
     // Both fixture tenants default to country "US" (see utils/fixtures.ts)
@@ -197,7 +197,7 @@ describe('WhatsApp final-mile notifications (e2e)', () => {
   });
 
   it('7. a Ghana-based tenant customer with a bare local number normalizes correctly using that tenant\'s own country', async () => {
-    const ghanaTenant = await createTestTenant(prisma, 'WaFinalGhana', UserRole.WAREHOUSE_MANAGER);
+    const ghanaTenant = await createTestTenant(prisma, 'WaFinalGhana', UserRole.MANAGER);
     await prisma.tenant.update({ where: { id: ghanaTenant.tenantId }, data: { country: 'GH' } });
     await prisma.customer.update({
       where: { id: ghanaTenant.customerId },

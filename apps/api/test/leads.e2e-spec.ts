@@ -30,14 +30,14 @@ describe('Leads: public capture + staff triage (e2e)', () => {
 
   beforeAll(async () => {
     app = await createTestApp();
-    tenantA = await createTestTenant(prisma, 'LeadsA', UserRole.TENANT_OWNER);
-    tenantB = await createTestTenant(prisma, 'LeadsB', UserRole.TENANT_OWNER);
+    tenantA = await createTestTenant(prisma, 'LeadsA', UserRole.OWNER);
+    tenantB = await createTestTenant(prisma, 'LeadsB', UserRole.OWNER);
     ownerTokenA = await login(app, tenantA.user.email, tenantA.user.password);
     ownerTokenB = await login(app, tenantB.user.email, tenantB.user.password);
 
-    const warehouseStaffA = await createUserInTenant(prisma, tenantA.tenantId, 'Staff', UserRole.WAREHOUSE_STAFF);
+    const warehouseStaffA = await createUserInTenant(prisma, tenantA.tenantId, 'Staff', UserRole.STAFF);
     warehouseStaffTokenA = await login(app, warehouseStaffA.email, warehouseStaffA.password);
-    const managerA = await createUserInTenant(prisma, tenantA.tenantId, 'Manager', UserRole.WAREHOUSE_MANAGER);
+    const managerA = await createUserInTenant(prisma, tenantA.tenantId, 'Manager', UserRole.MANAGER);
     managerTokenA = await login(app, managerA.email, managerA.password);
   }, 30_000);
 
@@ -137,12 +137,18 @@ describe('Leads: public capture + staff triage (e2e)', () => {
       expect(res.status).toBe(401);
     });
 
-    it('WAREHOUSE_STAFF (not a LEAD_MANAGE_ROLES member) gets 403', async () => {
+    /**
+     * RBAC V1: LEAD_MANAGE_ROLES is now OPERATIONS_ROLES (OWNER/MANAGER/
+     * STAFF) — STAFF (the merged successor of both the old plain
+     * WAREHOUSE_STAFF and CUSTOMER_SERVICE roles, the latter of which
+     * already had lead access) can list/triage leads now.
+     */
+    it('STAFF (a LEAD_MANAGE_ROLES member) can list leads', async () => {
       const res = await request(app.getHttpServer()).get('/leads').set('Authorization', `Bearer ${warehouseStaffTokenA}`);
-      expect(res.status).toBe(403);
+      expect(res.status).toBe(200);
     });
 
-    it('WAREHOUSE_MANAGER (a LEAD_MANAGE_ROLES member) can list leads', async () => {
+    it('MANAGER (a LEAD_MANAGE_ROLES member) can list leads', async () => {
       const res = await request(app.getHttpServer()).get('/leads').set('Authorization', `Bearer ${managerTokenA}`);
       expect(res.status).toBe(200);
       expect(Array.isArray(res.body)).toBe(true);
@@ -184,14 +190,14 @@ describe('Leads: public capture + staff triage (e2e)', () => {
       expect(stillA?.status).toBe('CONTACTED');
     });
 
-    it('WAREHOUSE_STAFF gets 403 attempting to update a lead status', async () => {
+    it('STAFF can update a lead status', async () => {
       const list = await request(app.getHttpServer()).get('/leads').set('Authorization', `Bearer ${ownerTokenA}`);
       const leadId = list.body[0].id;
       const res = await request(app.getHttpServer())
         .patch(`/leads/${leadId}/status`)
         .set('Authorization', `Bearer ${warehouseStaffTokenA}`)
         .send({ status: 'CLOSED' });
-      expect(res.status).toBe(403);
+      expect(res.status).toBe(200);
     });
   });
 });

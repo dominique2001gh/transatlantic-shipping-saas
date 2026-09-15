@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import type { ContainerDetail } from '@transatlantic/shared';
-import { UserRole } from '@transatlantic/shared';
+import { MANAGER_UP_ROLES, OPERATIONS_ROLES } from '@transatlantic/shared';
 import { StatusBadge } from '@/components/dashboard/StatusBadge';
 import { ContainerContentsList } from '@/components/warehouse/ContainerContentsList';
 import { Button } from '@/components/ui/Button';
@@ -18,17 +18,10 @@ import {
 } from '@/lib/containers';
 import { formatDateTime } from '@/lib/format';
 
-const FINALIZE_ROLES = new Set<UserRole>([UserRole.TENANT_OWNER, UserRole.TENANT_ADMIN, UserRole.WAREHOUSE_MANAGER]);
-/** Milestone 3F: mirrors ContainersController's DESTINATION_ROLES — opening for unloading is destination floor work. */
-const OPEN_ROLES = new Set<UserRole>([
-  UserRole.TENANT_OWNER,
-  UserRole.TENANT_ADMIN,
-  UserRole.WAREHOUSE_MANAGER,
-  UserRole.WAREHOUSE_STAFF,
-  UserRole.DESTINATION_AGENT,
-]);
-/** Mirrors ContainersController's CLOSE_ROLES — supervisor-level, staff excluded, same shape as FINALIZE_ROLES. */
-const CLOSE_ROLES = new Set<UserRole>([...FINALIZE_ROLES, UserRole.DESTINATION_AGENT]);
+/** Same role tiers ContainersController enforces server-side — finalize is the one supervisor-level MANAGER_UP_ROLES action; open/close are OPERATIONS_ROLES like everything else. */
+const FINALIZE_ROLES = new Set(MANAGER_UP_ROLES);
+const OPEN_ROLES = new Set(OPERATIONS_ROLES);
+const CLOSE_ROLES = new Set(OPERATIONS_ROLES);
 
 const STATUS_FILTERS = [
   'ALL',

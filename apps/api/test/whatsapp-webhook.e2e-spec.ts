@@ -41,8 +41,8 @@ describe('WhatsApp webhook (e2e)', () => {
   beforeAll(async () => {
     process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN = TEST_VERIFY_TOKEN;
     app = await createTestApp();
-    tenantA = await createTestTenant(prisma, 'WaWebhookA', UserRole.WAREHOUSE_MANAGER);
-    tenantB = await createTestTenant(prisma, 'WaWebhookB', UserRole.WAREHOUSE_MANAGER);
+    tenantA = await createTestTenant(prisma, 'WaWebhookA', UserRole.MANAGER);
+    tenantB = await createTestTenant(prisma, 'WaWebhookB', UserRole.MANAGER);
   });
 
   afterAll(async () => {

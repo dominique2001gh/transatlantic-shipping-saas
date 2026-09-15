@@ -32,7 +32,7 @@ describe('Final-mile customer notifications: READY_FOR_PICKUP / OUT_FOR_DELIVERY
 
   beforeAll(async () => {
     app = await createTestApp();
-    tenantA = await createTestTenant(prisma, 'FinalMile', UserRole.WAREHOUSE_MANAGER);
+    tenantA = await createTestTenant(prisma, 'FinalMile', UserRole.MANAGER);
     tokenA = await login(app, tenantA.user.email, tenantA.user.password);
   });
 

@@ -43,11 +43,11 @@ describe('Customer Portal invoices: draft-visibility, isolation, payments (e2e)'
   beforeAll(async () => {
     app = await createTestApp();
 
-    tenantA = await createTestTenant(prisma, 'PInvA', UserRole.WAREHOUSE_MANAGER);
-    tenantB = await createTestTenant(prisma, 'PInvB', UserRole.WAREHOUSE_MANAGER);
+    tenantA = await createTestTenant(prisma, 'PInvA', UserRole.MANAGER);
+    tenantB = await createTestTenant(prisma, 'PInvB', UserRole.MANAGER);
 
-    const tenantAdminA = await createUserInTenant(prisma, tenantA.tenantId, 'TenantAdmin', UserRole.TENANT_ADMIN);
-    const tenantAdminB = await createUserInTenant(prisma, tenantB.tenantId, 'TenantAdmin', UserRole.TENANT_ADMIN);
+    const tenantAdminA = await createUserInTenant(prisma, tenantA.tenantId, 'TenantAdmin', UserRole.OWNER);
+    const tenantAdminB = await createUserInTenant(prisma, tenantB.tenantId, 'TenantAdmin', UserRole.OWNER);
     tenantAdminTokenA = await login(app, tenantAdminA.email, tenantAdminA.password);
     tenantAdminTokenB = await login(app, tenantAdminB.email, tenantAdminB.password);
 

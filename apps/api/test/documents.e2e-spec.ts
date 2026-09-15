@@ -45,12 +45,12 @@ describe('Documents: upload, visibility, isolation, download (e2e)', () => {
   beforeAll(async () => {
     app = await createTestApp();
 
-    tenantA = await createTestTenant(prisma, 'DocsA', UserRole.WAREHOUSE_MANAGER);
-    tenantB = await createTestTenant(prisma, 'DocsB', UserRole.WAREHOUSE_MANAGER);
+    tenantA = await createTestTenant(prisma, 'DocsA', UserRole.MANAGER);
+    tenantB = await createTestTenant(prisma, 'DocsB', UserRole.MANAGER);
 
-    const tenantAdminA = await createUserInTenant(prisma, tenantA.tenantId, 'TenantAdmin', UserRole.TENANT_ADMIN);
+    const tenantAdminA = await createUserInTenant(prisma, tenantA.tenantId, 'TenantAdmin', UserRole.OWNER);
     tenantAdminTokenA = await login(app, tenantAdminA.email, tenantAdminA.password);
-    const warehouseStaffA = await createUserInTenant(prisma, tenantA.tenantId, 'WhStaff', UserRole.WAREHOUSE_STAFF);
+    const warehouseStaffA = await createUserInTenant(prisma, tenantA.tenantId, 'WhStaff', UserRole.STAFF);
     warehouseStaffTokenA = await login(app, warehouseStaffA.email, warehouseStaffA.password);
 
     customer1A = await createCustomerWithPortalUser(prisma, tenantA.tenantId, 'C1');
@@ -71,13 +71,21 @@ describe('Documents: upload, visibility, isolation, download (e2e)', () => {
   }, 30_000);
 
   describe('RBAC', () => {
-    it('a warehouse-staff token gets 403 uploading (not a DOCUMENT_MANAGE_ROLES role)', async () => {
+    /**
+     * RBAC V1: DOCUMENT_MANAGE_ROLES is now OPERATIONS_ROLES (OWNER/
+     * MANAGER/STAFF) — STAFF (the merged successor of both the old
+     * WAREHOUSE_STAFF and CUSTOMER_SERVICE roles) can upload documents,
+     * matching STAFF's approved V1 scope ("...appropriate operational
+     * documents"). This is the inverse of the pre-RBAC-V1 assertion here
+     * (plain WAREHOUSE_STAFF specifically was excluded then).
+     */
+    it('a STAFF token can upload (DOCUMENT_MANAGE_ROLES includes STAFF)', async () => {
       const res = await request(app.getHttpServer())
         .post(`/documents/shipments/${shipment1A.id}`)
         .set('Authorization', `Bearer ${warehouseStaffTokenA}`)
         .field('type', 'BILL_OF_LADING')
         .attach('file', FAKE_PDF, { filename: 'bol.pdf', contentType: 'application/pdf' });
-      expect(res.status).toBe(403);
+      expect(res.status).toBe(201);
     });
 
     it('a customer token gets 403 on the staff upload route', async () => {

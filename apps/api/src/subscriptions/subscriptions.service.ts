@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { SubscriptionStatus } from '@prisma/client';
 import type Stripe from 'stripe';
+import { resolvePlatformEmailSender } from '../notifications/providers/platform-email-sender.util';
 import { EMAIL_PROVIDER } from '../notifications/providers/provider.types';
 import type { EmailProvider } from '../notifications/providers/provider.types';
 import { paymentFailureEmail, tenantActivatedEmail } from '../notifications/templates/platform-emails';
@@ -181,10 +182,15 @@ export class SubscriptionsService {
     if (wasRecovering) {
       try {
         const tenant = await this.prisma.tenant.findUniqueOrThrow({ where: { id: existing.tenantId } });
-        const owner = await this.prisma.user.findFirst({ where: { tenantId: tenant.id, role: 'TENANT_OWNER' } });
+        const owner = await this.prisma.user.findFirst({ where: { tenantId: tenant.id, role: 'OWNER' } });
         if (owner) {
           const email = tenantActivatedEmail({ ownerFirstName: owner.firstName, tenantName: tenant.name });
-          await this.emailProvider.send({ to: owner.email, subject: email.subject, body: email.body });
+          await this.emailProvider.send({
+            to: owner.email,
+            subject: email.subject,
+            body: email.body,
+            ...resolvePlatformEmailSender(this.config),
+          });
         }
       } catch (err) {
         this.logger.error(`Failed to send tenant-activated email for subscription ${subscriptionId}: ${err}`);
@@ -212,7 +218,7 @@ export class SubscriptionsService {
 
     try {
       const tenant = await this.prisma.tenant.findUniqueOrThrow({ where: { id: existing.tenantId } });
-      const owner = await this.prisma.user.findFirst({ where: { tenantId: tenant.id, role: 'TENANT_OWNER' } });
+      const owner = await this.prisma.user.findFirst({ where: { tenantId: tenant.id, role: 'OWNER' } });
       if (owner) {
         const webAppUrl = this.config.get<string>('WEB_APP_URL', 'http://localhost:3000');
         const email = paymentFailureEmail({
@@ -221,7 +227,12 @@ export class SubscriptionsService {
           gracePeriodEndsAt,
           billingUrl: `${webAppUrl.replace(/\/$/, '')}/onboarding/billing`,
         });
-        await this.emailProvider.send({ to: owner.email, subject: email.subject, body: email.body });
+        await this.emailProvider.send({
+          to: owner.email,
+          subject: email.subject,
+          body: email.body,
+          ...resolvePlatformEmailSender(this.config),
+        });
       }
     } catch (err) {
       this.logger.error(`Failed to send payment-failure email for subscription ${subscriptionId}: ${err}`);

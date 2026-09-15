@@ -35,7 +35,15 @@ const STEP_LABELS: Record<(typeof STEPS)[number], string> = {
   BILLING: 'Billing',
   DONE: 'Done',
 };
-const INVITABLE_ROLES = STAFF_ROLES.filter((role) => role !== UserRole.TENANT_OWNER);
+/**
+ * RBAC V1: this whole wizard is ONBOARDING_ROLES-gated (OWNER only, see
+ * useRequireAuth below), so anyone reaching this Staff step is already an
+ * OWNER — no need to filter OWNER back out of the invitable list the way
+ * the pre-RBAC-V1 version did (that filter existed because TENANT_ADMIN
+ * could also reach this wizard and, by policy, couldn't invite a
+ * co-equal owner; TENANT_ADMIN no longer exists as a distinct role).
+ */
+const INVITABLE_ROLES = STAFF_ROLES;
 
 /**
  * AnanseLogix Phase 1: the post-signup onboarding wizard (Section 8) —
@@ -267,7 +275,7 @@ function StaffStep({
           <TextInput label="Email" id="email" name="email" type="email" required />
         </div>
         <div className="w-48">
-          <SelectInput label="Role" id="role" name="role" defaultValue={UserRole.WAREHOUSE_STAFF}>
+          <SelectInput label="Role" id="role" name="role" defaultValue={UserRole.STAFF}>
             {INVITABLE_ROLES.map((role) => (
               <option key={role} value={role}>
                 {role.replaceAll('_', ' ')}

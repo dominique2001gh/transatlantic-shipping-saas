@@ -1,7 +1,7 @@
 import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
 import { EntitlementFeature } from '@prisma/client';
 import type { AuthenticatedUser } from '@transatlantic/shared';
-import { ShipmentItemStatus, UserRole } from '@transatlantic/shared';
+import { OPERATIONS_ROLES, ShipmentItemStatus } from '@transatlantic/shared';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { RequireEntitlement } from '../common/decorators/require-entitlement.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -18,69 +18,34 @@ import { WarehouseService } from './warehouse.service';
 const VALID_ITEM_STATUSES = new Set<string>(Object.values(ShipmentItemStatus));
 
 /**
- * Physical warehouse operations are narrower than general shipment
- * management (3A's OPERATIONS_ROLES) — CUSTOMER_SERVICE can manage
- * shipments/customers but doesn't do floor-level receiving.
+ * RBAC V1: every warehouse route — origin receive/process, destination
+ * receive, pickup, dispatch, deliver, return — is OPERATIONS_ROLES
+ * (OWNER/MANAGER/STAFF). The old split between "origin-only" WAREHOUSE_ROLES
+ * and "origin+destination" DESTINATION_RECEIVE_ROLES existed only because
+ * WAREHOUSE_STAFF and DESTINATION_AGENT were once separate roles with
+ * different scopes; both are now the single STAFF tier, whose approved V1
+ * definition explicitly covers "warehouse receiving/processing/loading/
+ * destination receiving/pickup/delivery" end to end, so one role list
+ * covers every route in this controller. FINANCE has none of this — no
+ * warehouse access at all, not even view.
  */
-const WAREHOUSE_ROLES = [
-  UserRole.TENANT_OWNER,
-  UserRole.TENANT_ADMIN,
-  UserRole.WAREHOUSE_MANAGER,
-  UserRole.WAREHOUSE_STAFF,
-];
-
-/**
- * Milestone 3F: destination receiving is exactly the action
- * DESTINATION_AGENT exists for — a deliberate, additive widening (this
- * role has been view-only everywhere until now). Overrides the
- * class-level @Roles(...WAREHOUSE_ROLES) only for these routes
- * (RolesGuard uses getAllAndOverride — method-level wins); every other
- * warehouse route's access is unchanged.
- *
- * Customer Pickup milestone: reused as-is (not a new role set) for
- * items/:itemId/pickup — handing cargo to a customer at the destination
- * warehouse is the same floor-work tier as destination-receive, performed
- * by the same staff. Kept under this name rather than renamed/duplicated
- * since the role membership is identical.
- *
- * Delivery/Driver Dispatch milestone: dispatch/deliver/return reuse this
- * same set too — all three are staff actions performed at (or about) the
- * destination warehouse, not driver actions. UserRole.DRIVER is
- * deliberately still not added here — a driver self-service confirmation
- * flow is real future work, not V1 (see WarehouseService.deliverItem's
- * doc comment on how a driver is currently only ever recorded, never a
- * caller of these routes).
- */
-const DESTINATION_RECEIVE_ROLES = [...WAREHOUSE_ROLES, UserRole.DESTINATION_AGENT];
-
 @Controller('warehouse')
 @RequireEntitlement(EntitlementFeature.OPERATIONS_SOFTWARE)
-@Roles(...WAREHOUSE_ROLES)
+@Roles(...OPERATIONS_ROLES)
 export class WarehouseController {
   constructor(private readonly warehouseService: WarehouseService) {}
 
-  // locations/scan/search/inventory/activity are widened to
-  // DESTINATION_RECEIVE_ROLES (not left at the class-level default) so a
-  // DESTINATION_AGENT can actually use the scan-first destination-receive
-  // workflow this page hosts — resolving an item, and seeing the same
-  // warehouse's live inventory/activity, are read-only and don't grant
-  // any new write access. receive/process below stay WAREHOUSE_ROLES
-  // only — a destination agent doesn't do origin receiving.
-
   @Get('locations')
-  @Roles(...DESTINATION_RECEIVE_ROLES)
   listLocations(@CurrentUser() user: AuthenticatedUser) {
     return this.warehouseService.listLocations(requireTenantId(user.tenantId));
   }
 
   @Get('scan')
-  @Roles(...DESTINATION_RECEIVE_ROLES)
   scan(@CurrentUser() user: AuthenticatedUser, @Query('code') code?: string) {
     return this.warehouseService.resolveScan(requireTenantId(user.tenantId), code ?? '');
   }
 
   @Get('search')
-  @Roles(...DESTINATION_RECEIVE_ROLES)
   search(@CurrentUser() user: AuthenticatedUser, @Query('query') query?: string) {
     return this.warehouseService.searchItems(requireTenantId(user.tenantId), query ?? '');
   }
@@ -104,7 +69,6 @@ export class WarehouseController {
   }
 
   @Get('inventory')
-  @Roles(...DESTINATION_RECEIVE_ROLES)
   inventory(
     @CurrentUser() user: AuthenticatedUser,
     @Query('warehouseId') warehouseId?: string,
@@ -120,7 +84,6 @@ export class WarehouseController {
   }
 
   @Get('activity')
-  @Roles(...DESTINATION_RECEIVE_ROLES)
   activity(
     @CurrentUser() user: AuthenticatedUser,
     @Query('warehouseId') warehouseId?: string,
@@ -133,7 +96,6 @@ export class WarehouseController {
   }
 
   @Post('items/:itemId/destination-receive')
-  @Roles(...DESTINATION_RECEIVE_ROLES)
   destinationReceive(
     @CurrentUser() user: AuthenticatedUser,
     @Param('itemId') itemId: string,
@@ -144,28 +106,24 @@ export class WarehouseController {
 
   /** Customer Pickup milestone. See WarehouseService.pickupItem for the eligibility/warehouse-match rules. */
   @Post('items/:itemId/pickup')
-  @Roles(...DESTINATION_RECEIVE_ROLES)
   pickup(@CurrentUser() user: AuthenticatedUser, @Param('itemId') itemId: string, @Body() dto: PickupItemDto) {
     return this.warehouseService.pickupItem(requireTenantId(user.tenantId), user.id, itemId, dto);
   }
 
   /** Delivery/Driver Dispatch milestone. See WarehouseService.dispatchItem. */
   @Post('items/:itemId/dispatch')
-  @Roles(...DESTINATION_RECEIVE_ROLES)
   dispatch(@CurrentUser() user: AuthenticatedUser, @Param('itemId') itemId: string, @Body() dto: DispatchItemDto) {
     return this.warehouseService.dispatchItem(requireTenantId(user.tenantId), user.id, itemId, dto);
   }
 
   /** Delivery/Driver Dispatch milestone. See WarehouseService.deliverItem. */
   @Post('items/:itemId/deliver')
-  @Roles(...DESTINATION_RECEIVE_ROLES)
   deliver(@CurrentUser() user: AuthenticatedUser, @Param('itemId') itemId: string, @Body() dto: DeliverItemDto) {
     return this.warehouseService.deliverItem(requireTenantId(user.tenantId), user.id, itemId, dto);
   }
 
   /** Delivery/Driver Dispatch milestone. See WarehouseService.returnItem. */
   @Post('items/:itemId/return')
-  @Roles(...DESTINATION_RECEIVE_ROLES)
   returnToWarehouse(@CurrentUser() user: AuthenticatedUser, @Param('itemId') itemId: string, @Body() dto: ReturnItemDto) {
     return this.warehouseService.returnItem(requireTenantId(user.tenantId), user.id, itemId, dto);
   }

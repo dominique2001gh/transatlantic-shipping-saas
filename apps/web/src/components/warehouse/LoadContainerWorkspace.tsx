@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ContainerDetail, WarehouseItemDetail, WarehouseSummary } from '@transatlantic/shared';
-import { ContainerType, UserRole } from '@transatlantic/shared';
+import { ContainerType, MANAGER_UP_ROLES } from '@transatlantic/shared';
 import { StatusBadge } from '@/components/dashboard/StatusBadge';
 import { Button } from '@/components/ui/Button';
 import { ApiError } from '@/lib/api';
@@ -23,7 +23,8 @@ import { ScanInput } from './ScanInput';
 import { ScanSessionStats } from './ScanSessionStats';
 
 const CONTAINER_TYPES: ContainerType[] = Object.values(ContainerType);
-const FINALIZE_ROLES = new Set<UserRole>([UserRole.TENANT_OWNER, UserRole.TENANT_ADMIN, UserRole.WAREHOUSE_MANAGER]);
+/** Same role tier ContainersController.finalize enforces server-side — the one supervisor-level action, STAFF excluded. */
+const FINALIZE_ROLES = new Set(MANAGER_UP_ROLES);
 
 /**
  * LOAD mode's full workflow: pick or book an open container at the

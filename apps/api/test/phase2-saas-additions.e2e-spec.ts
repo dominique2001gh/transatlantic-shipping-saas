@@ -43,7 +43,7 @@ describe('AnanseLogix Phase 2 additions (e2e)', () => {
   }, 30_000);
 
   async function createSubscribedTenant(label: string, status: SubscriptionStatus = SubscriptionStatus.ACTIVE): Promise<TestTenantFixture> {
-    const fixture = await createTestTenant(prisma, label, UserRole.TENANT_ADMIN);
+    const fixture = await createTestTenant(prisma, label, UserRole.OWNER);
     await prisma.tenantSubscription.create({
       data: {
         tenantId: fixture.tenantId,
@@ -82,7 +82,7 @@ describe('AnanseLogix Phase 2 additions (e2e)', () => {
     });
 
     it('a grandfathered tenant (no subscription row) is served regardless of entitlements', async () => {
-      const fixture = await createTestTenant(prisma, 'SiteCfgGrandfathered', UserRole.TENANT_ADMIN);
+      const fixture = await createTestTenant(prisma, 'SiteCfgGrandfathered', UserRole.OWNER);
       const res = await request(app.getHttpServer()).get(`/public/site-config/${fixture.slug}`);
       expect(res.status).toBe(200);
       await deleteTestTenant(prisma, fixture.tenantId);

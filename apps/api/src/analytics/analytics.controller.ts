@@ -1,7 +1,7 @@
 import { Controller, Get, Query } from '@nestjs/common';
 import { EntitlementFeature } from '@prisma/client';
 import type { AuthenticatedUser } from '@transatlantic/shared';
-import { ANALYTICS_ROLES, DASHBOARD_ROLES } from '@transatlantic/shared';
+import { ANALYTICS_ROLES, DASHBOARD_ROLES, FINANCE_ANALYTICS_ROLES } from '@transatlantic/shared';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { RequireEntitlement } from '../common/decorators/require-entitlement.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -20,11 +20,13 @@ import { AnalyticsQueryDto } from './dto/analytics-query.dto';
  * `ANALYTICS_ROLES` — it backs the general Dashboard Overview tiles
  * (Active Shipments, Customers, Open Invoices, Containers In Transit),
  * which carry no financial figures and have always been open to any
- * staff role that can reach /dashboard at all. Every other route here is
- * `ANALYTICS_ROLES`-gated: full-tenant financial visibility (revenue,
- * payments, outstanding invoices) plus cross-warehouse operational
- * visibility is Owner/Admin/Manager-only, per explicit product decision
- * — see ANALYTICS_ROLES's own doc comment in @transatlantic/shared.
+ * staff role that can reach /dashboard at all. `revenue` is
+ * `FINANCE_ANALYTICS_ROLES` (ANALYTICS_ROLES + FINANCE) — financial
+ * reporting is explicitly part of FINANCE's V1 remit. Every other route
+ * here is `ANALYTICS_ROLES`-gated: full-tenant financial visibility
+ * (revenue, payments, outstanding invoices) plus cross-warehouse
+ * operational visibility is OWNER/MANAGER only, per explicit product
+ * decision — see ANALYTICS_ROLES's own doc comment in @transatlantic/shared.
  */
 @Controller('analytics')
 @RequireEntitlement(EntitlementFeature.ANALYTICS)
@@ -44,7 +46,7 @@ export class AnalyticsController {
   }
 
   @Get('revenue')
-  @Roles(...ANALYTICS_ROLES)
+  @Roles(...FINANCE_ANALYTICS_ROLES)
   revenue(@CurrentUser() user: AuthenticatedUser, @Query() query: AnalyticsQueryDto) {
     return this.analyticsService.getRevenue(requireTenantId(user.tenantId), query);
   }

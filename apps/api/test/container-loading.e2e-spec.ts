@@ -26,9 +26,9 @@ describe('Load Container / Consolidation workflow (e2e)', () => {
 
   beforeAll(async () => {
     app = await createTestApp();
-    tenantA = await createTestTenant(prisma, 'LoadA', UserRole.WAREHOUSE_MANAGER);
-    tenantB = await createTestTenant(prisma, 'LoadB', UserRole.WAREHOUSE_MANAGER);
-    const staffUser = await createUserInTenant(prisma, tenantA.tenantId, 'Staff', UserRole.WAREHOUSE_STAFF);
+    tenantA = await createTestTenant(prisma, 'LoadA', UserRole.MANAGER);
+    tenantB = await createTestTenant(prisma, 'LoadB', UserRole.MANAGER);
+    const staffUser = await createUserInTenant(prisma, tenantA.tenantId, 'Staff', UserRole.STAFF);
 
     tokenA = await login(app, tenantA.user.email, tenantA.user.password);
     tokenB = await login(app, tenantB.user.email, tenantB.user.password);
@@ -232,7 +232,7 @@ describe('Load Container / Consolidation workflow (e2e)', () => {
   });
 
   describe('finalize', () => {
-    it('rejects finalize from WAREHOUSE_STAFF (403) but allows WAREHOUSE_MANAGER', async () => {
+    it('rejects finalize from STAFF (403) but allows MANAGER', async () => {
       const container = await createContainer(app, tokenA, { warehouseId: tenantA.warehouseId });
       const item = await createReadyItem(app, tokenA, tenantA);
       await loadItem(app, tokenA, container.id, item.itemId);

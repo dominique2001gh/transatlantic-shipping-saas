@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useState, type FormEvent } from 'react';
-import { AuthShell } from '@/components/marketing/AuthShell';
+import { AuthShell, type AuthShellBrand } from '@/components/marketing/AuthShell';
 import { TextInput } from '@/components/forms/FormField';
 import { Button } from '@/components/ui/Button';
 import { ApiError } from '@/lib/api';
@@ -11,9 +11,13 @@ import { acceptInvite, previewInvite } from '@/lib/staff';
 
 /**
  * Staff Invitations stage — the page the invitation email points to. One
- * shared page across both brands, matching /forgot-password's own
- * doc comment for why (this backend endpoint has no way to know which
- * login page an owner/manager was using when they sent the invite).
+ * shared page across both brands (see `brand` prop): this backend
+ * endpoint has no way to know which login page an owner/manager was using
+ * when they sent the invite, and — the multi-tenant branding fix this
+ * `brand` prop exists for — the invited tenant may not be the one that
+ * happens to own whichever hostname this request arrived on (see this
+ * folder's page.tsx for how `brand` is actually decided, host-side,
+ * before this component ever renders).
  *
  * Two phases: a preview fetch (GET /auth/accept-invite/:token) decides
  * whether to show the password form or a clear invalid/expired message
@@ -22,7 +26,7 @@ import { acceptInvite, previewInvite } from '@/lib/staff';
  * one includes it since knowing "who/where" (the tenant name, their own
  * name) up front meaningfully helps a first-time user trust the page.
  */
-function AcceptInviteForm() {
+function AcceptInviteForm({ brand }: { brand: AuthShellBrand }) {
   const searchParams = useSearchParams();
   const token = searchParams.get('token');
 
@@ -67,7 +71,7 @@ function AcceptInviteForm() {
 
   if (!token) {
     return (
-      <AuthShell>
+      <AuthShell brand={brand}>
         <h1 className="font-display text-2xl font-bold text-slate-900">Invalid invitation link</h1>
         <p className="mt-2 text-sm text-slate-600">This link is missing its invitation token. Ask whoever invited you to resend it.</p>
       </AuthShell>
@@ -76,7 +80,7 @@ function AcceptInviteForm() {
 
   if (submitted) {
     return (
-      <AuthShell>
+      <AuthShell brand={brand}>
         <h1 className="font-display text-2xl font-bold text-slate-900">You&apos;re all set</h1>
         <p className="mt-2 text-sm text-slate-600">Your account is active. You can now sign in with the password you just created.</p>
         <Link href="/login" className="mt-8 inline-block text-sm font-semibold text-primary-700 hover:text-primary-800">
@@ -88,7 +92,7 @@ function AcceptInviteForm() {
 
   if (previewError) {
     return (
-      <AuthShell>
+      <AuthShell brand={brand}>
         <h1 className="font-display text-2xl font-bold text-slate-900">Something went wrong</h1>
         <p className="mt-2 text-sm text-slate-600">{previewError}</p>
       </AuthShell>
@@ -97,7 +101,7 @@ function AcceptInviteForm() {
 
   if (!preview) {
     return (
-      <AuthShell>
+      <AuthShell brand={brand}>
         <p className="text-sm text-slate-500">Checking your invitation…</p>
       </AuthShell>
     );
@@ -111,7 +115,7 @@ function AcceptInviteForm() {
           ? 'This invitation has already been used.'
           : 'This invitation link is invalid.';
     return (
-      <AuthShell>
+      <AuthShell brand={brand}>
         <h1 className="font-display text-2xl font-bold text-slate-900">This invitation isn&apos;t available</h1>
         <p className="mt-2 text-sm text-slate-600">{message}</p>
       </AuthShell>
@@ -119,7 +123,7 @@ function AcceptInviteForm() {
   }
 
   return (
-    <AuthShell>
+    <AuthShell brand={brand}>
       <h1 className="font-display text-2xl font-bold text-slate-900">Welcome, {preview.firstName}</h1>
       <p className="mt-2 text-sm text-slate-600">
         You&apos;ve been invited to join {preview.tenantName}. Create a password to activate your account.
@@ -159,10 +163,10 @@ function AcceptInviteForm() {
   );
 }
 
-export default function AcceptInvitePage() {
+export default function AcceptInviteClient({ brand }: { brand: AuthShellBrand }) {
   return (
     <Suspense fallback={null}>
-      <AcceptInviteForm />
+      <AcceptInviteForm brand={brand} />
     </Suspense>
   );
 }

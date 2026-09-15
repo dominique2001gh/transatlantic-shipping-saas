@@ -29,10 +29,10 @@ describe('Manifest foundation (e2e)', () => {
 
   beforeAll(async () => {
     app = await createTestApp();
-    tenantA = await createTestTenant(prisma, 'ManA', UserRole.WAREHOUSE_MANAGER);
-    tenantB = await createTestTenant(prisma, 'ManB', UserRole.WAREHOUSE_MANAGER);
+    tenantA = await createTestTenant(prisma, 'ManA', UserRole.MANAGER);
+    tenantB = await createTestTenant(prisma, 'ManB', UserRole.MANAGER);
     const customerUser = await createUserInTenant(prisma, tenantA.tenantId, 'Cust', UserRole.CUSTOMER);
-    const accountantUser = await createUserInTenant(prisma, tenantA.tenantId, 'Acct', UserRole.ACCOUNTANT);
+    const accountantUser = await createUserInTenant(prisma, tenantA.tenantId, 'Acct', UserRole.FINANCE);
 
     tokenA = await login(app, tenantA.user.email, tenantA.user.password);
     tokenB = await login(app, tenantB.user.email, tenantB.user.password);
@@ -156,8 +156,8 @@ describe('Manifest foundation (e2e)', () => {
     // proof-by-construction pattern used for tracking numbers/item codes:
     // if @@unique([tenantId, manifestNumber]) were accidentally global
     // instead of tenant-scoped, the second create below would 409/500.
-    const freshA = await createTestTenant(prisma, 'ManFreshA', UserRole.WAREHOUSE_MANAGER);
-    const freshB = await createTestTenant(prisma, 'ManFreshB', UserRole.WAREHOUSE_MANAGER);
+    const freshA = await createTestTenant(prisma, 'ManFreshA', UserRole.MANAGER);
+    const freshB = await createTestTenant(prisma, 'ManFreshB', UserRole.MANAGER);
     try {
       const freshTokenA = await login(app, freshA.user.email, freshA.user.password);
       const freshTokenB = await login(app, freshB.user.email, freshB.user.password);
@@ -204,11 +204,17 @@ describe('Manifest foundation (e2e)', () => {
       expect(listRes.status).toBe(403);
     });
 
-    it('allows ACCOUNTANT to view/list but not create', async () => {
+    /**
+     * RBAC V1: FINANCE has no manifest access at all, not even view — its
+     * V1 scope is a closed list (customers, invoices, payments, financial
+     * reporting) that doesn't include manifests, unlike the old ACCOUNTANT
+     * role this successor role replaces (which could view/list).
+     */
+    it('rejects FINANCE from viewing, listing, or creating manifests', async () => {
       const listRes = await request(app.getHttpServer())
         .get('/manifests')
         .set('Authorization', `Bearer ${accountantToken}`);
-      expect(listRes.status).toBe(200);
+      expect(listRes.status).toBe(403);
 
       const createRes = await request(app.getHttpServer())
         .post('/manifests')
@@ -217,7 +223,7 @@ describe('Manifest foundation (e2e)', () => {
       expect(createRes.status).toBe(403);
     });
 
-    it('allows WAREHOUSE_MANAGER (in OPERATIONS_ROLES) to create', async () => {
+    it('allows MANAGER (in OPERATIONS_ROLES) to create', async () => {
       const res = await request(app.getHttpServer())
         .post('/manifests')
         .set('Authorization', `Bearer ${tokenA}`)

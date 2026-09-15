@@ -34,19 +34,19 @@ describe('Invoice/Payment security hardening (e2e)', () => {
   beforeAll(async () => {
     app = await createTestApp();
 
-    tenantA = await createTestTenant(prisma, 'SecA', UserRole.WAREHOUSE_MANAGER);
-    tenantB = await createTestTenant(prisma, 'SecB', UserRole.WAREHOUSE_MANAGER);
+    tenantA = await createTestTenant(prisma, 'SecA', UserRole.MANAGER);
+    tenantB = await createTestTenant(prisma, 'SecB', UserRole.MANAGER);
 
-    const accountantA = await createUserInTenant(prisma, tenantA.tenantId, 'Accountant', UserRole.ACCOUNTANT);
-    const accountantB = await createUserInTenant(prisma, tenantB.tenantId, 'Accountant', UserRole.ACCOUNTANT);
+    const accountantA = await createUserInTenant(prisma, tenantA.tenantId, 'Accountant', UserRole.FINANCE);
+    const accountantB = await createUserInTenant(prisma, tenantB.tenantId, 'Accountant', UserRole.FINANCE);
     accountantTokenA = await login(app, accountantA.email, accountantA.password);
     accountantTokenB = await login(app, accountantB.email, accountantB.password);
 
     customer1IdA = tenantA.customerId;
     customerIdB = tenantB.customerId;
 
-    // tenantA.user/tenantB.user default to WAREHOUSE_MANAGER (in
-    // ShipmentsController.OPERATIONS_ROLES) — ACCOUNTANT is deliberately
+    // tenantA.user/tenantB.user default to MANAGER (in
+    // ShipmentsController.OPERATIONS_ROLES) — FINANCE is deliberately
     // NOT in that list, so shipment creation must use the warehouse
     // manager token, not the accountant token.
     const warehouseManagerTokenA = await login(app, tenantA.user.email, tenantA.user.password);

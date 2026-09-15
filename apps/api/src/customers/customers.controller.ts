@@ -1,7 +1,7 @@
 import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { EntitlementFeature } from '@prisma/client';
 import type { AuthenticatedUser } from '@transatlantic/shared';
-import { UserRole } from '@transatlantic/shared';
+import { CUSTOMER_VIEW_ROLES, OPERATIONS_ROLES } from '@transatlantic/shared';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { RequireEntitlement } from '../common/decorators/require-entitlement.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -11,22 +11,15 @@ import { CreateCustomerDto } from './dto/create-customer.dto';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
 
 /**
- * Creating/editing customer profiles. Originally front-office/admin only;
- * WAREHOUSE_STAFF was added per explicit product decision (2026-09) —
- * warehouse intake requires registering a new customer on the spot when
- * receiving their first shipment, the same operational tier as
- * ShipmentsController's OPERATIONS_ROLES (which already included
- * WAREHOUSE_STAFF for exactly this reason).
+ * Creating/editing customer profiles is OPERATIONS_ROLES (OWNER/MANAGER/
+ * STAFF) — a front-office/operational task. Viewing is broader
+ * (CUSTOMER_VIEW_ROLES = OPERATIONS_ROLES + FINANCE): customer profiles are
+ * explicitly part of FINANCE's remit ("customers plus invoices, payments,
+ * financial reporting"), so FINANCE can look up whose invoice it's
+ * handling, but doesn't create/edit customer profiles itself.
  */
-const MANAGE_ROLES = [
-  UserRole.TENANT_OWNER,
-  UserRole.TENANT_ADMIN,
-  UserRole.WAREHOUSE_MANAGER,
-  UserRole.WAREHOUSE_STAFF,
-  UserRole.CUSTOMER_SERVICE,
-];
-/** Broader read access — ACCOUNTANT/DESTINATION_AGENT can look up whose shipment they're handling but not create/edit customers. */
-const VIEW_ROLES = [...MANAGE_ROLES, UserRole.ACCOUNTANT, UserRole.DESTINATION_AGENT];
+const MANAGE_ROLES = OPERATIONS_ROLES;
+const VIEW_ROLES = CUSTOMER_VIEW_ROLES;
 
 @Controller('customers')
 @RequireEntitlement(EntitlementFeature.OPERATIONS_SOFTWARE)

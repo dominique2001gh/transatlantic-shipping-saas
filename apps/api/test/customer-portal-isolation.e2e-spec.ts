@@ -44,8 +44,8 @@ describe('Customer Portal authorization & isolation (e2e)', () => {
   beforeAll(async () => {
     app = await createTestApp();
 
-    tenantA = await createTestTenant(prisma, 'PortA', UserRole.WAREHOUSE_MANAGER);
-    tenantB = await createTestTenant(prisma, 'PortB', UserRole.WAREHOUSE_MANAGER);
+    tenantA = await createTestTenant(prisma, 'PortA', UserRole.MANAGER);
+    tenantB = await createTestTenant(prisma, 'PortB', UserRole.MANAGER);
     staffTokenA = await login(app, tenantA.user.email, tenantA.user.password);
     const staffTokenB = await login(app, tenantB.user.email, tenantB.user.password);
 

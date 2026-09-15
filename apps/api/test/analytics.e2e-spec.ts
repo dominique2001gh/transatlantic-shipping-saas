@@ -51,18 +51,18 @@ describe('Analytics: tenant isolation, role authorization, aggregation correctne
   beforeAll(async () => {
     app = await createTestApp();
 
-    tenantA = await createTestTenant(prisma, 'AnalyticsA', UserRole.TENANT_OWNER);
-    tenantB = await createTestTenant(prisma, 'AnalyticsB', UserRole.TENANT_OWNER);
+    tenantA = await createTestTenant(prisma, 'AnalyticsA', UserRole.OWNER);
+    tenantB = await createTestTenant(prisma, 'AnalyticsB', UserRole.OWNER);
     ownerTokenA = await login(app, tenantA.user.email, tenantA.user.password);
     ownerTokenB = await login(app, tenantB.user.email, tenantB.user.password);
 
-    const adminA = await createUserInTenant(prisma, tenantA.tenantId, 'Admin', UserRole.TENANT_ADMIN);
+    const adminA = await createUserInTenant(prisma, tenantA.tenantId, 'Admin', UserRole.OWNER);
     adminTokenA = await login(app, adminA.email, adminA.password);
-    const managerA = await createUserInTenant(prisma, tenantA.tenantId, 'Manager', UserRole.WAREHOUSE_MANAGER);
+    const managerA = await createUserInTenant(prisma, tenantA.tenantId, 'Manager', UserRole.MANAGER);
     managerTokenA = await login(app, managerA.email, managerA.password);
-    const warehouseStaffA = await createUserInTenant(prisma, tenantA.tenantId, 'Staff', UserRole.WAREHOUSE_STAFF);
+    const warehouseStaffA = await createUserInTenant(prisma, tenantA.tenantId, 'Staff', UserRole.STAFF);
     warehouseStaffTokenA = await login(app, warehouseStaffA.email, warehouseStaffA.password);
-    const accountantA = await createUserInTenant(prisma, tenantA.tenantId, 'Accountant', UserRole.ACCOUNTANT);
+    const accountantA = await createUserInTenant(prisma, tenantA.tenantId, 'Accountant', UserRole.FINANCE);
     accountantTokenA = await login(app, accountantA.email, accountantA.password);
 
     // --- Tenant A: precisely known financial data ---
@@ -287,14 +287,14 @@ describe('Analytics: tenant isolation, role authorization, aggregation correctne
       }
     });
 
-    it('/analytics/overview is open to any DASHBOARD_ROLES member, including WAREHOUSE_STAFF and ACCOUNTANT', async () => {
+    it('/analytics/overview is open to any DASHBOARD_ROLES member, including STAFF and FINANCE', async () => {
       for (const token of [ownerTokenA, adminTokenA, managerTokenA, warehouseStaffTokenA, accountantTokenA]) {
         const res = await request(app.getHttpServer()).get('/analytics/overview').set('Authorization', `Bearer ${token}`);
         expect(res.status).toBe(200);
       }
     });
 
-    it('every other /analytics/* route is ANALYTICS_ROLES-only: OWNER, ADMIN, MANAGER pass', async () => {
+    it('every other /analytics/* route is ANALYTICS_ROLES-only: OWNER, MANAGER pass', async () => {
       for (const token of [ownerTokenA, adminTokenA, managerTokenA]) {
         for (const path of ['alerts', 'revenue', 'operations', 'destinations', 'customers', 'exceptions']) {
           const res = await request(app.getHttpServer()).get(`/analytics/${path}`).set('Authorization', `Bearer ${token}`);
@@ -303,12 +303,27 @@ describe('Analytics: tenant isolation, role authorization, aggregation correctne
       }
     });
 
-    it('WAREHOUSE_STAFF and ACCOUNTANT get 403 on every financial/operational analytics route', async () => {
-      for (const token of [warehouseStaffTokenA, accountantTokenA]) {
-        for (const path of ['alerts', 'revenue', 'operations', 'destinations', 'customers', 'exceptions']) {
-          const res = await request(app.getHttpServer()).get(`/analytics/${path}`).set('Authorization', `Bearer ${token}`);
-          expect(res.status).toBe(403);
-        }
+    it('STAFF gets 403 on every financial/operational analytics route', async () => {
+      for (const path of ['alerts', 'revenue', 'operations', 'destinations', 'customers', 'exceptions']) {
+        const res = await request(app.getHttpServer()).get(`/analytics/${path}`).set('Authorization', `Bearer ${warehouseStaffTokenA}`);
+        expect(res.status).toBe(403);
+      }
+    });
+
+    /**
+     * RBAC V1: FINANCE's V1 scope includes financial reporting, so
+     * /analytics/revenue is additionally open to it (FINANCE_ANALYTICS_ROLES)
+     * — every other analytics route (ops/destinations/customers/exceptions/
+     * alerts) stays ANALYTICS_ROLES-only (OWNER/MANAGER), since those carry
+     * cross-warehouse operational data outside FINANCE's closed-list remit.
+     */
+    it('FINANCE can reach /analytics/revenue but gets 403 on every other financial/operational analytics route', async () => {
+      const revenueRes = await request(app.getHttpServer()).get('/analytics/revenue').set('Authorization', `Bearer ${accountantTokenA}`);
+      expect(revenueRes.status).toBe(200);
+
+      for (const path of ['alerts', 'operations', 'destinations', 'customers', 'exceptions']) {
+        const res = await request(app.getHttpServer()).get(`/analytics/${path}`).set('Authorization', `Bearer ${accountantTokenA}`);
+        expect(res.status).toBe(403);
       }
     });
 
@@ -527,18 +542,18 @@ describe('Executive Dashboard: GET /analytics/executive (e2e)', () => {
   beforeAll(async () => {
     app = await createTestApp();
 
-    tenantExec = await createTestTenant(prisma, 'ExecDashA', UserRole.TENANT_OWNER);
-    tenantOther = await createTestTenant(prisma, 'ExecDashB', UserRole.TENANT_OWNER);
-    tenantEmpty = await createTestTenant(prisma, 'ExecDashEmpty', UserRole.TENANT_OWNER);
+    tenantExec = await createTestTenant(prisma, 'ExecDashA', UserRole.OWNER);
+    tenantOther = await createTestTenant(prisma, 'ExecDashB', UserRole.OWNER);
+    tenantEmpty = await createTestTenant(prisma, 'ExecDashEmpty', UserRole.OWNER);
     ownerToken = await login(app, tenantExec.user.email, tenantExec.user.password);
     ownerTokenOther = await login(app, tenantOther.user.email, tenantOther.user.password);
     ownerTokenEmpty = await login(app, tenantEmpty.user.email, tenantEmpty.user.password);
 
-    const admin = await createUserInTenant(prisma, tenantExec.tenantId, 'Admin', UserRole.TENANT_ADMIN);
+    const admin = await createUserInTenant(prisma, tenantExec.tenantId, 'Admin', UserRole.OWNER);
     adminToken = await login(app, admin.email, admin.password);
-    const manager = await createUserInTenant(prisma, tenantExec.tenantId, 'Manager', UserRole.WAREHOUSE_MANAGER);
+    const manager = await createUserInTenant(prisma, tenantExec.tenantId, 'Manager', UserRole.MANAGER);
     managerToken = await login(app, manager.email, manager.password);
-    const warehouseStaff = await createUserInTenant(prisma, tenantExec.tenantId, 'Staff', UserRole.WAREHOUSE_STAFF);
+    const warehouseStaff = await createUserInTenant(prisma, tenantExec.tenantId, 'Staff', UserRole.STAFF);
     warehouseStaffToken = await login(app, warehouseStaff.email, warehouseStaff.password);
 
     // --- Financial: one overdue USD invoice + one fully-paid GHS invoice ---
@@ -726,7 +741,7 @@ describe('Executive Dashboard: GET /analytics/executive (e2e)', () => {
       }
     });
 
-    it('WAREHOUSE_STAFF gets 403 — unlike /analytics/overview, this route carries financial data', async () => {
+    it('STAFF gets 403 — unlike /analytics/overview, this route carries financial data', async () => {
       const res = await request(app.getHttpServer()).get('/analytics/executive').set('Authorization', `Bearer ${warehouseStaffToken}`);
       expect(res.status).toBe(403);
     });

@@ -7,7 +7,7 @@ import { RequireEntitlement } from '../common/decorators/require-entitlement.dec
 import { AskAgentDto } from './dto/ask-agent.dto';
 import { AiAgentService } from './ai-agent.service';
 
-/** AnanseLogix Phase 1: any authenticated tenant staff/customer role may ask — RBAC doesn't need to be narrower than that; the AI_AGENT entitlement is the actual gate (a WEBSITE_ONLY tenant's TENANT_OWNER is a valid role but was never granted this feature). */
+/** AnanseLogix Phase 1: any authenticated tenant staff/customer role may ask — RBAC doesn't need to be narrower than that; the AI_AGENT entitlement is the actual gate (a WEBSITE_ONLY tenant's OWNER is a valid role but was never granted this feature). */
 @Controller('ai-agent')
 export class AiAgentController {
   constructor(private readonly aiAgentService: AiAgentService) {}

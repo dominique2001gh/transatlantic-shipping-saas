@@ -33,16 +33,20 @@ datasource db {
 // ENUMS
 // ==========================================================================
 
+/// RBAC V1 (2026-09): 4 tenant-staff tiers replacing the earlier 8-value
+/// granular taxonomy (TENANT_OWNER/TENANT_ADMIN/WAREHOUSE_MANAGER/
+/// WAREHOUSE_STAFF/CUSTOMER_SERVICE/ACCOUNTANT/DESTINATION_AGENT/DRIVER) —
+/// see packages/shared/src/enums.ts's UserRole doc comment for the full
+/// mapping and the closed-list capability definition of each tier, and
+/// migration 20260914000000_rbac_v1_role_consolidation for the data
+/// backfill. PLATFORM_ADMIN (tenantId always null) and CUSTOMER are
+/// unchanged.
 enum UserRole {
   PLATFORM_ADMIN
-  TENANT_OWNER
-  TENANT_ADMIN
-  WAREHOUSE_MANAGER
-  WAREHOUSE_STAFF
-  CUSTOMER_SERVICE
-  ACCOUNTANT
-  DESTINATION_AGENT
-  DRIVER
+  OWNER
+  MANAGER
+  STAFF
+  FINANCE
   CUSTOMER
 }
 
@@ -388,9 +392,9 @@ enum WebsiteLeadStatus {
 /// company). Trans Atlantic Logistics Solutions is tenant #1, not a
 /// special case in code.
 model Tenant {
-  id             String   @id @default(cuid())
+  id             String  @id @default(cuid())
   name           String
-  slug           String   @unique
+  slug           String  @unique
   legalName      String?
   email          String
   phone          String?
@@ -410,12 +414,12 @@ model Tenant {
   /// set yet; PublicAiAgentService falls back to "{tenant.name} Assistant"
   /// in that case rather than requiring a value here.
   agentName String?
-  country        String
-  timezone       String
-  currency       String
-  isActive       Boolean  @default(true)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  country   String
+  timezone  String
+  currency  String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   // ------------------------------------------------------------------------
   // AnanseLogix Phase 2 (Section 15): tenant-branded public website config.
@@ -475,8 +479,48 @@ model Tenant {
   invitations          TenantInvitation[]
   signupSessions       SignupSession[]
   platformAuditLogsFor PlatformAuditLog[]
+  paymentSettings      TenantPaymentSettings?
 
   @@map("tenants")
+}
+
+/// Platform-billing vs. tenant-customer-payments separation: this table is
+/// exclusively about (B) — money a tenant's OWN customers pay it (invoice
+/// checkout) — and has nothing to do with (A) — the setup fee/subscription
+/// a tenant pays AnanseLogix (see SaasPlan/TenantSubscription, and
+/// StripeService which stays scoped to (A) only).
+///
+/// Never stores a tenant's own Stripe secret key. `stripeConnectedAccountId`
+/// is a Stripe Connect account id — with Connect, the *platform's* own
+/// PLATFORM_STRIPE_SECRET_KEY still makes every API call; a connected tenant's
+/// requests just add a `Stripe-Account: <this id>` request option (see
+/// TenantPaymentsStripeService). That means there is no tenant secret to
+/// leak, store encrypted, or ever accidentally expose to another tenant or
+/// to browser/client code — a connected account id is not a credential.
+///
+/// A tenant with no row here (every tenant today, including Trans
+/// Atlantic) is not "unconfigured" — it's the correct default, meaning
+/// "this tenant's customer payments run through the platform's own Stripe
+/// account," exactly the behavior that already existed before this table
+/// was introduced. Onboarding a tenant onto their own connected account
+/// (the actual Connect OAuth flow) is deliberately not built yet — this
+/// table is the extension point for when it is.
+model TenantPaymentSettings {
+  id       String @id @default(cuid())
+  tenantId String @unique
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  /// Null = use the platform's own Stripe account (default, current
+  /// behavior for every tenant). Set only once a tenant has completed a
+  /// (not-yet-built) Connect onboarding flow.
+  stripeConnectedAccountId String? @unique
+
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("tenant_payment_settings")
 }
 
 /// Per-tenant configuration, including the configurable numbering prefixes
@@ -2122,6 +2166,16 @@ model TenantOnboarding {
 /// (a database read/leak alone can never be replayed as a valid invite
 /// link). Resending overwrites this same row's tokenHash/expiresAt in
 /// place, which is what makes the previous link stop working immediately.
+///
+/// NOTE — not expressible below: migration 20260915000000 adds a PARTIAL
+/// unique index on (tenantId, email) WHERE status = 'PENDING', closing a
+/// TOCTOU race in StaffInvitationsService.invite()'s check-then-create
+/// (see that migration's own comment). Prisma has no schema.prisma syntax
+/// for a WHERE-scoped unique constraint — a plain `@@unique([tenantId,
+/// email])` would be wrong here (a tenant may legitimately hold several
+/// non-pending invitation rows for the same email over time) — so this is
+/// intentionally absent from the model below; the migration is its only
+/// source of truth.
 model TenantInvitation {
   id              String                 @id @default(cuid())
   tenantId        String

@@ -50,8 +50,8 @@ describe('Customer Portal: profile, notification preferences, password (e2e)', (
   beforeAll(async () => {
     app = await createTestApp();
 
-    tenantA = await createTestTenant(prisma, 'SettA', UserRole.TENANT_ADMIN);
-    tenantB = await createTestTenant(prisma, 'SettB', UserRole.TENANT_ADMIN);
+    tenantA = await createTestTenant(prisma, 'SettA', UserRole.OWNER);
+    tenantB = await createTestTenant(prisma, 'SettB', UserRole.OWNER);
     staffTokenA = await login(app, tenantA.user.email, tenantA.user.password);
 
     customerA1 = await createCustomerWithPortalUser(prisma, tenantA.tenantId, 'S1');

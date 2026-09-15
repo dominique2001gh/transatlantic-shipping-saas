@@ -8,8 +8,8 @@ import { getOnboardingOverview } from './onboarding';
  * shared by every login entry point (the central AnanseLogix login and
  * any tenant-branded one) so the rule can never drift between them.
  *
- * A TENANT_OWNER/TENANT_ADMIN who hasn't finished the post-signup
- * onboarding wizard is sent there first, instead of straight to
+ * An OWNER who hasn't finished the post-signup onboarding wizard is sent
+ * there first, instead of straight to
  * /dashboard — checked only at login (not on every dashboard load) so
  * this stays a one-time redirect, not a recurring extra request for staff
  * who onboarded long ago. A failure here (e.g. no TenantOnboarding row —
@@ -22,7 +22,7 @@ import { getOnboardingOverview } from './onboarding';
  * anything the browser could supply independently.
  */
 export async function resolvePostLoginRoute(user: AuthenticatedUser): Promise<string> {
-  if (user.role === UserRole.TENANT_OWNER || user.role === UserRole.TENANT_ADMIN) {
+  if (user.role === UserRole.OWNER) {
     try {
       const overview = await getOnboardingOverview();
       if (overview.onboarding.currentStep !== 'DONE') {

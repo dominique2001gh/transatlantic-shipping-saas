@@ -104,7 +104,7 @@ async function main() {
     passwordHash: await hashPassword(DEV_PASSWORD),
     firstName: 'Akosua',
     lastName: 'Mensah',
-    role: UserRole.TENANT_ADMIN,
+    role: UserRole.OWNER,
     tenantId: tenant.id,
     isActive: true,
   });
@@ -115,7 +115,7 @@ async function main() {
     passwordHash: await hashPassword(DEV_PASSWORD),
     firstName: 'Efua',
     lastName: 'Asiedu',
-    role: UserRole.WAREHOUSE_MANAGER,
+    role: UserRole.MANAGER,
     tenantId: tenant.id,
     isActive: true,
   });
@@ -126,7 +126,7 @@ async function main() {
     passwordHash: await hashPassword(DEV_PASSWORD),
     firstName: 'Kwame',
     lastName: 'Owusu',
-    role: UserRole.WAREHOUSE_STAFF,
+    role: UserRole.STAFF,
     tenantId: tenant.id,
     isActive: true,
   });

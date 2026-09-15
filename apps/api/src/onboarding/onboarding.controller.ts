@@ -1,7 +1,7 @@
 import { Body, Controller, Get, Post } from '@nestjs/common';
 import { EntitlementFeature } from '@prisma/client';
 import type { AuthenticatedUser } from '@transatlantic/shared';
-import { ONBOARDING_ROLES, UserRole } from '@transatlantic/shared';
+import { ONBOARDING_ROLES } from '@transatlantic/shared';
 import { AllowWhenSuspended } from '../common/decorators/allow-when-suspended.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { RequireEntitlement } from '../common/decorators/require-entitlement.decorator';
@@ -18,7 +18,7 @@ import { OnboardingService } from './onboarding.service';
 
 /**
  * AnanseLogix Phase 1: the post-signup onboarding wizard's API — scoped to
- * ONBOARDING_ROLES (TENANT_OWNER/TENANT_ADMIN only, see that constant's
+ * ONBOARDING_ROLES (OWNER only, see that constant's
  * own doc comment), never PLATFORM_ADMIN — this configures one tenant's
  * own setup, not platform-wide state.
  */
@@ -45,15 +45,13 @@ export class OnboardingController {
   }
 
   /**
-   * Staff Invitations stage: overrides the class-level ONBOARDING_ROLES
-   * (TENANT_OWNER/TENANT_ADMIN) for this one route only — inviting staff
-   * is scoped to TENANT_OWNER/WAREHOUSE_MANAGER specifically, matching
-   * the same rule the permanent staff-management page enforces (see
-   * UsersController). Every other onboarding route keeps its original
-   * ONBOARDING_ROLES gate, unchanged.
+   * RBAC V1: staff administration (inviting included) is OWNER-only —
+   * identical to the class-level ONBOARDING_ROLES gate now, so no
+   * method-level override is needed here (kept implicit rather than
+   * redundantly re-declared). See UsersController's STAFF_ADMIN_ROLES for
+   * the permanent staff-management page's identical rule.
    */
   @Post('staff/invite')
-  @Roles(UserRole.TENANT_OWNER, UserRole.WAREHOUSE_MANAGER)
   inviteStaff(@CurrentUser() user: AuthenticatedUser, @Body() dto: InviteStaffDto) {
     return this.onboardingService.inviteStaff(requireTenantId(user.tenantId), user.id, `${user.firstName} ${user.lastName}`, dto);
   }
