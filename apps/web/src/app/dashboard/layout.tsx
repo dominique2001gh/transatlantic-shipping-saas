@@ -62,7 +62,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         that's a different, pre-existing scenario this banner isn't for.
       */}
       {subscription?.trialEndsAt && subscription.setupFeeStatus === 'PENDING' && (subscription.status === 'TRIALING' || subscription.status === 'SUSPENDED') && (
-        <TrialBanner planName={subscription.planName} trialEndsAt={subscription.trialEndsAt} />
+        <TrialBanner planName={subscription.planName} trialEndsAt={subscription.trialEndsAt} role={user.role} />
       )}
       <AppShell
         items={visibleNavItems}

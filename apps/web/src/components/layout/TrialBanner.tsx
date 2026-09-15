@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { UserRole } from '@transatlantic/shared';
 
 /**
  * Free Trial stage: the persistent, always-visible trial-status indicator
@@ -7,11 +8,27 @@ import Link from 'next/link';
  * from GET /tenants/me via useTenant, reachable by every staff role
  * (including once a trial has expired and the tenant is otherwise
  * SUSPENDED), so nobody is surprised when access locks.
+ *
+ * RBAC billing-link fix (2026-09): the "Manage Billing"/"Activate Paid
+ * Billing" action links to /onboarding, whose billing step is OWNER-only
+ * (ONBOARDING_ROLES). Only OWNER gets the link — every other role still
+ * sees the informational trial-status text (they should know access is
+ * about to lock even though only OWNER can act on it), just without a
+ * link that would land them on a page they have no access to.
  */
-export function TrialBanner({ planName, trialEndsAt }: { planName: string; trialEndsAt: string }) {
+export function TrialBanner({
+  planName,
+  trialEndsAt,
+  role,
+}: {
+  planName: string;
+  trialEndsAt: string;
+  role: UserRole;
+}) {
   const msRemaining = new Date(trialEndsAt).getTime() - Date.now();
   const daysRemaining = Math.max(0, Math.ceil(msRemaining / (24 * 60 * 60 * 1000)));
   const expired = msRemaining <= 0;
+  const canManageBilling = role === UserRole.OWNER;
 
   return (
     <div
@@ -31,9 +48,11 @@ export function TrialBanner({ planName, trialEndsAt }: { planName: string; trial
           </>
         )}
       </p>
-      <Link href="/onboarding" className={`font-semibold underline ${expired ? 'text-red-900' : 'text-accent-900'}`}>
-        {expired ? 'Activate Paid Billing' : 'Manage Billing'}
-      </Link>
+      {canManageBilling && (
+        <Link href="/onboarding" className={`font-semibold underline ${expired ? 'text-red-900' : 'text-accent-900'}`}>
+          {expired ? 'Activate Paid Billing' : 'Manage Billing'}
+        </Link>
+      )}
     </div>
   );
 }

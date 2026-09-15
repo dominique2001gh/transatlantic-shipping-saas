@@ -150,6 +150,49 @@ describe('RBAC V1 permission matrix (e2e)', () => {
         expect(res.status).toBe(403);
       }
     });
+
+    /**
+     * "Manage Billing" bug fix (2026-09): a MANAGER following the trial
+     * banner's billing link hit /onboarding directly, which redirected to
+     * /login and read as an unwanted logout. Root cause was purely
+     * client-side (useRequireAuth conflated "unauthorized" with
+     * "unauthenticated" — see useRequireAuth.ts and TrialBanner.tsx). These
+     * two billing sub-routes were already correctly OWNER-only via the
+     * controller's class-level @Roles(...ONBOARDING_ROLES), the same as
+     * plain GET /onboarding above — this locks that in explicitly, since
+     * a controller-level guard change could otherwise silently loosen just
+     * these two @AllowWhenSuspended() routes without any test noticing.
+     */
+    it('MANAGER/STAFF/FINANCE are rejected (403, never 401) from both billing sub-routes; the token remains valid afterward', async () => {
+      for (const role of ['MANAGER', 'STAFF', 'FINANCE'] as const) {
+        const portalRes = await request(app.getHttpServer())
+          .post('/onboarding/billing/portal-session')
+          .set('Authorization', `Bearer ${tokenFor(role)}`)
+          .send({ returnUrl: 'https://example.test/return' });
+        expect(portalRes.status).toBe(403);
+
+        const subscribeRes = await request(app.getHttpServer())
+          .post('/onboarding/billing/subscribe')
+          .set('Authorization', `Bearer ${tokenFor(role)}`)
+          .send({ successUrl: 'https://example.test/success', cancelUrl: 'https://example.test/cancel' });
+        expect(subscribeRes.status).toBe(403);
+
+        // The 403 is a pure authorization rejection, not a side effect that
+        // invalidates the session — the exact same token still works on a
+        // route this role IS allowed to use.
+        const stillValid = await get('/customers', role);
+        expect(stillValid.status).toBe(200);
+      }
+    });
+
+    it('OWNER is not rejected by the billing sub-routes\' role gate (may still fail later for an unrelated business reason, e.g. no real Stripe customer yet)', async () => {
+      const portalRes = await request(app.getHttpServer())
+        .post('/onboarding/billing/portal-session')
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .send({ returnUrl: 'https://example.test/return' });
+      expect(portalRes.status).not.toBe(403);
+      expect(portalRes.status).not.toBe(401);
+    });
   });
 
   /**
