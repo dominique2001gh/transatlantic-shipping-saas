@@ -8,6 +8,7 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { requireTenantId } from '../common/tenant/tenant.util';
 import { CreateShipmentDto } from './dto/create-shipment.dto';
 import { CreateTrackingEventDto } from './dto/create-tracking-event.dto';
+import { QuickReceiveDto } from './dto/quick-receive.dto';
 import { ShipmentItemInputDto } from './dto/shipment-item-input.dto';
 import { UpdateShipmentDto } from './dto/update-shipment.dto';
 import { UpdateShipmentItemDto } from './dto/update-shipment-item.dto';
@@ -55,6 +56,17 @@ export class ShipmentsController {
   @Roles(...OPERATIONS_ROLES)
   create(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateShipmentDto) {
     return this.shipmentsService.create(requireTenantId(user.tenantId), user.id, dto);
+  }
+
+  // Must stay above @Get(':id')/@Patch(':id') is not a concern for a POST
+  // route (no @Post(':id') exists on this controller to collide with),
+  // but kept next to `create` above since it's the same "make a shipment"
+  // family of action. Same OPERATIONS_ROLES gate as every other route
+  // here — FINANCE has no shipment access at all, Quick Receive included.
+  @Post('quick-receive')
+  @Roles(...OPERATIONS_ROLES)
+  quickReceive(@CurrentUser() user: AuthenticatedUser, @Body() dto: QuickReceiveDto) {
+    return this.shipmentsService.createQuickReceive(requireTenantId(user.tenantId), user.id, dto);
   }
 
   @Patch(':id')

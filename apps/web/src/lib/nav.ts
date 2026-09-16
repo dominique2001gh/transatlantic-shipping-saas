@@ -1,5 +1,5 @@
 import type { UserRole } from '@transatlantic/shared';
-import { ANALYTICS_ROLES, DOCUMENT_MANAGE_ROLES, INVOICE_MANAGE_ROLES, LEAD_MANAGE_ROLES, NOTIFICATION_MANAGE_ROLES, ONBOARDING_ROLES, STAFF_ROLES } from '@transatlantic/shared';
+import { ANALYTICS_ROLES, DOCUMENT_MANAGE_ROLES, INVOICE_MANAGE_ROLES, LEAD_MANAGE_ROLES, NOTIFICATION_MANAGE_ROLES, ONBOARDING_ROLES, OPERATIONS_ROLES, STAFF_ROLES } from '@transatlantic/shared';
 
 export interface NavItem {
   label: string;
@@ -16,6 +16,7 @@ export const dashboardNavItems: NavItem[] = [
   { label: 'Overview', href: '/dashboard' },
   { label: 'Customers', href: '/dashboard/customers' },
   { label: 'Shipments', href: '/dashboard/shipments' },
+  { label: 'Quick Receive', href: '/dashboard/quick-receive', roles: OPERATIONS_ROLES },
   { label: 'Warehouse', href: '/dashboard/warehouse' },
   { label: 'Containers', href: '/dashboard/containers' },
   { label: 'Manifests', href: '/dashboard/manifests' },

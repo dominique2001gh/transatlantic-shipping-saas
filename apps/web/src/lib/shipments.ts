@@ -46,6 +46,34 @@ export interface CreateShipmentInput {
   items?: ShipmentItemInput[];
 }
 
+/**
+ * Quick Receive (Phase 1): mirrors CreateShipmentInput but takes
+ * `packageCount` instead of an explicit `items[]` — the server generates
+ * that many identical-defaults items and marks every one of them received
+ * at `originWarehouseId` immediately (see ShipmentsService.createQuickReceive).
+ */
+export interface QuickReceiveInput {
+  customerId: string;
+  shipmentMode: ShipmentMode;
+  originCountry: string;
+  destinationCountry: string;
+  originLocation?: string;
+  destinationLocation?: string;
+  originWarehouseId: string;
+  description?: string;
+  packageCount: number;
+  itemType?: ShipmentItemType;
+  itemDescription?: string;
+  weight?: number;
+  weightUnit?: WeightUnit;
+  length?: number;
+  width?: number;
+  height?: number;
+  dimensionUnit?: DimensionUnit;
+  declaredValue?: number;
+  notes?: string;
+}
+
 export interface CreateTrackingEventInput {
   eventType: TrackingEventType;
   shipmentItemId?: string;
@@ -80,6 +108,14 @@ export function searchShipments(query: string): Promise<ShipmentSummary[]> {
 
 export function createShipment(input: CreateShipmentInput): Promise<ShipmentSummary> {
   return apiFetch<ShipmentSummary>('/shipments', {
+    method: 'POST',
+    body: JSON.stringify(input),
+    token: authToken(),
+  });
+}
+
+export function createQuickReceive(input: QuickReceiveInput): Promise<ShipmentSummary> {
+  return apiFetch<ShipmentSummary>('/shipments/quick-receive', {
     method: 'POST',
     body: JSON.stringify(input),
     token: authToken(),

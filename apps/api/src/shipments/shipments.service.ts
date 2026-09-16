@@ -1,12 +1,13 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { formatItemCode } from '@transatlantic/shared';
+import { formatItemCode, ShipmentItemType } from '@transatlantic/shared';
 import type { Prisma } from '@prisma/client';
-import { ShipmentStatus, TrackingEventSource, TrackingEventType } from '@prisma/client';
+import { ShipmentItemStatus, ShipmentStatus, TrackingEventSource, TrackingEventType } from '@prisma/client';
 import { generateTrackingNumber } from '../common/numbering/numbering.util';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateShipmentDto } from './dto/create-shipment.dto';
 import { CreateTrackingEventDto } from './dto/create-tracking-event.dto';
+import { QuickReceiveDto } from './dto/quick-receive.dto';
 import { ShipmentItemInputDto } from './dto/shipment-item-input.dto';
 import { UpdateShipmentDto } from './dto/update-shipment.dto';
 import { UpdateShipmentItemDto } from './dto/update-shipment-item.dto';
@@ -165,6 +166,175 @@ export class ShipmentsService {
 
       return shipment.id;
     });
+
+    return this.findById(tenantId, shipmentId);
+  }
+
+  /**
+   * Quick Receive (Phase 1): creates a shipment and `packageCount`
+   * identical-defaults items in one transaction, with every item already
+   * in the normal origin-warehouse RECEIVED state — no separate trip
+   * through Warehouse -> Receive is required for these pieces. `create()`
+   * above and WarehouseService.receiveItem are both untouched by this
+   * method; existing New Shipment / Warehouse -> Receive keep working
+   * exactly as before for anyone who doesn't use this endpoint.
+   *
+   * Deliberately does NOT call createTrackingEvent() (used by
+   * receiveItem) for the per-item receiving writes: that method opens its
+   * own `$transaction`, and a Prisma interactive transaction started from
+   * inside another one would not actually be atomic with it. Instead this
+   * inlines the same handful of fields createTrackingEvent's transaction
+   * body would set (ShipmentItem.status/receivedAt/receivedByUserId/
+   * currentWarehouseId, plus the matching TrackingEvent row) directly
+   * here, and mirrors WarehouseService.maybeRollupShipmentStatus's own
+   * shipment-level rollup at the end of the same transaction — since by
+   * construction every item this method creates is already received, the
+   * rollup is unconditional rather than re-queried the way that method
+   * (called after a single ad-hoc item receive) needs to.
+   *
+   * Every generated item shares one set of optional physical defaults
+   * (itemType/weight/dimensions/declaredValue) from the DTO — a single
+   * odd-one-out package is still editable afterward via the existing
+   * PATCH /shipments/:id/items/:itemId, unchanged by this feature.
+   */
+  async createQuickReceive(tenantId: string, actorUserId: string, dto: QuickReceiveDto) {
+    const customer = await this.prisma.customer.findFirst({
+      where: { id: dto.customerId, tenantId },
+    });
+    if (!customer) {
+      throw new NotFoundException('Customer not found');
+    }
+
+    const warehouse = await this.prisma.warehouse.findFirst({
+      where: { id: dto.originWarehouseId, tenantId },
+    });
+    if (!warehouse) {
+      throw new NotFoundException('Warehouse not found');
+    }
+
+    // Sequence generation is its own atomic step, deliberately outside the
+    // transaction below — same reasoning as create() above.
+    const trackingNumber = await generateTrackingNumber(this.prisma, tenantId);
+    // One shared timestamp for the whole batch: every item in this intake
+    // physically arrived and was logged together, so "received at" should
+    // read as one moment, not `packageCount` microscopically different ones.
+    const receivedAt = new Date();
+
+    const shipmentId = await this.prisma.$transaction(async (tx) => {
+      const shipment = await tx.shipment.create({
+        data: {
+          tenantId,
+          customerId: dto.customerId,
+          trackingNumber,
+          shipmentMode: dto.shipmentMode,
+          originCountry: dto.originCountry,
+          destinationCountry: dto.destinationCountry,
+          originLocation: dto.originLocation,
+          destinationLocation: dto.destinationLocation,
+          originWarehouseId: dto.originWarehouseId,
+          description: dto.description,
+          status: ShipmentStatus.DRAFT,
+        },
+      });
+
+      await tx.trackingEvent.create({
+        data: {
+          tenantId,
+          shipmentId: shipment.id,
+          eventType: TrackingEventType.SHIPMENT_CREATED,
+          source: TrackingEventSource.MANUAL,
+          status: ShipmentStatus.DRAFT,
+          occurredAt: receivedAt,
+          createdByUserId: actorUserId,
+        },
+      });
+
+      for (let sequenceNumber = 1; sequenceNumber <= dto.packageCount; sequenceNumber++) {
+        const item = await tx.shipmentItem.create({
+          data: {
+            tenantId,
+            shipmentId: shipment.id,
+            itemCode: formatItemCode(trackingNumber, sequenceNumber),
+            sequenceNumber,
+            itemType: dto.itemType ?? ShipmentItemType.BOX,
+            description: dto.itemDescription,
+            quantity: 1,
+            length: dto.length,
+            width: dto.width,
+            height: dto.height,
+            dimensionUnit: dto.dimensionUnit,
+            weight: dto.weight,
+            weightUnit: dto.weightUnit,
+            declaredValue: dto.declaredValue,
+            // The entire point of Quick Receive: every generated item
+            // starts already received, never REGISTERED — see the method
+            // doc above for why this is written directly here rather than
+            // via a second call to the general receiving code path.
+            status: ShipmentItemStatus.RECEIVED_ORIGIN_WAREHOUSE,
+            receivedAt,
+            receivedByUserId: actorUserId,
+            currentWarehouseId: dto.originWarehouseId,
+          },
+        });
+
+        await tx.trackingEvent.create({
+          data: {
+            tenantId,
+            shipmentId: shipment.id,
+            shipmentItemId: item.id,
+            eventType: TrackingEventType.ITEM_REGISTERED,
+            source: TrackingEventSource.MANUAL,
+            occurredAt: receivedAt,
+            createdByUserId: actorUserId,
+          },
+        });
+
+        await tx.trackingEvent.create({
+          data: {
+            tenantId,
+            shipmentId: shipment.id,
+            shipmentItemId: item.id,
+            eventType: TrackingEventType.RECEIVED_AT_WAREHOUSE,
+            source: TrackingEventSource.MANUAL,
+            warehouseId: dto.originWarehouseId,
+            notes: dto.notes,
+            occurredAt: receivedAt,
+            createdByUserId: actorUserId,
+          },
+        });
+      }
+
+      // Shipment-level rollup — unconditional here (unlike
+      // WarehouseService.maybeRollupShipmentStatus, which re-checks "are
+      // all items received?" because it runs after a single ad-hoc item
+      // receive): by construction every item created above is already
+      // received, so the shipment goes straight to WAREHOUSE_RECEIVED in
+      // this same transaction.
+      await tx.trackingEvent.create({
+        data: {
+          tenantId,
+          shipmentId: shipment.id,
+          eventType: TrackingEventType.RECEIVED_AT_WAREHOUSE,
+          source: TrackingEventSource.SYSTEM,
+          status: ShipmentStatus.WAREHOUSE_RECEIVED,
+          notes: 'All items received at origin warehouse (Quick Receive)',
+          occurredAt: receivedAt,
+          createdByUserId: actorUserId,
+        },
+      });
+      await tx.shipment.update({
+        where: { id: shipment.id },
+        data: { status: ShipmentStatus.WAREHOUSE_RECEIVED },
+      });
+
+      return shipment.id;
+    });
+
+    // Stage 3H convention (see createTrackingEvent below): fired after the
+    // transaction commits, never inside it — a notification-pipeline
+    // failure must never roll back a shipment that has otherwise already
+    // been successfully created and received.
+    await this.notificationsService.fireShipmentStatusChanged(tenantId, shipmentId, ShipmentStatus.WAREHOUSE_RECEIVED);
 
     return this.findById(tenantId, shipmentId);
   }
