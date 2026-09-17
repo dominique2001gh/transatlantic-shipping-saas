@@ -82,6 +82,25 @@ const CONTAINER_ARRIVED_OR_LATER: DbContainerStatus[] = [
 ];
 
 /**
+ * "Has this item at least been received at the destination warehouse" —
+ * RECEIVED_DESTINATION_WAREHOUSE itself, plus every status an item only
+ * reaches by having passed through it first (OUT_FOR_DELIVERY, DELIVERED,
+ * PICKED_UP — the same forward progression WarehouseService's own
+ * ITEM_TERMINAL_HANDOFF/ITEM_OUT_FOR_DELIVERY_OR_LATER lists are built
+ * from). Without this, summarizeDestination below would mis-report an
+ * item that has already been picked up or delivered as still
+ * "outstanding" the moment it moves past the exact
+ * RECEIVED_DESTINATION_WAREHOUSE status — further along, not behind, but
+ * miscounted as a discrepancy either way.
+ */
+const ITEM_RECEIVED_AT_DESTINATION_OR_LATER: DbShipmentItemStatus[] = [
+  DbShipmentItemStatus.RECEIVED_DESTINATION_WAREHOUSE,
+  DbShipmentItemStatus.OUT_FOR_DELIVERY,
+  DbShipmentItemStatus.DELIVERED,
+  DbShipmentItemStatus.PICKED_UP,
+];
+
+/**
  * Live-computed, destination-side progress — never stored, always
  * derived from current ContainerItem + ShipmentItem.status. Deliberately
  * distinguishes "outstanding" (not yet scanned in at destination) from
@@ -97,7 +116,7 @@ function summarizeDestination(container: ContainerDetailRaw) {
   let exceptionCount = 0;
   let outstandingCount = 0;
   for (const containerItem of container.items) {
-    if (containerItem.shipmentItem.status === DbShipmentItemStatus.RECEIVED_DESTINATION_WAREHOUSE) {
+    if (ITEM_RECEIVED_AT_DESTINATION_OR_LATER.includes(containerItem.shipmentItem.status)) {
       receivedCount += 1;
     } else if (containerItem.shipmentItem.status === DbShipmentItemStatus.EXCEPTION) {
       exceptionCount += 1;

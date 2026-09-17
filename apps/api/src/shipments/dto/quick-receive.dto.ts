@@ -1,5 +1,6 @@
 import { DimensionUnit, ShipmentItemType, ShipmentMode, WeightUnit } from '@transatlantic/shared';
 import {
+  IsEmail,
   IsEnum,
   IsInt,
   IsNumber,
@@ -29,6 +30,18 @@ import {
  * (`@ArrayMaxSize(50)`) — chosen for the same reason: a sane upper bound
  * for a single warehouse-floor action and for the size of the one
  * transaction ShipmentsService.createQuickReceive runs.
+ *
+ * Phase 2: deliberately has no `originCountry`/`originLocation` fields —
+ * ShipmentsService.createQuickReceive derives both directly from the
+ * selected `originWarehouseId`'s own city/state/country, which is the
+ * authoritative record of where a warehouse physically is (see
+ * Warehouse in schema.prisma). Origin geography is never client-supplied
+ * free text here, so there is no per-tenant default to get wrong.
+ * `destinationWarehouseId` is optional and, unlike origin, does not
+ * override the staff-entered `destinationCountry`/`destinationLocation` —
+ * a shipment's real destination may be a port or airport the tenant
+ * hasn't modeled as a Warehouse row at all, and forcing the warehouse's
+ * own address onto the shipment would silently overwrite that.
  */
 export class QuickReceiveDto {
   @IsString()
@@ -39,15 +52,7 @@ export class QuickReceiveDto {
 
   @IsString()
   @MinLength(1)
-  originCountry!: string;
-
-  @IsString()
-  @MinLength(1)
   destinationCountry!: string;
-
-  @IsOptional()
-  @IsString()
-  originLocation?: string;
 
   @IsOptional()
   @IsString()
@@ -58,7 +63,55 @@ export class QuickReceiveDto {
 
   @IsOptional()
   @IsString()
+  destinationWarehouseId?: string;
+
+  @IsOptional()
+  @IsString()
   description?: string;
+
+  /**
+   * Consignee at destination — required (see Shipment.recipient* doc
+   * comment in schema.prisma for why this is captured once here rather
+   * than re-asked at every downstream handoff). `recipientPhone` is a
+   * plain string with no format/country regex: this platform serves
+   * tenants shipping to any country, so no single phone format can be
+   * assumed correct.
+   */
+  @IsString()
+  @MinLength(1)
+  recipientName!: string;
+
+  @IsString()
+  @MinLength(1)
+  recipientPhone!: string;
+
+  @IsOptional()
+  @IsEmail()
+  recipientEmail?: string;
+
+  @IsOptional()
+  @IsString()
+  recipientAddressLine1?: string;
+
+  @IsOptional()
+  @IsString()
+  recipientAddressLine2?: string;
+
+  @IsOptional()
+  @IsString()
+  recipientCity?: string;
+
+  @IsOptional()
+  @IsString()
+  recipientState?: string;
+
+  @IsOptional()
+  @IsString()
+  recipientCountry?: string;
+
+  @IsOptional()
+  @IsString()
+  recipientPostalCode?: string;
 
   @IsInt()
   @Min(1)

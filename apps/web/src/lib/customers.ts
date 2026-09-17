@@ -13,6 +13,14 @@ export interface CreateCustomerInput {
   lastName: string;
   email: string;
   phone?: string;
+  /** Re-submit with this set to true to create a customer anyway after reviewing a 409 DuplicateCustomerError's matches. */
+  confirmDuplicate?: boolean;
+}
+
+/** Shape of the 409 response body from CustomersService.create's duplicate-email/phone check — read via ApiError.details. */
+export interface DuplicateCustomerErrorBody {
+  message: string;
+  duplicates: CustomerSummary[];
 }
 
 export type UpdateCustomerInput = Partial<CreateCustomerInput>;

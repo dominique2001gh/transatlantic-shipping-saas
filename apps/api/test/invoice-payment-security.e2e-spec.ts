@@ -311,6 +311,8 @@ async function createShipmentForCustomerId(
       shipmentMode: ShipmentMode.OCEAN_LCL,
       originCountry: 'US',
       destinationCountry: 'GH',
+      recipientName: 'Test Recipient',
+      recipientPhone: '+15550000000',
       items: [{ itemType: ShipmentItemType.BOX, description: 'Security e2e test box' }],
     });
   if (res.status !== 201) {

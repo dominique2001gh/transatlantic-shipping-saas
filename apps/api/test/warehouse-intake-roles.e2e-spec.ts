@@ -65,6 +65,8 @@ describe('Warehouse intake RBAC: STAFF can register customers and create shipmen
         shipmentMode: 'OCEAN_LCL',
         originCountry: 'US',
         destinationCountry: 'GH',
+        recipientName: 'Test Recipient',
+        recipientPhone: '+15550000000',
         items: [{ itemType: 'BOX', quantity: 1 }],
       });
     expect(res.status).toBe(201);
@@ -75,7 +77,14 @@ describe('Warehouse intake RBAC: STAFF can register customers and create shipmen
     const shipmentRes = await request(app.getHttpServer())
       .post('/shipments')
       .set('Authorization', `Bearer ${staffToken}`)
-      .send({ customerId: tenant.customerId, shipmentMode: 'AIR', originCountry: 'US', destinationCountry: 'GH' });
+      .send({
+        customerId: tenant.customerId,
+        shipmentMode: 'AIR',
+        originCountry: 'US',
+        destinationCountry: 'GH',
+        recipientName: 'Test Recipient',
+        recipientPhone: '+15550000000',
+      });
     expect(shipmentRes.status).toBe(201);
 
     const itemRes = await request(app.getHttpServer())

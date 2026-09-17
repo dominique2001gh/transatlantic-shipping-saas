@@ -52,6 +52,13 @@ describe('Public Tracking (e2e)', () => {
     expect(res.body.timeline.some((m: { label: string }) => m.label === 'Received at origin warehouse')).toBe(true);
     expect(res.body.items).toHaveLength(1);
     expect(res.body.items[0].itemCode).toBe(shipment.items[0].itemCode);
+    // Phase 2: the shipment has a real recipientName/recipientPhone on file
+    // (see createShipmentForCustomer below) — the public projection must
+    // never include it, same allowlist posture TrackingService's own doc
+    // comment describes for every other internal-only field.
+    expect(res.body.recipientName).toBeUndefined();
+    expect(res.body.recipientPhone).toBeUndefined();
+    expect(res.body.recipientEmail).toBeUndefined();
     void customer;
   });
 
@@ -247,6 +254,8 @@ async function createShipmentForCustomer(
       shipmentMode: ShipmentMode.OCEAN_LCL,
       originCountry: 'US',
       destinationCountry: 'GH',
+      recipientName: 'Test Recipient',
+      recipientPhone: '+15550000000',
       items: Array.from({ length: itemCount }, () => ({
         itemType: ShipmentItemType.BOX,
         description: 'Public tracking e2e test box',

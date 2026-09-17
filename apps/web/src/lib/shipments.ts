@@ -31,7 +31,20 @@ export interface ShipmentItemInput {
   declaredValue?: number;
 }
 
-export interface CreateShipmentInput {
+/** Consignee at destination — required name/phone, everything else optional. Shared shape between New Shipment and Quick Receive; both create the same Shipment.recipient* columns. */
+export interface RecipientInput {
+  recipientName: string;
+  recipientPhone: string;
+  recipientEmail?: string;
+  recipientAddressLine1?: string;
+  recipientAddressLine2?: string;
+  recipientCity?: string;
+  recipientState?: string;
+  recipientCountry?: string;
+  recipientPostalCode?: string;
+}
+
+export interface CreateShipmentInput extends RecipientInput {
   customerId: string;
   shipmentMode: ShipmentMode;
   originCountry: string;
@@ -47,19 +60,24 @@ export interface CreateShipmentInput {
 }
 
 /**
- * Quick Receive (Phase 1): mirrors CreateShipmentInput but takes
- * `packageCount` instead of an explicit `items[]` — the server generates
- * that many identical-defaults items and marks every one of them received
- * at `originWarehouseId` immediately (see ShipmentsService.createQuickReceive).
+ * Quick Receive: mirrors CreateShipmentInput but takes `packageCount`
+ * instead of an explicit `items[]` — the server generates that many
+ * identical-defaults items and marks every one of them received at
+ * `originWarehouseId` immediately (see ShipmentsService.createQuickReceive).
+ *
+ * Phase 2: deliberately has no `originCountry`/`originLocation` — the
+ * server derives both from the selected `originWarehouseId`'s own address,
+ * so there is nothing for this client to send (see QuickReceiveDto's own
+ * doc comment). `destinationWarehouseId` is optional and purely additive —
+ * it never overrides the staff-entered `destinationCountry`/`destinationLocation`.
  */
-export interface QuickReceiveInput {
+export interface QuickReceiveInput extends RecipientInput {
   customerId: string;
   shipmentMode: ShipmentMode;
-  originCountry: string;
   destinationCountry: string;
-  originLocation?: string;
   destinationLocation?: string;
   originWarehouseId: string;
+  destinationWarehouseId?: string;
   description?: string;
   packageCount: number;
   itemType?: ShipmentItemType;

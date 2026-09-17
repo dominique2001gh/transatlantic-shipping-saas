@@ -905,6 +905,32 @@ model Shipment {
   description            String?
   declaredValue          Decimal?       @db.Decimal(12, 2)
   currency               String?
+
+  /// Consignee at destination — deliberately distinct from `customer`
+  /// (the sender/account holder). Captured once at shipment intake (New
+  /// Shipment or Quick Receive) so downstream destination-side workflows
+  /// (destination receiving, pickup/delivery dispatch, documents,
+  /// operational notifications) can read it instead of re-asking staff for
+  /// it. All nullable at the DB layer so every shipment created before this
+  /// field existed remains valid with no backfill; `recipientName`/
+  /// `recipientPhone` are required by DTO-level validation for any *new*
+  /// shipment going forward (New Shipment and Quick Receive both enforce
+  /// this the same way — see CreateShipmentDto/QuickReceiveDto). Distinct
+  /// from PickupDeliveryRecord.recipientName/recipientPhone, which is the
+  /// separate, immutable record of who *actually* took physical custody at
+  /// the real handoff moment (may differ from the person named here) —
+  /// this field is only ever a same-tenant UX default for that screen, never
+  /// overwritten by it and never a substitute for it.
+  recipientName          String?
+  recipientPhone         String?
+  recipientEmail         String?
+  recipientAddressLine1  String?
+  recipientAddressLine2  String?
+  recipientCity          String?
+  recipientState         String?
+  recipientCountry       String?
+  recipientPostalCode    String?
+
   createdAt              DateTime       @default(now())
   updatedAt              DateTime       @updatedAt
 

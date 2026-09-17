@@ -171,10 +171,22 @@ export interface ShipmentSummary {
   destinationCountry: string;
   originLocation: string | null;
   destinationLocation: string | null;
+  originWarehouseId: string | null;
+  destinationWarehouseId: string | null;
   description: string | null;
   declaredValue: string | null;
   currency: string | null;
   customerId: string;
+  /** Consignee at destination — distinct from `customer` (the sender). See Shipment.recipient* in schema.prisma. */
+  recipientName: string | null;
+  recipientPhone: string | null;
+  recipientEmail: string | null;
+  recipientAddressLine1: string | null;
+  recipientAddressLine2: string | null;
+  recipientCity: string | null;
+  recipientState: string | null;
+  recipientCountry: string | null;
+  recipientPostalCode: string | null;
   createdAt: string;
   updatedAt: string;
   customer?: CustomerSummary;
@@ -233,6 +245,10 @@ export interface WarehouseSummary {
   id: string;
   name: string;
   code: string;
+  /** Authoritative geography for this warehouse — Quick Receive/New Shipment derive origin location from here rather than a separately-typed default. */
+  city: string;
+  state: string | null;
+  country: string;
   isOriginWarehouse: boolean;
   isDestinationWarehouse: boolean;
 }
@@ -279,6 +295,9 @@ export interface WarehouseItemDetail {
     status: ShipmentStatus;
     destinationCountry: string;
     destinationLocation: string | null;
+    /** Consignee captured at intake — used to prefill (never silently overwrite) the Pickup/Delivery handoff form. */
+    recipientName: string | null;
+    recipientPhone: string | null;
     customer: {
       id: string;
       customerNumber: string;

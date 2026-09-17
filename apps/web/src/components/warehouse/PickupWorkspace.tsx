@@ -91,10 +91,19 @@ export function PickupWorkspace({
   const canSubmitDeliver = !!recipientName.trim() && !!selectedWarehouseId && !confirming;
   const canSubmitReturn = !!failureReason.trim() && !!selectedWarehouseId && !confirming;
 
-  function resetForm() {
+  /**
+   * Phase 2: prefills recipientName/recipientPhone from the shipment's own
+   * consignee info captured at intake (Quick Receive / New Shipment) when
+   * an item is freshly resolved — a pure default, never authoritative.
+   * Staff can freely edit or blank either field before confirming; the
+   * actual handoff recipient (who may differ — e.g. someone picking up on
+   * the named recipient's behalf) is what actually gets submitted and
+   * recorded as its own PickupDeliveryRecord.
+   */
+  function resetForm(item: WarehouseItemDetail | null = null) {
     setActionMode(null);
-    setRecipientName('');
-    setRecipientPhone('');
+    setRecipientName(item?.shipment.recipientName ?? '');
+    setRecipientPhone(item?.shipment.recipientPhone ?? '');
     setRecipientIdReference('');
     setNotes('');
     setDeliveryAddress('');
@@ -113,7 +122,7 @@ export function PickupWorkspace({
       playScanSuccessTone();
       setResolvedItem(item);
       setScannedCode(code);
-      resetForm();
+      resetForm(item);
     } catch (err) {
       playScanErrorTone();
       setResolvedItem(null);
@@ -143,7 +152,7 @@ export function PickupWorkspace({
     setManualQuery('');
     setLookupError(null);
     setSuccessMessage(null);
-    resetForm();
+    resetForm(item);
   }
 
   function handleCancel() {

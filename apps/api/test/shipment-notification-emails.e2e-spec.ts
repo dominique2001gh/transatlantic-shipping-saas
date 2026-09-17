@@ -283,6 +283,8 @@ async function createSingleShipment(
       shipmentMode: ShipmentMode.OCEAN_LCL,
       originCountry: 'US',
       destinationCountry: 'Ghana',
+      recipientName: 'Test Recipient',
+      recipientPhone: '+15550000000',
       ...extra,
       items: Array.from({ length: itemCount }, () => ({ itemType: ShipmentItemType.BOX, description: 'E2E email-redesign test box' })),
     });

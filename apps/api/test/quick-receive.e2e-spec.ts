@@ -7,16 +7,21 @@ import { createTestApp } from './utils/test-app';
 jest.setTimeout(30_000);
 
 /**
- * Quick Receive (Phase 1, 2026-09): one request creates a shipment and N
- * packages, every one of them already in the normal origin-warehouse
- * RECEIVED state — no scan required. Exercises the real HTTP API, real
- * Prisma, real Postgres (no mocks), same convention as
+ * Quick Receive (Phase 1 2026-09 + Phase 2 2026-09): one request creates a
+ * shipment and N packages, every one of them already in the normal
+ * origin-warehouse RECEIVED state — no scan required. Exercises the real
+ * HTTP API, real Prisma, real Postgres (no mocks), same convention as
  * warehouse-tenant-isolation.e2e-spec.ts.
  *
- * Covers exactly what the approved Phase 1 plan called out: piece-count
- * correctness, unique barcode generation, automatic RECEIVED state/events,
- * atomic failure behavior, tenant isolation, RBAC, inline customer
- * creation, and preservation of downstream Process/container eligibility.
+ * Phase 1 coverage: piece-count correctness, unique barcode generation,
+ * automatic RECEIVED state/events, atomic failure behavior, tenant
+ * isolation, RBAC, inline customer creation, and preservation of
+ * downstream Process/container eligibility.
+ *
+ * Phase 2 coverage added below: origin geography is derived from the
+ * selected warehouse (never client-supplied — originCountry/originLocation
+ * are no longer accepted fields at all), required recipient/consignee
+ * fields, and the optional destinationWarehouseId FK.
  */
 describe('Quick Receive (e2e)', () => {
   let app: INestApplication;
@@ -57,9 +62,10 @@ describe('Quick Receive (e2e)', () => {
     return {
       customerId: tenant.customerId,
       shipmentMode: ShipmentMode.OCEAN_LCL,
-      originCountry: 'US',
       destinationCountry: 'GH',
       originWarehouseId: tenant.warehouseId,
+      recipientName: 'Test Recipient',
+      recipientPhone: '+233201234567',
       packageCount: 4,
       ...overrides,
     };
@@ -200,6 +206,136 @@ describe('Quick Receive (e2e)', () => {
       const res = await quickReceive(managerToken, rest);
       expect(res.status).toBe(400);
     });
+
+    it('rejects a missing recipientName', async () => {
+      const { recipientName, ...rest } = basePayload();
+      const res = await quickReceive(managerToken, rest);
+      expect(res.status).toBe(400);
+    });
+
+    it('rejects a missing recipientPhone', async () => {
+      const { recipientPhone, ...rest } = basePayload();
+      const res = await quickReceive(managerToken, rest);
+      expect(res.status).toBe(400);
+    });
+
+  });
+
+  // -- Phase 2: origin geography is warehouse-derived, never client input ----
+
+  describe('dynamic origin geography', () => {
+    it('derives originCountry/originLocation from the selected warehouse\'s own city/country — not any hardcoded default', async () => {
+      const res = await quickReceive(managerToken, basePayload({ packageCount: 1 }));
+      expect(res.status).toBe(201);
+      // Fixture warehouse (see createTestTenant) is city: 'Testville', country: 'US', no state.
+      expect(res.body.originCountry).toBe('US');
+      expect(res.body.originLocation).toBe('Testville');
+    });
+
+    it('composes "City, State" when the warehouse has a state/province on file', async () => {
+      const warehouseWithState = await prisma.warehouse.create({
+        data: {
+          tenantId: tenant.tenantId,
+          name: 'State-Having Warehouse',
+          code: `E2E-STATE-${Date.now()}`,
+          addressLine1: '2 Test Street',
+          city: 'Testopolis',
+          state: 'TS',
+          country: 'CA',
+          isOriginWarehouse: true,
+        },
+      });
+      const res = await quickReceive(managerToken, basePayload({ originWarehouseId: warehouseWithState.id, packageCount: 1 }));
+      expect(res.status).toBe(201);
+      expect(res.body.originCountry).toBe('CA');
+      expect(res.body.originLocation).toBe('Testopolis, TS');
+    });
+
+    it('rejects an originCountry/originLocation in the request body outright — Quick Receive has no client-supplied origin geography at all', async () => {
+      const res = await quickReceive(managerToken, basePayload({ originCountry: 'US', originLocation: 'Somewhere', packageCount: 1 }));
+      expect(res.status).toBe(400);
+    });
+  });
+
+  // -- Phase 2: recipient/consignee ------------------------------------------
+
+  describe('recipient/consignee', () => {
+    it('persists the required recipientName/recipientPhone plus optional fields on the Shipment row', async () => {
+      const res = await quickReceive(
+        managerToken,
+        basePayload({
+          recipientName: 'Ama Mensah',
+          recipientPhone: '+233 20 123 4567',
+          recipientEmail: 'ama@example.test',
+          recipientAddressLine1: '12 High Street',
+          recipientCity: 'Accra',
+          recipientCountry: 'Ghana',
+          packageCount: 1,
+        }),
+      );
+      expect(res.status).toBe(201);
+      expect(res.body.recipientName).toBe('Ama Mensah');
+      expect(res.body.recipientPhone).toBe('+233 20 123 4567');
+      expect(res.body.recipientEmail).toBe('ama@example.test');
+      expect(res.body.recipientAddressLine1).toBe('12 High Street');
+      expect(res.body.recipientCity).toBe('Accra');
+      expect(res.body.recipientCountry).toBe('Ghana');
+    });
+
+    it('accepts international phone formats with no hardcoded country-specific regex (e.g. a UK-style number)', async () => {
+      const res = await quickReceive(managerToken, basePayload({ recipientPhone: '+44 20 7946 0958', packageCount: 1 }));
+      expect(res.status).toBe(201);
+      expect(res.body.recipientPhone).toBe('+44 20 7946 0958');
+    });
+
+    it('leaves optional recipient fields null when omitted — no forced defaults', async () => {
+      const res = await quickReceive(managerToken, basePayload({ packageCount: 1 }));
+      expect(res.status).toBe(201);
+      expect(res.body.recipientEmail).toBeNull();
+      expect(res.body.recipientAddressLine1).toBeNull();
+    });
+  });
+
+  // -- Phase 2: optional destination warehouse --------------------------------
+
+  describe('destination warehouse (optional)', () => {
+    it('is null when omitted — destinationCountry/destinationLocation remain purely staff-entered', async () => {
+      const res = await quickReceive(managerToken, basePayload({ destinationLocation: 'Tema Port', packageCount: 1 }));
+      expect(res.status).toBe(201);
+      expect(res.body.destinationWarehouseId).toBeNull();
+      expect(res.body.destinationCountry).toBe('GH');
+      expect(res.body.destinationLocation).toBe('Tema Port');
+    });
+
+    it('accepts and persists a same-tenant destinationWarehouseId without overriding the staff-entered destinationCountry/destinationLocation', async () => {
+      const destinationWarehouse = await prisma.warehouse.create({
+        data: {
+          tenantId: tenant.tenantId,
+          name: 'Destination Test Warehouse',
+          code: `E2E-DEST-${Date.now()}`,
+          addressLine1: '3 Test Street',
+          city: 'Accra',
+          country: 'Ghana',
+          isDestinationWarehouse: true,
+        },
+      });
+      const res = await quickReceive(
+        managerToken,
+        basePayload({ destinationWarehouseId: destinationWarehouse.id, destinationLocation: 'Tema Port (pre-warehouse)', packageCount: 1 }),
+      );
+      expect(res.status).toBe(201);
+      expect(res.body.destinationWarehouseId).toBe(destinationWarehouse.id);
+      // Never silently overwritten by the warehouse's own address — see QuickReceiveDto's doc comment.
+      expect(res.body.destinationLocation).toBe('Tema Port (pre-warehouse)');
+    });
+
+    it("404s on another tenant's destinationWarehouseId, atomically (no partial shipment left behind)", async () => {
+      const shipmentCountBefore = await prisma.shipment.count({ where: { tenantId: tenant.tenantId } });
+      const res = await quickReceive(managerToken, basePayload({ destinationWarehouseId: otherTenant.warehouseId, packageCount: 1 }));
+      expect(res.status).toBe(404);
+      const shipmentCountAfter = await prisma.shipment.count({ where: { tenantId: tenant.tenantId } });
+      expect(shipmentCountAfter).toBe(shipmentCountBefore);
+    });
   });
 
   // -- Tenant isolation -------------------------------------------------------
@@ -238,9 +374,10 @@ describe('Quick Receive (e2e)', () => {
         quickReceive(otherTenantToken, {
           customerId: otherTenant.customerId,
           shipmentMode: ShipmentMode.OCEAN_LCL,
-          originCountry: 'US',
           destinationCountry: 'GH',
           originWarehouseId: otherTenant.warehouseId,
+          recipientName: 'Test Recipient',
+          recipientPhone: '+15550000000',
           packageCount: 2,
         }),
       ]);

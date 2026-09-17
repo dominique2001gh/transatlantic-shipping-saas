@@ -6,6 +6,8 @@ export class ApiError extends Error {
   constructor(
     message: string,
     public readonly statusCode: number,
+    /** Raw parsed JSON error body, when the response was JSON — lets a caller read structured fields (e.g. CustomersService's 409 `duplicates` array) beyond the plain message. */
+    public readonly details?: unknown,
   ) {
     super(message);
     this.name = 'ApiError';
@@ -57,7 +59,7 @@ export async function apiFetch<T>(
       logout('expired');
     }
 
-    throw new ApiError(message, response.status);
+    throw new ApiError(message, response.status, body);
   }
 
   return body as T;

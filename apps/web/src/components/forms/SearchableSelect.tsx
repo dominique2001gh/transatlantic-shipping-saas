@@ -36,6 +36,19 @@ export interface SearchableSelectProps<T> {
   /** Caps how many matches render at once, so a large tenant customer list never dumps thousands of DOM nodes into the popup. */
   maxResults?: number;
   className?: string;
+  /**
+   * Opt-in escape hatch for a caller that wants to drive `items` from a
+   * server-side search instead of filtering a pre-fetched full list (see
+   * this component's own doc comment for why client-side filtering is the
+   * default). Fires on every keystroke with the raw typed text — debouncing
+   * and fetching are entirely the caller's responsibility; this component
+   * still filters whatever `items` it's given, so if the caller doesn't
+   * refresh `items` in response, behavior is unchanged. Omitted by every
+   * caller that hasn't opted in (e.g. New Shipment's customer picker),
+   * which keeps their existing fully-client-side behavior identical.
+   */
+  onQueryChange?: (query: string) => void;
+  autoFocus?: boolean;
 }
 
 /**
@@ -80,6 +93,8 @@ export function SearchableSelect<T>({
   emptyMessage = 'No matches',
   maxResults = 50,
   className = '',
+  onQueryChange,
+  autoFocus,
 }: SearchableSelectProps<T>) {
   const [query, setQuery] = useState('');
   const [isOpen, setIsOpen] = useState(false);
@@ -210,12 +225,14 @@ export function SearchableSelect<T>({
         placeholder={placeholder}
         className={`${fieldClasses} ${className}`}
         value={query}
+        autoFocus={autoFocus}
         onFocus={openListShowingAll}
         onClick={openListShowingAll}
         onChange={(event) => {
           setQuery(event.target.value);
           setIsOpen(true);
           if (value) onChange('', undefined);
+          onQueryChange?.(event.target.value);
         }}
         onKeyDown={handleKeyDown}
       />

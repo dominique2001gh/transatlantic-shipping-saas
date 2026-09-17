@@ -78,6 +78,31 @@ export default function ShipmentDetailPage() {
         {shipment.description && <p className="mt-4 text-sm text-slate-600">{shipment.description}</p>}
       </Card>
 
+      {shipment.recipientName && (
+        <Card>
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Recipient at destination</p>
+          <dl className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <Detail label="Name" value={shipment.recipientName} />
+            <Detail label="Phone" value={shipment.recipientPhone ?? '—'} />
+            <Detail label="Email" value={shipment.recipientEmail ?? '—'} />
+          </dl>
+          {(shipment.recipientAddressLine1 || shipment.recipientCity || shipment.recipientCountry) && (
+            <p className="mt-3 text-sm text-slate-600">
+              {[
+                shipment.recipientAddressLine1,
+                shipment.recipientAddressLine2,
+                shipment.recipientCity,
+                shipment.recipientState,
+                shipment.recipientPostalCode,
+                shipment.recipientCountry,
+              ]
+                .filter(Boolean)
+                .join(', ')}
+            </p>
+          )}
+        </Card>
+      )}
+
       <section>
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold text-slate-900">Items</h2>

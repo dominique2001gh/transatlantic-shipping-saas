@@ -481,6 +481,8 @@ async function createSingleShipment(
       shipmentMode: ShipmentMode.OCEAN_LCL,
       originCountry: 'US',
       destinationCountry: 'GH',
+      recipientName: 'Test Recipient',
+      recipientPhone: '+15550000000',
       items: Array.from({ length: itemCount }, () => ({
         itemType: ShipmentItemType.BOX,
         description: 'E2E manifest test box',

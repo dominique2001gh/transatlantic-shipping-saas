@@ -128,6 +128,11 @@ const ITEM_DETAIL_INCLUDE = {
       status: true,
       destinationCountry: true,
       destinationLocation: true,
+      // Phase 2: consignee captured at intake — surfaced here so the
+      // Pickup/Delivery workspace can prefill (never silently overwrite)
+      // its own recipient fields at the actual handoff moment.
+      recipientName: true,
+      recipientPhone: true,
       customer: {
         select: { id: true, customerNumber: true, firstName: true, lastName: true },
       },

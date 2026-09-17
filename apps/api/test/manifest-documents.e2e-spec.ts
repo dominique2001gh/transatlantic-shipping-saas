@@ -443,6 +443,8 @@ async function createSingleShipment(
       shipmentMode: 'OCEAN_LCL',
       originCountry: 'US',
       destinationCountry: 'GH',
+      recipientName: 'Test Recipient',
+      recipientPhone: '+15550000000',
       items: [item],
     });
   if (res.status !== 201) {

@@ -138,6 +138,15 @@ export class ShipmentsService {
           description: dto.description,
           declaredValue: dto.declaredValue,
           currency: dto.currency,
+          recipientName: dto.recipientName,
+          recipientPhone: dto.recipientPhone,
+          recipientEmail: dto.recipientEmail,
+          recipientAddressLine1: dto.recipientAddressLine1,
+          recipientAddressLine2: dto.recipientAddressLine2,
+          recipientCity: dto.recipientCity,
+          recipientState: dto.recipientState,
+          recipientCountry: dto.recipientCountry,
+          recipientPostalCode: dto.recipientPostalCode,
           status: ShipmentStatus.DRAFT,
         },
       });
@@ -171,13 +180,21 @@ export class ShipmentsService {
   }
 
   /**
-   * Quick Receive (Phase 1): creates a shipment and `packageCount`
-   * identical-defaults items in one transaction, with every item already
-   * in the normal origin-warehouse RECEIVED state — no separate trip
-   * through Warehouse -> Receive is required for these pieces. `create()`
-   * above and WarehouseService.receiveItem are both untouched by this
-   * method; existing New Shipment / Warehouse -> Receive keep working
-   * exactly as before for anyone who doesn't use this endpoint.
+   * Quick Receive: creates a shipment and `packageCount` identical-defaults
+   * items in one transaction, with every item already in the normal
+   * origin-warehouse RECEIVED state — no separate trip through Warehouse
+   * -> Receive is required for these pieces. `create()` above and
+   * WarehouseService.receiveItem are both untouched by this method;
+   * existing New Shipment / Warehouse -> Receive keep working exactly as
+   * before for anyone who doesn't use this endpoint.
+   *
+   * Phase 2: origin geography (originCountry/originLocation) is derived
+   * from the selected warehouse, never client-supplied — see
+   * QuickReceiveDto's own doc comment. Also persists the required
+   * recipient/consignee fields onto the Shipment row (Requirement #5-#7 of
+   * the Phase 2 design) — the same fields CreateShipmentDto's `create()`
+   * populates, so both intake paths produce an identically-shaped Shipment
+   * record.
    *
    * Deliberately does NOT call createTrackingEvent() (used by
    * receiveItem) for the per-item receiving writes: that method opens its
@@ -212,6 +229,24 @@ export class ShipmentsService {
       throw new NotFoundException('Warehouse not found');
     }
 
+    // Origin geography is never client-supplied free text here (see
+    // QuickReceiveDto's own doc comment) — the selected warehouse's own
+    // address is the single source of truth for "where these packages
+    // physically are right now," for any tenant, in any country.
+    const originCountry = warehouse.country;
+    const originLocation = warehouse.state ? `${warehouse.city}, ${warehouse.state}` : warehouse.city;
+
+    let destinationWarehouseId: string | undefined;
+    if (dto.destinationWarehouseId) {
+      const destinationWarehouse = await this.prisma.warehouse.findFirst({
+        where: { id: dto.destinationWarehouseId, tenantId },
+      });
+      if (!destinationWarehouse) {
+        throw new NotFoundException('Destination warehouse not found');
+      }
+      destinationWarehouseId = destinationWarehouse.id;
+    }
+
     // Sequence generation is its own atomic step, deliberately outside the
     // transaction below — same reasoning as create() above.
     const trackingNumber = await generateTrackingNumber(this.prisma, tenantId);
@@ -227,12 +262,22 @@ export class ShipmentsService {
           customerId: dto.customerId,
           trackingNumber,
           shipmentMode: dto.shipmentMode,
-          originCountry: dto.originCountry,
+          originCountry,
           destinationCountry: dto.destinationCountry,
-          originLocation: dto.originLocation,
+          originLocation,
           destinationLocation: dto.destinationLocation,
           originWarehouseId: dto.originWarehouseId,
+          destinationWarehouseId,
           description: dto.description,
+          recipientName: dto.recipientName,
+          recipientPhone: dto.recipientPhone,
+          recipientEmail: dto.recipientEmail,
+          recipientAddressLine1: dto.recipientAddressLine1,
+          recipientAddressLine2: dto.recipientAddressLine2,
+          recipientCity: dto.recipientCity,
+          recipientState: dto.recipientState,
+          recipientCountry: dto.recipientCountry,
+          recipientPostalCode: dto.recipientPostalCode,
           status: ShipmentStatus.DRAFT,
         },
       });
