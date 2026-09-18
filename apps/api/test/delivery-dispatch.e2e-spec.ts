@@ -22,6 +22,10 @@ import { createTestApp } from './utils/test-app';
  * Customer Pickup's own suite (customer-pickup.e2e-spec.ts) is unchanged
  * and still exercised independently — this file only adds coverage, it
  * does not touch or duplicate that regression protection.
+ *
+ * Simplified Operational Scanning Workflow (Phase 2): the destination-
+ * warehouse receiving scan is now optional — mirrors customer-pickup's own
+ * Phase 2 coverage for dispatchItem.
  */
 describe('Delivery/Driver Dispatch (e2e)', () => {
   let app: INestApplication;
@@ -118,9 +122,30 @@ describe('Delivery/Driver Dispatch (e2e)', () => {
       expect(dbItem.status).toBe('RECEIVED_DESTINATION_WAREHOUSE'); // untouched
     });
 
-    it('rejects dispatch of an item not yet received at the destination warehouse', async () => {
-      const manifest = await createArrivedOceanManifest(app, tokenA, tenantA, 1); // ARRIVED_DESTINATION only
+    it('Phase 2: dispatches directly from ARRIVED_DESTINATION when the destination-receive scan was skipped but the destination warehouse is known', async () => {
+      const manifest = await createArrivedOceanManifest(app, tokenA, tenantA, 1, { destinationWarehouseId: tenantA.warehouseId });
       const res = await dispatch(app, tokenA, manifest.itemId, tenantA.warehouseId, {
+        recipientName: 'Someone',
+        courierName: 'DHL Ghana',
+      });
+      expect(res.status).toBe(201);
+      expect(res.body.status).toBe('OUT_FOR_DELIVERY');
+    });
+
+    it("Phase 2: still rejects dispatch from ARRIVED_DESTINATION when the shipment's destination warehouse isn't known (safe fallback)", async () => {
+      const otherWarehouse = await prisma.warehouse.create({
+        data: {
+          tenantId: tenantA.tenantId,
+          name: 'Unlinked Destination WH',
+          code: `UNLINKED-${Date.now()}`,
+          addressLine1: '1 Nowhere Rd',
+          city: 'Kumasi',
+          country: 'GH',
+          isDestinationWarehouse: true,
+        },
+      });
+      const manifest = await createArrivedOceanManifest(app, tokenA, tenantA, 1); // no destinationWarehouseId set
+      const res = await dispatch(app, tokenA, manifest.itemId, otherWarehouse.id, {
         recipientName: 'Someone',
         courierName: 'DHL Ghana',
       });
@@ -549,7 +574,13 @@ async function createContainer(app: INestApplication, token: string, opts: { war
   return res.body as { id: string };
 }
 
-async function createSingleShipment(app: INestApplication, token: string, customerId: string, itemCount = 1) {
+async function createSingleShipment(
+  app: INestApplication,
+  token: string,
+  customerId: string,
+  itemCount = 1,
+  opts: { destinationWarehouseId?: string } = {},
+) {
   const res = await request(app.getHttpServer())
     .post('/shipments')
     .set('Authorization', `Bearer ${token}`)
@@ -560,6 +591,7 @@ async function createSingleShipment(app: INestApplication, token: string, custom
       destinationCountry: 'GH',
       recipientName: 'Test Recipient',
       recipientPhone: '+15550000000',
+      ...opts,
       items: Array.from({ length: itemCount }, () => ({
         itemType: ShipmentItemType.BOX,
         description: 'E2E delivery-dispatch test box',
@@ -623,9 +655,10 @@ async function createArrivedOceanManifest(
   token: string,
   tenant: TestTenantFixture,
   itemCount: number,
+  opts: { destinationWarehouseId?: string } = {},
 ): Promise<{ manifestId: string; containerId: string; itemId: string; itemIds: string[]; shipmentId: string }> {
   const container = await createContainer(app, token, { warehouseId: tenant.warehouseId });
-  const shipment = await createSingleShipment(app, token, tenant.customerId, itemCount);
+  const shipment = await createSingleShipment(app, token, tenant.customerId, itemCount, opts);
   for (const item of shipment.items) {
     await receiveItem(app, token, item.id, tenant.warehouseId);
     await processOnce(app, token, item.id, tenant.warehouseId);

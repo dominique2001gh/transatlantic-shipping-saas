@@ -22,6 +22,16 @@ jest.setTimeout(30_000);
  * already covered by notifications.e2e-spec.ts; this suite only adds
  * coverage for the three new milestones plus COMPLETED's continued
  * correctness alongside them.
+ *
+ * Simplified Operational Scanning Workflow (Phase 2): test 6 below proves
+ * COMPLETED still fires correctly via a direct pickup from
+ * ARRIVED_DESTINATION when the per-item destination-receive scan is
+ * skipped entirely. READY_FOR_PICKUP deliberately does NOT fire in that
+ * case — widening it to fire on ARRIVED_DESTINATION alone would make
+ * every shipment "ready" the instant it arrives, defeating the
+ * reconciliation guarantee destination-receive.e2e-spec.ts's "CRITICAL"
+ * test locks in for tenants who DO use the scan. Accepted trade-off, not
+ * an oversight.
  */
 describe('Final-mile customer notifications: READY_FOR_PICKUP / OUT_FOR_DELIVERY / DELIVERED (e2e)', () => {
   let app: INestApplication;
@@ -147,6 +157,24 @@ describe('Final-mile customer notifications: READY_FOR_PICKUP / OUT_FOR_DELIVERY
     const dbShipment = await prisma.shipment.findUniqueOrThrow({ where: { id: manifest.shipmentId } });
     expect(dbShipment.status).toBe('ARRIVED_DESTINATION');
   });
+
+  it('6. Phase 2: COMPLETED still fires via a direct pickup from ARRIVED_DESTINATION when the destination-receive scan is skipped (READY_FOR_PICKUP deliberately does not fire first)', async () => {
+    const manifest = await createArrivedOceanManifest(app, tokenA, tenantA, 1, { destinationWarehouseId: tenantA.warehouseId });
+
+    // No destinationReceiveOnce call at all.
+    const readyEvent = await prisma.notificationEvent.findFirst({
+      where: { tenantId: tenantA.tenantId, dedupeKey: `shipment:${manifest.shipmentId}:status:READY_FOR_PICKUP` },
+    });
+    expect(readyEvent).toBeNull(); // accepted trade-off — see this file's own top comment
+
+    const pickupRes = await pickup(app, tokenA, manifest.itemId, tenantA.warehouseId, { recipientName: 'Test Recipient' });
+    expect(pickupRes.status).toBe(201);
+
+    const completedEvent = await prisma.notificationEvent.findFirst({
+      where: { tenantId: tenantA.tenantId, dedupeKey: `shipment:${manifest.shipmentId}:status:COMPLETED` },
+    });
+    expect(completedEvent).not.toBeNull();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -233,7 +261,13 @@ async function createContainer(app: INestApplication, token: string, opts: { war
   return res.body as { id: string };
 }
 
-async function createSingleShipment(app: INestApplication, token: string, customerId: string, itemCount = 1) {
+async function createSingleShipment(
+  app: INestApplication,
+  token: string,
+  customerId: string,
+  itemCount = 1,
+  opts: { destinationWarehouseId?: string } = {},
+) {
   const res = await request(app.getHttpServer())
     .post('/shipments')
     .set('Authorization', `Bearer ${token}`)
@@ -244,6 +278,7 @@ async function createSingleShipment(app: INestApplication, token: string, custom
       destinationCountry: 'GH',
       recipientName: 'Test Recipient',
       recipientPhone: '+15550000000',
+      ...opts,
       items: Array.from({ length: itemCount }, () => ({ itemType: ShipmentItemType.BOX, description: 'E2E final-mile test box' })),
     });
   if (res.status !== 201) {
@@ -288,9 +323,10 @@ async function createArrivedOceanManifest(
   token: string,
   tenant: TestTenantFixture,
   itemCount: number,
+  opts: { destinationWarehouseId?: string } = {},
 ): Promise<{ manifestId: string; containerId: string; itemId: string; itemIds: string[]; shipmentId: string }> {
   const container = await createContainer(app, token, { warehouseId: tenant.warehouseId });
-  const shipment = await createSingleShipment(app, token, tenant.customerId, itemCount);
+  const shipment = await createSingleShipment(app, token, tenant.customerId, itemCount, opts);
   for (const item of shipment.items) {
     await receiveItem(app, token, item.id, tenant.warehouseId);
     await processOnce(app, token, item.id, tenant.warehouseId);

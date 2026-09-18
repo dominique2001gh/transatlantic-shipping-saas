@@ -18,6 +18,7 @@ import { ShipmentItemStatus, ShipmentStatus, TrackingEventType } from '@transatl
 import { generateManifestNumber } from '../common/numbering/numbering.util';
 import { PrismaService } from '../prisma/prisma.service';
 import { ShipmentsService } from '../shipments/shipments.service';
+import { WarehouseService } from '../warehouse/warehouse.service';
 import { AssignContainerDto } from './dto/assign-container.dto';
 import { AssignItemDto } from './dto/assign-item.dto';
 import { CreateManifestDto } from './dto/create-manifest.dto';
@@ -25,6 +26,18 @@ import { UnassignDto } from './dto/unassign.dto';
 
 const ACTOR_SELECT = { id: true, firstName: true, lastName: true } as const;
 const WAREHOUSE_SELECT = { id: true, name: true, code: true } as const;
+
+/**
+ * Simplified Operational Scanning Workflow (Phase 2): mirrors
+ * ContainersService's CONTAINER_LOADING_ELIGIBLE_STATUSES for the
+ * air-freight direct-assignment path — inspection is optional, not
+ * required, to reach manifest assignment. Explicit allow-list; every
+ * other status is still rejected exactly as before.
+ */
+const MANIFEST_ASSIGNMENT_ELIGIBLE_STATUSES: DbShipmentItemStatus[] = [
+  DbShipmentItemStatus.RECEIVED_ORIGIN_WAREHOUSE,
+  DbShipmentItemStatus.PROCESSED,
+];
 
 /**
  * Milestone 3E-B adds assignment: `containers`/`items` are no longer
@@ -565,6 +578,7 @@ export class ManifestsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly shipmentsService: ShipmentsService,
+    private readonly warehouseService: WarehouseService,
   ) {}
 
   async create(tenantId: string, dto: CreateManifestDto) {
@@ -857,12 +871,13 @@ export class ManifestsService {
   }
 
   /**
-   * Assigns one PROCESSED (Ready) item directly to an Air manifest — no
-   * container involved. Mirrors ContainersService.loadItem's eligibility
-   * posture exactly (status/warehouse checks, clear 409 messaging), but
-   * ShipmentItemStatus moves PROCESSED -> ASSIGNED_TO_MANIFEST (the
-   * air-specific equivalent of ASSIGNED_TO_CONTAINER) since there's no
-   * container-finalize step to defer the LOADED transition to for air.
+   * Assigns one item directly to an Air manifest — no container involved.
+   * Mirrors ContainersService.loadItem's eligibility posture exactly
+   * (status/warehouse checks, clear 409 messaging, and — Phase 2 —
+   * inspection being optional via MANIFEST_ASSIGNMENT_ELIGIBLE_STATUSES),
+   * but ShipmentItemStatus moves to ASSIGNED_TO_MANIFEST (the air-specific
+   * equivalent of ASSIGNED_TO_CONTAINER) since there's no container-finalize
+   * step to defer the LOADED transition to for air.
    */
   async assignItem(tenantId: string, actorUserId: string, manifestId: string, itemId: string, dto: AssignItemDto) {
     const manifest = await this.prisma.manifest.findFirst({ where: { id: manifestId, tenantId } });
@@ -889,7 +904,7 @@ export class ManifestsService {
       throw new ConflictException('This shipment has been cancelled and its items cannot be assigned.');
     }
 
-    if (item.status !== DbShipmentItemStatus.PROCESSED) {
+    if (!MANIFEST_ASSIGNMENT_ELIGIBLE_STATUSES.includes(item.status)) {
       if (item.status === DbShipmentItemStatus.ASSIGNED_TO_MANIFEST) {
         const activeAssignment = await this.prisma.manifestItem.findFirst({
           where: { shipmentItemId: item.id, tenantId, removedAt: null },
@@ -901,7 +916,7 @@ export class ManifestsService {
       }
       throw new ConflictException(
         `This item's current status (${item.status}) is not eligible for manifest assignment. ` +
-          `It must be Processed / Ready first.`,
+          `It must be Received or Processed / Ready first.`,
       );
     }
 
@@ -945,12 +960,16 @@ export class ManifestsService {
       },
     });
 
+    // Phase 2: see ContainersService.loadItem's identical comment — an
+    // item can reach here without ever going through processItem, so this
+    // rollup (normally only triggered by processItem) must also run here.
+    await this.warehouseService.maybeRollupToReadyForConsolidation(tenantId, actorUserId, item.shipmentId);
     await this.maybeRollupShipmentConsolidation(tenantId, actorUserId, item.shipmentId);
 
     return this.findById(tenantId, manifest.id);
   }
 
-  /** Unassigns a direct item — only while the manifest is still DRAFT. Item reverts to PROCESSED. */
+  /** Unassigns a direct item — only while the manifest is still DRAFT. Item reverts to its true prior status (see unassignItem body). */
   async unassignItem(tenantId: string, actorUserId: string, manifestId: string, itemId: string, dto: UnassignDto) {
     const manifest = await this.prisma.manifest.findFirst({ where: { id: manifestId, tenantId } });
     if (!manifest) {
@@ -972,6 +991,15 @@ export class ManifestsService {
       data: { removedAt: new Date(), removedByUserId: actorUserId, removalReason: dto.reason ?? null },
     });
 
+    // Phase 2: see ContainersService.unloadItem's identical comment — this
+    // item may never have been inspected, so it can't be unconditionally
+    // reverted to PROCESSED.
+    const hasBeenInspected = await this.prisma.itemInspection.findFirst({
+      where: { tenantId, shipmentItemId: itemId },
+      select: { id: true },
+    });
+    const revertStatus = hasBeenInspected ? ShipmentItemStatus.PROCESSED : ShipmentItemStatus.RECEIVED_ORIGIN_WAREHOUSE;
+
     await this.shipmentsService.createTrackingEvent(
       tenantId,
       actorUserId,
@@ -979,7 +1007,7 @@ export class ManifestsService {
       {
         eventType: TrackingEventType.REMOVED_FROM_MANIFEST,
         shipmentItemId: itemId,
-        itemStatus: ShipmentItemStatus.PROCESSED,
+        itemStatus: revertStatus,
         notes: dto.reason ?? `Removed from manifest ${manifest.manifestNumber}`,
         metadata: { manifestId: manifest.id, manifestNumber: manifest.manifestNumber },
       },
@@ -1351,7 +1379,7 @@ export class ManifestsService {
         where: { manifestId: manifest.id, tenantId, removedAt: null },
         include: {
           shipmentItem: { select: { id: true, itemCode: true, status: true } },
-          shipment: { select: { id: true } },
+          shipment: { select: { id: true, destinationWarehouseId: true } },
         },
       });
       if (manifestItems.length === 0) {
@@ -1379,6 +1407,19 @@ export class ManifestsService {
           },
           { source: TrackingEventSource.SYSTEM },
         );
+        // Simplified Operational Scanning Workflow (Phase 2): the
+        // per-item destination-receive scan (which is the only other
+        // place currentWarehouseId gets updated after origin receiving)
+        // is now optional, so pickup/dispatch must not stay blocked by a
+        // stale origin-warehouse pointer. When the shipment's destination
+        // warehouse is on record, set the live location pointer here, at
+        // the moment cargo actually arrives — never guessed when unknown.
+        if (manifestItem.shipment.destinationWarehouseId) {
+          await this.prisma.shipmentItem.update({
+            where: { id: manifestItem.shipmentItem.id },
+            data: { currentWarehouseId: manifestItem.shipment.destinationWarehouseId },
+          });
+        }
         affectedShipmentIds.add(manifestItem.shipment.id);
       }
     } else {
@@ -1389,7 +1430,7 @@ export class ManifestsService {
             where: { removedAt: null },
             include: {
               shipmentItem: { select: { id: true, itemCode: true, status: true } },
-              shipment: { select: { id: true } },
+              shipment: { select: { id: true, destinationWarehouseId: true } },
             },
           },
         },
@@ -1425,6 +1466,13 @@ export class ManifestsService {
             },
             { source: TrackingEventSource.SYSTEM },
           );
+          // See the air-freight branch above for why this write exists.
+          if (containerItem.shipment.destinationWarehouseId) {
+            await this.prisma.shipmentItem.update({
+              where: { id: containerItem.shipmentItem.id },
+              data: { currentWarehouseId: containerItem.shipment.destinationWarehouseId },
+            });
+          }
           affectedShipmentIds.add(containerItem.shipment.id);
         }
         await this.prisma.container.update({

@@ -9,12 +9,26 @@ import {
 import { ShipmentItemStatus, ShipmentStatus, TrackingEventType } from '@transatlantic/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { ShipmentsService } from '../shipments/shipments.service';
+import { WarehouseService } from '../warehouse/warehouse.service';
 import { CreateContainerDto } from './dto/create-container.dto';
 import { FinalizeContainerDto } from './dto/finalize-container.dto';
 import { LoadItemDto } from './dto/load-item.dto';
 import { UnloadItemDto } from './dto/unload-item.dto';
 
 const ACTOR_SELECT = { id: true, firstName: true, lastName: true } as const;
+
+/**
+ * Simplified Operational Scanning Workflow (Phase 2): the warehouse
+ * inspection/processing step is optional — an item may be scanned into a
+ * container straight off RECEIVED_ORIGIN_WAREHOUSE, or after PROCESSED for
+ * tenants that still want inspection. Explicit allow-list, not a loosened
+ * inequality: every other status (MEASURED, CONSOLIDATED, EXCEPTION, ...)
+ * is still rejected by loadItem exactly as before.
+ */
+const CONTAINER_LOADING_ELIGIBLE_STATUSES: DbShipmentItemStatus[] = [
+  DbShipmentItemStatus.RECEIVED_ORIGIN_WAREHOUSE,
+  DbShipmentItemStatus.PROCESSED,
+];
 
 /** Only currently-loaded (not soft-removed) items belong in a "what's in this container right now" view. */
 const ACTIVE_CONTAINER_ITEM_INCLUDE = {
@@ -136,6 +150,7 @@ export class ContainersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly shipmentsService: ShipmentsService,
+    private readonly warehouseService: WarehouseService,
   ) {}
 
   async create(tenantId: string, dto: CreateContainerDto) {
@@ -198,11 +213,15 @@ export class ContainersService {
   }
 
   /**
-   * Scans one PROCESSED (Ready) item into a container. The item must
-   * currently be at the same warehouse the container is loading at.
-   * Cross-tenant, wrong-warehouse, ineligible-status, and already-loaded
-   * cases all reject with a specific message rather than silently
-   * succeeding or creating a duplicate ContainerItem row.
+   * Scans one item into a container — eligible straight off
+   * RECEIVED_ORIGIN_WAREHOUSE or after PROCESSED (Ready); see
+   * CONTAINER_LOADING_ELIGIBLE_STATUSES (Simplified Operational Scanning
+   * Workflow, Phase 2: inspection is optional, not required, to reach
+   * this step). The item must currently be at the same warehouse the
+   * container is loading at. Cross-tenant, wrong-warehouse,
+   * ineligible-status, and already-loaded cases all reject with a
+   * specific message rather than silently succeeding or creating a
+   * duplicate ContainerItem row.
    */
   async loadItem(tenantId: string, actorUserId: string, containerId: string, itemId: string, dto: LoadItemDto) {
     const container = await this.prisma.container.findFirst({ where: { id: containerId, tenantId } });
@@ -229,7 +248,7 @@ export class ContainersService {
       throw new ConflictException('This shipment has been cancelled and its items cannot be loaded.');
     }
 
-    if (item.status !== DbShipmentItemStatus.PROCESSED) {
+    if (!CONTAINER_LOADING_ELIGIBLE_STATUSES.includes(item.status)) {
       if (item.status === DbShipmentItemStatus.ASSIGNED_TO_CONTAINER || item.status === DbShipmentItemStatus.LOADED) {
         const activeAssignment = await this.prisma.containerItem.findFirst({
           where: { shipmentItemId: item.id, tenantId, removedAt: null },
@@ -241,7 +260,7 @@ export class ContainersService {
       }
       throw new ConflictException(
         `This item's current status (${item.status}) is not eligible for container loading. ` +
-          `It must be Processed / Ready first.`,
+          `It must be Received or Processed / Ready first.`,
       );
     }
 
@@ -294,6 +313,15 @@ export class ContainersService {
       await this.prisma.container.update({ where: { id: container.id }, data: { status: DbContainerStatus.LOADING } });
     }
 
+    // Phase 2: an item can reach here without ever going through
+    // processItem, so WarehouseService's own WAREHOUSE_RECEIVED ->
+    // PROCESSING -> READY_FOR_CONSOLIDATION rollup (normally only
+    // triggered by processItem) must also run from here, or a
+    // skip-inspection shipment's own status would get stuck at
+    // WAREHOUSE_RECEIVED forever even though its items are loaded.
+    // Called before maybeRollupShipmentConsolidation below, which only
+    // acts once shipment.status has already reached READY_FOR_CONSOLIDATION.
+    await this.warehouseService.maybeRollupToReadyForConsolidation(tenantId, actorUserId, item.shipmentId);
     await this.maybeRollupShipmentConsolidation(tenantId, actorUserId, item.shipmentId);
 
     const result = await this.findById(tenantId, container.id);
@@ -322,6 +350,19 @@ export class ContainersService {
       data: { removedAt: new Date(), removedByUserId: actorUserId, removalReason: dto.reason ?? null },
     });
 
+    // Phase 2: this item may have been loaded straight off
+    // RECEIVED_ORIGIN_WAREHOUSE with no inspection at all (see
+    // CONTAINER_LOADING_ELIGIBLE_STATUSES), so unloading it can no longer
+    // unconditionally revert to PROCESSED — that would fabricate an
+    // inspection that never happened. Revert to PROCESSED only if this
+    // item actually has at least one ItemInspection row on record;
+    // otherwise revert to RECEIVED_ORIGIN_WAREHOUSE, its true prior status.
+    const hasBeenInspected = await this.prisma.itemInspection.findFirst({
+      where: { tenantId, shipmentItemId: itemId },
+      select: { id: true },
+    });
+    const revertStatus = hasBeenInspected ? ShipmentItemStatus.PROCESSED : ShipmentItemStatus.RECEIVED_ORIGIN_WAREHOUSE;
+
     await this.shipmentsService.createTrackingEvent(
       tenantId,
       actorUserId,
@@ -329,7 +370,7 @@ export class ContainersService {
       {
         eventType: TrackingEventType.REMOVED_FROM_CONTAINER,
         shipmentItemId: itemId,
-        itemStatus: ShipmentItemStatus.PROCESSED,
+        itemStatus: revertStatus,
         notes: dto.reason ?? `Removed from container ${container.containerNumber}`,
         metadata: { containerId: container.id, containerNumber: container.containerNumber },
       },

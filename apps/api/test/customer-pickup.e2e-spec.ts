@@ -17,6 +17,13 @@ import { createTestApp } from './utils/test-app';
  * Deliberately does not implement or test Delivery/Driver/Dispatch — see
  * ITEM_TERMINAL_HANDOFF's own comment for why the rollup is already
  * shaped to accept it later without changes here.
+ *
+ * Simplified Operational Scanning Workflow (Phase 2): the destination-
+ * warehouse receiving scan is now optional. This file also covers pickup
+ * succeeding directly from ARRIVED_DESTINATION when the shipment's
+ * destination warehouse is known (ManifestsService.arrive sets
+ * currentWarehouseId in that case), and still correctly rejecting when it
+ * isn't known — a deliberate safe fallback, not a regression.
  */
 describe('Customer Pickup (e2e)', () => {
   let app: INestApplication;
@@ -95,9 +102,37 @@ describe('Customer Pickup (e2e)', () => {
     expect(events.filter((e) => e.eventType === 'PICKED_UP')).toHaveLength(1);
   });
 
-  it('rejects pickup of an item that has not yet been received at the destination warehouse', async () => {
-    const manifest = await createArrivedOceanManifest(app, tokenA, tenantA, 1); // ARRIVED_DESTINATION, not yet destination-received
+  it('Phase 2: picks up directly from ARRIVED_DESTINATION when the destination-receive scan was skipped but the shipment has a known destination warehouse', async () => {
+    const manifest = await createArrivedOceanManifest(app, tokenA, tenantA, 1, { destinationWarehouseId: tenantA.warehouseId });
+    const dbItemBefore = await prisma.shipmentItem.findUniqueOrThrow({ where: { id: manifest.itemId } });
+    expect(dbItemBefore.status).toBe('ARRIVED_DESTINATION'); // never individually destination-received
+    expect(dbItemBefore.currentWarehouseId).toBe(tenantA.warehouseId); // set by arrive(), not by a receive scan
+
     const res = await pickup(app, tokenA, manifest.itemId, tenantA.warehouseId, { recipientName: 'Someone' });
+    expect(res.status).toBe(201);
+    expect(res.body.status).toBe('PICKED_UP');
+
+    const dbShipment = await prisma.shipment.findUniqueOrThrow({ where: { id: manifest.shipmentId } });
+    expect(dbShipment.status).toBe('COMPLETED'); // final handoff still closes the shipment out normally
+  });
+
+  it("Phase 2: still rejects pickup from ARRIVED_DESTINATION when the shipment's destination warehouse isn't known (safe fallback, never guesses a location)", async () => {
+    const otherWarehouse = await prisma.warehouse.create({
+      data: {
+        tenantId: tenantA.tenantId,
+        name: 'Unlinked Destination WH',
+        code: `UNLINKED-${Date.now()}`,
+        addressLine1: '1 Nowhere Rd',
+        city: 'Kumasi',
+        country: 'GH',
+        isDestinationWarehouse: true,
+      },
+    });
+    const manifest = await createArrivedOceanManifest(app, tokenA, tenantA, 1); // no destinationWarehouseId set
+    const dbItemBefore = await prisma.shipmentItem.findUniqueOrThrow({ where: { id: manifest.itemId } });
+    expect(dbItemBefore.currentWarehouseId).not.toBe(otherWarehouse.id); // never set to a warehouse we can't confirm
+
+    const res = await pickup(app, tokenA, manifest.itemId, otherWarehouse.id, { recipientName: 'Someone' });
     expect(res.status).toBe(409);
 
     const dbItem = await prisma.shipmentItem.findUniqueOrThrow({ where: { id: manifest.itemId } });
@@ -286,7 +321,13 @@ async function createContainer(app: INestApplication, token: string, opts: { war
   return res.body as { id: string };
 }
 
-async function createSingleShipment(app: INestApplication, token: string, customerId: string, itemCount = 1) {
+async function createSingleShipment(
+  app: INestApplication,
+  token: string,
+  customerId: string,
+  itemCount = 1,
+  opts: { destinationWarehouseId?: string } = {},
+) {
   const res = await request(app.getHttpServer())
     .post('/shipments')
     .set('Authorization', `Bearer ${token}`)
@@ -297,6 +338,7 @@ async function createSingleShipment(app: INestApplication, token: string, custom
       destinationCountry: 'GH',
       recipientName: 'Test Recipient',
       recipientPhone: '+15550000000',
+      ...opts,
       items: Array.from({ length: itemCount }, () => ({
         itemType: ShipmentItemType.BOX,
         description: 'E2E customer-pickup test box',
@@ -365,9 +407,10 @@ async function createArrivedOceanManifest(
   token: string,
   tenant: TestTenantFixture,
   itemCount: number,
+  opts: { destinationWarehouseId?: string } = {},
 ): Promise<{ manifestId: string; containerId: string; itemId: string; itemIds: string[]; shipmentId: string }> {
   const container = await createContainer(app, token, { warehouseId: tenant.warehouseId });
-  const shipment = await createSingleShipment(app, token, tenant.customerId, itemCount);
+  const shipment = await createSingleShipment(app, token, tenant.customerId, itemCount, opts);
   for (const item of shipment.items) {
     await receiveItem(app, token, item.id, tenant.warehouseId);
     await processOnce(app, token, item.id, tenant.warehouseId);

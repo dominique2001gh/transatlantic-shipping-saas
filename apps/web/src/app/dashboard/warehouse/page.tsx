@@ -135,7 +135,8 @@ export default function WarehousePage() {
           <h2 className="text-lg font-semibold text-slate-900">Process / Inspect Items</h2>
           <p className="mt-1 text-sm text-slate-500">
             Scan a received item to record its actual weight, dimensions, and condition. Damaged or flagged items are
-            automatically held and never marked ready for container loading.
+            automatically held and never marked ready for container loading. This step is optional — a received item
+            can also go straight to Container Loading without inspection.
           </p>
           <p className="mt-1">
             <AskAiLink question="How do I process and inspect an item?" />
@@ -164,8 +165,8 @@ export default function WarehousePage() {
         <section>
           <h2 className="text-lg font-semibold text-slate-900">Load Container</h2>
           <p className="mt-1 text-sm text-slate-500">
-            Open or book a container, then scan Processed / Ready items into it. Held, unprocessed, or already-loaded
-            items are rejected automatically.
+            Open or book a container, then scan Received or Processed / Ready items into it — inspection is optional.
+            Held or already-loaded items are rejected automatically.
           </p>
           <p className="mt-1">
             <AskAiLink question="How do I load items into a container?" />
@@ -195,7 +196,8 @@ export default function WarehousePage() {
           <p className="mt-1 text-sm text-slate-500">
             Scan an arrived item&apos;s label to record it as physically received at this destination warehouse.
             Damaged, missing, or discrepant cargo is flagged and held for review instead — it never silently counts
-            as received.
+            as received. This step is optional — Pickup / Delivery works even if it&apos;s skipped, but scanning here
+            gives you an expected-vs-actually-received reconciliation for this cargo.
           </p>
           <p className="mt-1">
             <AskAiLink question="How do I receive items at the destination warehouse and reconcile against a container's manifest?" />
@@ -224,9 +226,9 @@ export default function WarehousePage() {
         <section>
           <h2 className="text-lg font-semibold text-slate-900">Pickup / Delivery</h2>
           <p className="mt-1 text-sm text-slate-500">
-            Scan an item to see what it&apos;s eligible for: a received item can be picked up in person or dispatched
-            for delivery; an item already out for delivery can be confirmed delivered or returned after a failed
-            attempt.
+            Scan an item to see what it&apos;s eligible for: an item that has arrived (whether or not it was
+            individually destination-received) can be picked up in person or dispatched for delivery; an item
+            already out for delivery can be confirmed delivered or returned after a failed attempt.
           </p>
           <Card className="mt-3">
             {warehouses === null ? (

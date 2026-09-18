@@ -101,7 +101,7 @@ export function ManifestItemAssignment({
       {canModify && (
         <div className="rounded-lg border border-slate-200 p-4">
           <h3 className="text-sm font-semibold text-slate-900">Assign items</h3>
-          <p className="mt-0.5 text-xs text-slate-500">Scan a Processed / Ready item&apos;s code, or search manually.</p>
+          <p className="mt-0.5 text-xs text-slate-500">Scan a Received or Processed / Ready item&apos;s code, or search manually.</p>
           <div className="mt-3">
             <ScanInput
               onSubmit={handleScan}

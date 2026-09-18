@@ -17,8 +17,13 @@ type ActionMode = 'PICKUP' | 'DISPATCH' | 'DELIVER' | 'RETURN' | null;
  * (Milestone: Delivery). One scan resolves the item; the available next
  * actions depend entirely on its current status, read straight off the
  * backend response, never re-derived client-side:
- *   - RECEIVED_DESTINATION_WAREHOUSE -> choose Customer Pickup or
- *     Dispatch for Delivery.
+ *   - RECEIVED_DESTINATION_WAREHOUSE or ARRIVED_DESTINATION -> choose
+ *     Customer Pickup or Dispatch for Delivery. (Simplified Operational
+ *     Scanning Workflow, Phase 2: the destination-warehouse receiving
+ *     scan is optional — an item that arrived but was never individually
+ *     re-scanned at destination is just as eligible here as one that was;
+ *     the backend's own currentWarehouseId check still guarantees the
+ *     handoff only happens from the warehouse actually holding it.)
  *   - OUT_FOR_DELIVERY -> choose Confirm Delivered or Record Failed
  *     Attempt / Return to Warehouse.
  *   - anything else (PICKED_UP, DELIVERED, EXCEPTION, not yet received,
@@ -293,7 +298,8 @@ export function PickupWorkspace({
     }
   }
 
-  const isEligibleForPickupOrDispatch = resolvedItem?.status === 'RECEIVED_DESTINATION_WAREHOUSE';
+  const isEligibleForPickupOrDispatch =
+    resolvedItem?.status === 'RECEIVED_DESTINATION_WAREHOUSE' || resolvedItem?.status === 'ARRIVED_DESTINATION';
   const isEligibleForDeliverOrReturn = resolvedItem?.status === 'OUT_FOR_DELIVERY';
 
   return (

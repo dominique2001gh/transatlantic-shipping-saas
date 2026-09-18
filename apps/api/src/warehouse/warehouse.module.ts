@@ -7,5 +7,6 @@ import { WarehouseService } from './warehouse.service';
   imports: [ShipmentsModule],
   controllers: [WarehouseController],
   providers: [WarehouseService],
+  exports: [WarehouseService],
 })
 export class WarehouseModule {}

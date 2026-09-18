@@ -11,6 +11,13 @@ import { createTestApp } from './utils/test-app';
  * rejection path, RBAC, and full tenant isolation. Deliberately does NOT
  * test finalize/depart/status-roll-forward — those endpoints don't exist
  * yet (later controlled steps).
+ *
+ * Simplified Operational Scanning Workflow (Phase 2): also covers direct
+ * air assignment straight off RECEIVED_ORIGIN_WAREHOUSE with no
+ * inspection, that a never-inspected item unassigns back to
+ * RECEIVED_ORIGIN_WAREHOUSE (not PROCESSED), and that REGISTERED/HOLD
+ * items are still rejected — the eligibility change is an explicit
+ * allow-list, not a blanket weakening.
  */
 describe('Manifest assignment (e2e)', () => {
   let app: INestApplication;
@@ -251,17 +258,17 @@ describe('Manifest assignment (e2e)', () => {
       expect(dbItem1.status).toBe('PROCESSED'); // untouched — can go on a different manifest/flight later
     });
 
-    it('11. rejects HOLD/EXCEPTION and unprocessed items', async () => {
+    it('11. accepts a RECEIVED_ORIGIN_WAREHOUSE item with no inspection (Phase 2), but still rejects HOLD/EXCEPTION', async () => {
       const manifest = await createManifest(app, tokenA, { shipmentMode: 'AIR', originWarehouseId: tenantA.warehouseId });
 
-      // Unprocessed (still RECEIVED_ORIGIN_WAREHOUSE).
+      // Not yet inspected — still eligible now that inspection is optional.
       const unprocessedShipment = await createSingleShipment(app, tokenA, tenantA.customerId, 1);
       await receiveItem(app, tokenA, unprocessedShipment.items[0].id, tenantA.warehouseId);
       const unprocessedRes = await request(app.getHttpServer())
         .post(`/manifests/${manifest.id}/items/${unprocessedShipment.items[0].id}`)
         .set('Authorization', `Bearer ${tokenA}`)
         .send({ scanned: false });
-      expect(unprocessedRes.status).toBe(409);
+      expect(unprocessedRes.status).toBe(201);
 
       // HOLD/EXCEPTION.
       const heldShipment = await createSingleShipment(app, tokenA, tenantA.customerId, 1);
@@ -282,6 +289,16 @@ describe('Manifest assignment (e2e)', () => {
         .set('Authorization', `Bearer ${tokenA}`)
         .send({ scanned: false });
       expect(heldRes.status).toBe(409);
+    });
+
+    it('11b. still rejects a REGISTERED item (Phase 2 widened the allow-list, not a blanket weakening)', async () => {
+      const manifest = await createManifest(app, tokenA, { shipmentMode: 'AIR', originWarehouseId: tenantA.warehouseId });
+      const shipment = await createSingleShipment(app, tokenA, tenantA.customerId, 1);
+      const res = await request(app.getHttpServer())
+        .post(`/manifests/${manifest.id}/items/${shipment.items[0].id}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ scanned: false });
+      expect(res.status).toBe(409);
     });
 
     it("12. rejects an item belonging to another tenant", async () => {
@@ -334,6 +351,22 @@ describe('Manifest assignment (e2e)', () => {
         where: { shipmentItemId: item.itemId, eventType: 'REMOVED_FROM_MANIFEST' },
       });
       expect(removedEvent).not.toBeNull();
+    });
+
+    it('14b. unassigning a never-inspected item reverts it to RECEIVED_ORIGIN_WAREHOUSE, not PROCESSED (Phase 2)', async () => {
+      const manifest = await createManifest(app, tokenA, { shipmentMode: 'AIR', originWarehouseId: tenantA.warehouseId });
+      const shipment = await createSingleShipment(app, tokenA, tenantA.customerId, 1);
+      await receiveItem(app, tokenA, shipment.items[0].id, tenantA.warehouseId);
+      await assignItem(app, tokenA, manifest.id, shipment.items[0].id);
+
+      const res = await request(app.getHttpServer())
+        .delete(`/manifests/${manifest.id}/items/${shipment.items[0].id}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ reason: 'Flight rescheduled' });
+      expect(res.status).toBe(200);
+
+      const dbItem = await prisma.shipmentItem.findUniqueOrThrow({ where: { id: shipment.items[0].id } });
+      expect(dbItem.status).toBe('RECEIVED_ORIGIN_WAREHOUSE');
     });
   });
 

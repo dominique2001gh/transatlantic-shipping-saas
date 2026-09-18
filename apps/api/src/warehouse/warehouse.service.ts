@@ -93,12 +93,44 @@ export const ITEM_TERMINAL_HANDOFF: DbShipmentItemStatus[] = [DbShipmentItemStat
  * precondition), so maybeRollupShipmentReadyForPickup below checks for
  * that real state rather than a status value nothing ever reaches. Same
  * "at least this far along" pattern as ITEM_PROCESSED_OR_LATER above.
+ *
+ * Simplified Operational Scanning Workflow (Phase 2) deliberately does NOT
+ * add ARRIVED_DESTINATION here: doing so would make every shipment "ready
+ * for pickup" the instant it arrives, before a tenant that DOES use
+ * destination-receive reconciliation has had a chance to actually confirm
+ * receipt — silently defeating the "CRITICAL: shipment stays at
+ * ARRIVED_DESTINATION until every item is individually
+ * RECEIVED_DESTINATION_WAREHOUSE" guarantee destination-receive.e2e-spec.ts
+ * already locks in. The accepted trade-off: a shipment that skips the
+ * optional scan entirely never fires the READY_FOR_PICKUP notification,
+ * but pickupItem/dispatchItem below still work directly from
+ * ARRIVED_DESTINATION (see PICKUP_DISPATCH_ELIGIBLE_STATUSES), and
+ * COMPLETED still fires normally once that happens.
  */
 const ITEM_AT_DESTINATION_OR_LATER: DbShipmentItemStatus[] = [
   DbShipmentItemStatus.RECEIVED_DESTINATION_WAREHOUSE,
   DbShipmentItemStatus.OUT_FOR_DELIVERY,
   DbShipmentItemStatus.DELIVERED,
   DbShipmentItemStatus.PICKED_UP,
+];
+
+/**
+ * Simplified Operational Scanning Workflow (Phase 2): the destination-
+ * warehouse receiving scan (destinationReceiveItem) is optional — a tenant
+ * may still use it for reconciliation, but pickupItem/dispatchItem must
+ * also accept an item straight off ARRIVED_DESTINATION (manifest/container
+ * arrival) so final pickup/delivery is never blocked by a skipped optional
+ * step. Every other status is still rejected exactly as before — this is
+ * an explicit allow-list, not a loosened inequality. currentWarehouseId's
+ * own hard equality check (unchanged, see pickupItem/dispatchItem) is what
+ * keeps this safe: ManifestsService.arrive now sets currentWarehouseId to
+ * the shipment's known destination warehouse the moment cargo arrives, so
+ * an ARRIVED_DESTINATION item only passes this combined guard when it is
+ * actually, physically at the warehouse staff selected.
+ */
+const PICKUP_DISPATCH_ELIGIBLE_STATUSES: DbShipmentItemStatus[] = [
+  DbShipmentItemStatus.RECEIVED_DESTINATION_WAREHOUSE,
+  DbShipmentItemStatus.ARRIVED_DESTINATION,
 ];
 
 /**
@@ -638,7 +670,7 @@ export class WarehouseService {
       throw new ConflictException('This shipment has been cancelled and cannot be picked up.');
     }
 
-    if (item.status !== DbShipmentItemStatus.RECEIVED_DESTINATION_WAREHOUSE) {
+    if (!PICKUP_DISPATCH_ELIGIBLE_STATUSES.includes(item.status)) {
       if (item.status === DbShipmentItemStatus.PICKED_UP) {
         throw new ConflictException(
           `This item was already picked up${item.lastInspectedAt ? ` on ${item.lastInspectedAt.toLocaleString()}` : ''}.`,
@@ -654,7 +686,7 @@ export class WarehouseService {
       }
       throw new ConflictException(
         `This item's current status (${item.status}) is not eligible for pickup. ` +
-          `It must be received at the destination warehouse first.`,
+          `It must have arrived at the destination warehouse first.`,
       );
     }
 
@@ -765,7 +797,7 @@ export class WarehouseService {
       throw new ConflictException('This shipment has been cancelled and cannot be dispatched.');
     }
 
-    if (item.status !== DbShipmentItemStatus.RECEIVED_DESTINATION_WAREHOUSE) {
+    if (!PICKUP_DISPATCH_ELIGIBLE_STATUSES.includes(item.status)) {
       if (item.status === DbShipmentItemStatus.OUT_FOR_DELIVERY) {
         throw new ConflictException('This item is already out for delivery.');
       }
@@ -782,7 +814,7 @@ export class WarehouseService {
       }
       throw new ConflictException(
         `This item's current status (${item.status}) is not eligible for dispatch. ` +
-          `It must be received at the destination warehouse first.`,
+          `It must have arrived at the destination warehouse first.`,
       );
     }
 
@@ -1440,7 +1472,15 @@ export class WarehouseService {
    * never read as reachable here, so it can never be downgraded — matching
    * the invariant "never regress a shipment past consolidation/loading".
    */
-  private async maybeRollupToReadyForConsolidation(tenantId: string, actorUserId: string, shipmentId: string) {
+  /**
+   * Not private: Simplified Operational Scanning Workflow (Phase 2) calls
+   * this directly from ContainersService.loadItem / ManifestsService.assignItem
+   * too, not only from this file's own processItem — see those call sites'
+   * comments for why (an item that skips processItem entirely still needs
+   * this rollup to run, or the shipment status gets stuck at
+   * WAREHOUSE_RECEIVED forever). Logic itself is unchanged.
+   */
+  async maybeRollupToReadyForConsolidation(tenantId: string, actorUserId: string, shipmentId: string) {
     const ROLLUP_ELIGIBLE_STATUSES: DbShipmentStatus[] = [
       DbShipmentStatus.WAREHOUSE_RECEIVED,
       DbShipmentStatus.PROCESSING,

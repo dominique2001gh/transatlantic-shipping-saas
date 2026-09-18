@@ -17,6 +17,14 @@ import { createTestApp } from './utils/test-app';
  *     RECEIVED_DESTINATION_WAREHOUSE never implies Ready for
  *     Pickup/Delivery, and that damaged/missing cargo goes to EXCEPTION
  *     instead of silently advancing.
+ *
+ * Simplified Operational Scanning Workflow (Phase 2): this per-item
+ * destination-receive scan is now optional (see customer-pickup.e2e-spec.ts
+ * and delivery-dispatch.e2e-spec.ts for pickup/dispatch succeeding without
+ * it) — every test in this file still passes completely unmodified since
+ * none of these fixtures set a shipment destinationWarehouseId, which is
+ * required to trigger the new arrive()-time currentWarehouseId write. This
+ * file adds one new test confirming that write happens when it IS known.
  */
 describe('Destination Receive (e2e)', () => {
   let app: INestApplication;
@@ -139,6 +147,35 @@ describe('Destination Receive (e2e)', () => {
 
       const dbShipment = await prisma.shipment.findUniqueOrThrow({ where: { id: manifest.shipmentIds[0] } });
       expect(dbShipment.status).toBe('ARRIVED_DESTINATION');
+    });
+
+    it('Phase 2: arriving also sets currentWarehouseId to the destination warehouse when the shipment has one on record', async () => {
+      const destinationWarehouse = await prisma.warehouse.create({
+        data: {
+          tenantId: tenantA.tenantId,
+          name: 'Known Destination WH',
+          code: `KNOWN-DEST-${Date.now()}`,
+          addressLine1: '1 Dest St',
+          city: 'Accra',
+          country: 'GH',
+          isDestinationWarehouse: true,
+        },
+      });
+      const manifest = await createDepartedOceanManifest(app, tokenA, tenantA, 1, {
+        destinationWarehouseId: destinationWarehouse.id,
+      });
+
+      const dbItemBefore = await prisma.shipmentItem.findUniqueOrThrow({ where: { id: manifest.itemId } });
+      expect(dbItemBefore.currentWarehouseId).toBe(tenantA.warehouseId); // still at origin pre-arrival
+
+      await request(app.getHttpServer())
+        .post(`/manifests/${manifest.manifestId}/arrive`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send();
+
+      const dbItemAfter = await prisma.shipmentItem.findUniqueOrThrow({ where: { id: manifest.itemId } });
+      expect(dbItemAfter.status).toBe('ARRIVED_DESTINATION');
+      expect(dbItemAfter.currentWarehouseId).toBe(destinationWarehouse.id); // moved on arrival, no destination-receive scan needed
     });
 
     it('rejects arriving a manifest that has not yet DEPARTED', async () => {
@@ -634,6 +671,7 @@ async function createSingleShipment(
   token: string,
   customerId: string,
   itemCount = 1,
+  opts: { destinationWarehouseId?: string } = {},
 ): Promise<{ id: string; trackingNumber: string; items: { id: string; itemCode: string }[] }> {
   const res = await request(app.getHttpServer())
     .post('/shipments')
@@ -645,6 +683,7 @@ async function createSingleShipment(
       destinationCountry: 'GH',
       recipientName: 'Test Recipient',
       recipientPhone: '+15550000000',
+      ...opts,
       items: Array.from({ length: itemCount }, () => ({
         itemType: ShipmentItemType.BOX,
         description: 'E2E destination-receive test box',
@@ -720,9 +759,10 @@ async function createDepartedOceanManifest(
   token: string,
   tenant: TestTenantFixture,
   itemCount: number,
+  opts: { destinationWarehouseId?: string } = {},
 ): Promise<{ manifestId: string; containerId: string; itemId: string; itemIds: string[]; shipmentId: string }> {
   const container = await createContainer(app, token, { warehouseId: tenant.warehouseId });
-  const shipment = await createSingleShipment(app, token, tenant.customerId, itemCount);
+  const shipment = await createSingleShipment(app, token, tenant.customerId, itemCount, opts);
   for (const item of shipment.items) {
     await receiveItem(app, token, item.id, tenant.warehouseId);
     await processOnce(app, token, item.id, tenant.warehouseId);

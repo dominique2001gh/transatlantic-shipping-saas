@@ -64,6 +64,7 @@ export function LoadContainerWorkspace({
   const [refocusKey, setRefocusKey] = useState(0);
 
   const [stats, setStats] = useState({ succeeded: 0, duplicates: 0, errors: 0 });
+  const [lastScannedCode, setLastScannedCode] = useState<string | null>(null);
   /** Codes loaded onto the *currently selected* container — reset whenever the selected container changes (see the effect below), since "duplicate" is scoped to one container's manifest, not the whole session. */
   const loadedCodesRef = useRef<Set<string>>(new Set());
 
@@ -102,6 +103,7 @@ export function LoadContainerWorkspace({
     lastContainerIdRef.current = selectedContainer?.id ?? null;
     loadedCodesRef.current = new Set(selectedContainer?.items.map((item) => item.shipmentItem.itemCode) ?? []);
     setStats({ succeeded: 0, duplicates: 0, errors: 0 });
+    setLastScannedCode(null);
   }, [selectedContainer]);
 
   async function refreshSelectedContainer(id: string) {
@@ -153,6 +155,7 @@ export function LoadContainerWorkspace({
       setSelectedContainer(updated);
       loadedCodesRef.current.add(itemCode);
       setStats((s) => ({ ...s, succeeded: s.succeeded + 1 }));
+      setLastScannedCode(itemCode);
       playScanSuccessTone();
       setSuccessMessage(
         updated.destinationWarning
@@ -178,6 +181,7 @@ export function LoadContainerWorkspace({
     } catch (err) {
       playScanErrorTone();
       setLookupError(err instanceof ApiError ? err.message : 'Lookup failed.');
+      setStats((s) => ({ ...s, errors: s.errors + 1 }));
       setRefocusKey((key) => key + 1);
     }
   }
@@ -355,7 +359,7 @@ export function LoadContainerWorkspace({
                 onDuplicate={checkDuplicate}
                 disabled={loadingItem}
                 autoFocusKey={refocusKey}
-                placeholder="Scan or type a Ready item's code, then press Enter"
+                placeholder="Scan or type a Received or Ready item's code, then press Enter"
               />
               <div className="mt-2">
                 <button
@@ -420,6 +424,8 @@ export function LoadContainerWorkspace({
                 succeededLabel="loaded onto this container"
                 duplicates={stats.duplicates}
                 errors={stats.errors}
+                lastScannedCode={lastScannedCode}
+                weightByUnit={selectedContainer.summary.weightByUnit}
               />
             </div>
           )}

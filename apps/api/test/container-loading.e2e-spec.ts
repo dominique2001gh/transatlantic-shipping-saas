@@ -8,11 +8,17 @@ import { createTestApp } from './utils/test-app';
  * End-to-end regression suite for Milestone 3D (Load Container /
  * Consolidation), against the real Nest app, real Prisma, real Postgres.
  * Covers the happy path (load -> finalize), every rejection path
- * (unprocessed/on-hold/wrong-warehouse/duplicate/no-warehouse/finalized),
+ * (registered/on-hold/wrong-warehouse/duplicate/no-warehouse/finalized),
  * unload + container/shipment status reversion, the finalize role gate,
  * mixed-customer containers, soft route/destination warnings, cross-tenant
  * denial, and the shipment-level CONSOLIDATED/LOADED rollup in both
  * directions.
+ *
+ * Simplified Operational Scanning Workflow (Phase 2): also covers loading
+ * straight off RECEIVED_ORIGIN_WAREHOUSE with no inspection at all, the
+ * correct unload-revert status for that skip-inspection path, and that the
+ * shipment-level CONSOLIDATED/LOADED rollup still advances correctly for a
+ * shipment whose items never went through processItem.
  */
 describe('Load Container / Consolidation workflow (e2e)', () => {
   let app: INestApplication;
@@ -95,7 +101,7 @@ describe('Load Container / Consolidation workflow (e2e)', () => {
       expect(res.status).toBe(409);
     });
 
-    it('rejects a RECEIVED_ORIGIN_WAREHOUSE item (not yet processed)', async () => {
+    it('accepts a RECEIVED_ORIGIN_WAREHOUSE item with no inspection (Phase 2: inspection is optional)', async () => {
       const container = await createContainer(app, tokenA, { warehouseId: tenantA.warehouseId });
       const shipment = await createSingleShipment(app, tokenA, tenantA.customerId, 1);
       await receiveItem(app, tokenA, shipment.items[0].id, tenantA.warehouseId);
@@ -103,7 +109,10 @@ describe('Load Container / Consolidation workflow (e2e)', () => {
         .post(`/containers/${container.id}/items/${shipment.items[0].id}`)
         .set('Authorization', `Bearer ${tokenA}`)
         .send({ scanned: false });
-      expect(res.status).toBe(409);
+      expect(res.status).toBe(201);
+
+      const dbItem = await prisma.shipmentItem.findUniqueOrThrow({ where: { id: shipment.items[0].id } });
+      expect(dbItem.status).toBe('ASSIGNED_TO_CONTAINER');
     });
 
     it('rejects an EXCEPTION/HOLD item', async () => {
@@ -194,6 +203,22 @@ describe('Load Container / Consolidation workflow (e2e)', () => {
       });
       expect(containerItem.removedAt).not.toBeNull();
       expect(containerItem.removalReason).toBe('Wrong container');
+    });
+
+    it('unloading a never-inspected item reverts it to RECEIVED_ORIGIN_WAREHOUSE, not PROCESSED (Phase 2)', async () => {
+      const container = await createContainer(app, tokenA, { warehouseId: tenantA.warehouseId });
+      const shipment = await createSingleShipment(app, tokenA, tenantA.customerId, 1);
+      await receiveItem(app, tokenA, shipment.items[0].id, tenantA.warehouseId);
+      await loadItem(app, tokenA, container.id, shipment.items[0].id);
+
+      const unloadRes = await request(app.getHttpServer())
+        .delete(`/containers/${container.id}/items/${shipment.items[0].id}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ reason: 'Wrong container' });
+      expect(unloadRes.status).toBe(200);
+
+      const dbItem = await prisma.shipmentItem.findUniqueOrThrow({ where: { id: shipment.items[0].id } });
+      expect(dbItem.status).toBe('RECEIVED_ORIGIN_WAREHOUSE');
     });
 
     it('reverts container from LOADING back to BOOKED once its last active item is removed', async () => {
@@ -380,6 +405,31 @@ describe('Load Container / Consolidation workflow (e2e)', () => {
       const dbShipment = await prisma.shipment.findUniqueOrThrow({ where: { id: shipment.id } });
       expect(dbShipment.status).toBe('CONSOLIDATED');
       expect(dbShipment.status).not.toBe('LOADED');
+    });
+
+    it('Phase 2: shipment status still rolls up to CONSOLIDATED then LOADED when its item skips processItem entirely', async () => {
+      const container = await createContainer(app, tokenA, { warehouseId: tenantA.warehouseId });
+      const shipment = await createSingleShipment(app, tokenA, tenantA.customerId, 1);
+      await receiveItem(app, tokenA, shipment.items[0].id, tenantA.warehouseId);
+
+      // Sanity: without the Phase 2 fix, maybeRollupToReadyForConsolidation
+      // (normally only triggered by processItem) would never run for this
+      // shipment, and it would still be WAREHOUSE_RECEIVED here.
+      const beforeLoad = await prisma.shipment.findUniqueOrThrow({ where: { id: shipment.id } });
+      expect(beforeLoad.status).toBe('WAREHOUSE_RECEIVED');
+
+      await loadItem(app, tokenA, container.id, shipment.items[0].id);
+
+      const afterLoad = await prisma.shipment.findUniqueOrThrow({ where: { id: shipment.id } });
+      expect(afterLoad.status).toBe('CONSOLIDATED');
+
+      await request(app.getHttpServer())
+        .post(`/containers/${container.id}/finalize`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({});
+
+      const afterFinalize = await prisma.shipment.findUniqueOrThrow({ where: { id: shipment.id } });
+      expect(afterFinalize.status).toBe('LOADED');
     });
   });
 });

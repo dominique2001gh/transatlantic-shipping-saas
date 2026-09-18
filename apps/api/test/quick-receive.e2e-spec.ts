@@ -145,21 +145,22 @@ describe('Quick Receive (e2e)', () => {
       expect(res.body.status).toBe('PROCESSED');
     });
 
-    it('container loading still requires PROCESSED — a Quick Receive item that has NOT been processed yet is rejected, preserving barcode scanning as a real checkpoint', async () => {
+    it('Simplified Operational Scanning Workflow: container loading now works directly off a Quick Receive item with no inspection, AND still works on a processed one', async () => {
       const container = await request(app.getHttpServer())
         .post('/containers')
         .set('Authorization', `Bearer ${managerToken}`)
         .send({ containerNumber: `QR-TEST-${Date.now()}`, containerType: 'TWENTY_FT', warehouseId: tenant.warehouseId });
       expect(container.status).toBe(201);
 
-      // items[1] was created by Quick Receive and is RECEIVED_ORIGIN_WAREHOUSE, not yet PROCESSED.
+      // items[1] was created by Quick Receive and is RECEIVED_ORIGIN_WAREHOUSE, never processed —
+      // inspection is optional, so this is the intended default simplified path, not a rejection.
       const loadRes = await request(app.getHttpServer())
         .post(`/containers/${container.body.id}/items/${shipment.items[1].id}`)
         .set('Authorization', `Bearer ${managerToken}`)
         .send({ scanned: false });
-      expect(loadRes.status).toBe(409);
+      expect(loadRes.status).toBe(201);
 
-      // items[0] WAS processed in the previous test — loading it succeeds, proving the checkpoint is real, not a permanent block.
+      // items[0] WAS processed in the previous test — still loads fine too; inspection remains fully available, just not required.
       const loadProcessed = await request(app.getHttpServer())
         .post(`/containers/${container.body.id}/items/${shipment.items[0].id}`)
         .set('Authorization', `Bearer ${managerToken}`)
