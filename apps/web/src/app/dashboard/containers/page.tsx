@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
 import type { ContainerDetail } from '@transatlantic/shared';
 import { MANAGER_UP_ROLES, OPERATIONS_ROLES } from '@transatlantic/shared';
 import { StatusBadge } from '@/components/dashboard/StatusBadge';
@@ -251,6 +252,28 @@ export default function ContainersPage() {
               <Button type="button" onClick={handleFinalize} disabled={finalizing}>
                 {finalizing ? 'Finalizing…' : 'Finalize / Seal Container'}
               </Button>
+            </div>
+          )}
+
+          {selected.status === 'LOADED' && (
+            <div className="mt-5 rounded-lg bg-blue-50 px-4 py-3 text-sm text-blue-800">
+              {selected.manifest ? (
+                <>
+                  Sealed and assigned to manifest <strong>{selected.manifest.manifestNumber}</strong>. Go to{' '}
+                  <Link href="/dashboard/manifests" className="font-medium underline hover:text-blue-900">
+                    Manifests
+                  </Link>{' '}
+                  to finalize and depart it.
+                </>
+              ) : (
+                <>
+                  Sealed and ready to ship. Assign it to a manifest on{' '}
+                  <Link href="/dashboard/manifests" className="font-medium underline hover:text-blue-900">
+                    Manifests
+                  </Link>
+                  , then finalize and depart it there.
+                </>
+              )}
             </div>
           )}
 

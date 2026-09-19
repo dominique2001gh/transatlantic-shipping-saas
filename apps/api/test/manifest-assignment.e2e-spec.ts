@@ -72,6 +72,17 @@ describe('Manifest assignment (e2e)', () => {
       const dbContainer = await prisma.container.findUniqueOrThrow({ where: { id: container.id } });
       expect(dbContainer.manifestId).toBe(manifest.id);
 
+      // Dashboard/containers page's "assigned to manifest, go depart it" link
+      // depends on GET /containers/:id returning this populated manifest
+      // object, not just the manifestId FK — assert the API response shape
+      // directly, not only the DB row.
+      const getContainerRes = await request(app.getHttpServer())
+        .get(`/containers/${container.id}`)
+        .set('Authorization', `Bearer ${tokenA}`);
+      expect(getContainerRes.status).toBe(200);
+      expect(getContainerRes.body.manifestId).toBe(manifest.id);
+      expect(getContainerRes.body.manifest).toEqual({ id: manifest.id, manifestNumber: manifest.manifestNumber });
+
       const events = await prisma.trackingEvent.findMany({
         where: { shipmentId: container.shipmentId, eventType: 'ASSIGNED_TO_MANIFEST' },
       });
