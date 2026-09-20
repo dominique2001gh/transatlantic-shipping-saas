@@ -20,6 +20,7 @@ const SUCCESS_STATUSES = new Set([
   'RECEIVED_DESTINATION_WAREHOUSE',
   'CLOSED',
   'PAID',
+  'CONVERTED',
 ]);
 const NEUTRAL_STATUSES = new Set(['DRAFT', 'REGISTERED', 'UNLOADING']);
 const WARNING_STATUSES = new Set([
@@ -31,6 +32,7 @@ const WARNING_STATUSES = new Set([
   'OVERDUE',
   'VOID',
   'FAILED',
+  'EXPIRED',
 ]);
 
 /** Best-effort color mapping shared across ShipmentStatus, ShipmentItemStatus, etc. */

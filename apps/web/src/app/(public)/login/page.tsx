@@ -2,14 +2,15 @@
 
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Suspense, useState, type FormEvent } from 'react';
+import { Suspense, useEffect, useState, type FormEvent } from 'react';
 import type { LoginResponseDto } from '@transatlantic/shared';
+import { UserRole } from '@transatlantic/shared';
 import { AuthShell } from '@/components/marketing/AuthShell';
 import { TextInput } from '@/components/forms/FormField';
 import { Button } from '@/components/ui/Button';
 import { apiFetch, ApiError } from '@/lib/api';
 import { storeSession } from '@/lib/auth';
-import { resolvePostLoginRoute } from '@/lib/post-login';
+import { resolvePostLoginRoute, resolveSafeNextPath } from '@/lib/post-login';
 
 /**
  * Stage 3J: reads ?reason=expired, set only by apiFetch's own 401 handler
@@ -29,12 +30,31 @@ function SessionExpiredBanner() {
   );
 }
 
+/**
+ * /dropoff entry point: reads `?next=/portal/pre-register` (or nothing) so
+ * a customer who arrived here from "Prepare a Drop-Off" lands back there
+ * after signing in, instead of the normal portal overview — see
+ * resolveSafeNextPath's own doc comment for why this is an allow-list, not
+ * an arbitrary redirect. Its own component + <Suspense> wrapper for the
+ * same reason as SessionExpiredBanner above: useSearchParams() needs that
+ * boundary on a statically-prerendered page.
+ */
+function NextParamReader({ onResolved }: { onResolved: (path: string | null) => void }) {
+  const searchParams = useSearchParams();
+  useEffect(() => {
+    onResolved(resolveSafeNextPath(searchParams.get('next')));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
+  return null;
+}
+
 export default function LoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [nextPath, setNextPath] = useState<string | null>(null);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -46,7 +66,12 @@ export default function LoginPage() {
         body: JSON.stringify({ email, password }),
       });
       storeSession(response.accessToken, response.user);
-      router.push(await resolvePostLoginRoute(response.user));
+      // A `next` override only ever applies to the customer it was built
+      // for — staff/platform-admin accounts always land on their normal
+      // role-based home, even if a stray `?next=` is present.
+      const destination =
+        nextPath && response.user.role === UserRole.CUSTOMER ? nextPath : await resolvePostLoginRoute(response.user);
+      router.push(destination);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Unable to log in right now.');
     } finally {
@@ -63,6 +88,9 @@ export default function LoginPage() {
 
       <Suspense fallback={null}>
         <SessionExpiredBanner />
+      </Suspense>
+      <Suspense fallback={null}>
+        <NextParamReader onResolved={setNextPath} />
       </Suspense>
 
       <form className="mt-8 flex flex-col gap-5" onSubmit={handleSubmit} noValidate>
@@ -102,7 +130,10 @@ export default function LoginPage() {
 
       <p className="mt-8 text-center text-sm text-slate-500">
         New here?{' '}
-        <Link href="/register" className="font-semibold text-primary-700 hover:text-primary-800">
+        <Link
+          href={nextPath ? `/register?next=${encodeURIComponent(nextPath)}` : '/register'}
+          className="font-semibold text-primary-700 hover:text-primary-800"
+        >
           Create an account
         </Link>
       </p>

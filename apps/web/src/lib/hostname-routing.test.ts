@@ -109,3 +109,24 @@ test('a missing/empty host header never matches any hostname-specific rule', () 
   assert.deepEqual(resolveHostnameRouting(undefined, '/pricing'), { type: 'next' });
   assert.deepEqual(resolveHostnameRouting('', '/dashboard'), { type: 'next' });
 });
+
+// ---------------------------------------------------------------------------
+// 4. /dropoff (Customer Self-Service Pre-Registration public entry point):
+//    a plain Trans Atlantic public-site page, same as /track or /about —
+//    deliberately NOT added to middleware.ts's matcher, so it must pass
+//    through untouched everywhere, on every hostname, including
+//    ananselogix.com (which has no equivalent concept and no
+//    /ananselogix/dropoff page to rewrite to).
+// ---------------------------------------------------------------------------
+
+test('/dropoff passes through untouched on Trans Atlantic hostnames', () => {
+  for (const host of ['talogisticssolutions.com', 'www.talogisticssolutions.com', 'app.talogisticssolutions.com']) {
+    assert.deepEqual(resolveHostnameRouting(host, '/dropoff'), { type: 'next' });
+  }
+});
+
+test('/dropoff passes through untouched on hosts with no special rule (local dev, raw Railway domain)', () => {
+  for (const host of ['localhost:3000', 'web-production-31f5d.up.railway.app']) {
+    assert.deepEqual(resolveHostnameRouting(host, '/dropoff'), { type: 'next' });
+  }
+});

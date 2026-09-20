@@ -34,3 +34,19 @@ export async function resolvePostLoginRoute(user: AuthenticatedUser): Promise<st
   }
   return homeRouteForRole(user.role);
 }
+
+/**
+ * /dropoff entry point: the only post-auth destination allowed to override
+ * homeRouteForRole's normal role-based landing. An exact-match allow-list
+ * of one, not a general "redirect to any path" mechanism — a `next` query
+ * param is untrusted browser input, and this is what stops it from ever
+ * becoming an open redirect (arbitrary path, let alone arbitrary host).
+ * Extend this set, never loosen the match, if another entry point needs
+ * the same "come back here after signing in" behavior later.
+ */
+const ALLOWED_NEXT_PATHS = new Set(['/portal/pre-register']);
+
+export function resolveSafeNextPath(nextParam: string | null | undefined): string | null {
+  if (!nextParam) return null;
+  return ALLOWED_NEXT_PATHS.has(nextParam) ? nextParam : null;
+}

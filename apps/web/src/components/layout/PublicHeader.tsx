@@ -281,9 +281,14 @@ export function PublicHeader() {
               ))}
           </nav>
 
-          <LinkButton href="/track" className="my-2.5 shrink-0 !bg-primary-500 !text-white hover:!bg-primary-400">
-            Track Shipment
-          </LinkButton>
+          <div className="my-2.5 flex shrink-0 items-center gap-3">
+            <LinkButton href="/dropoff" variant="inverse" size="sm">
+              Prepare a Drop-Off
+            </LinkButton>
+            <LinkButton href="/track" className="!bg-primary-500 !text-white hover:!bg-primary-400">
+              Track Shipment
+            </LinkButton>
+          </div>
         </Container>
       </div>
 
@@ -357,7 +362,11 @@ export function PublicHeader() {
               Customer Login
             </Link>
 
-            <LinkButton href="/track" className="mt-4 justify-center" onClick={() => setMobileOpen(false)}>
+            <LinkButton href="/dropoff" variant="secondary" className="mt-2 justify-center" onClick={() => setMobileOpen(false)}>
+              Prepare a Drop-Off
+            </LinkButton>
+
+            <LinkButton href="/track" className="mt-2 justify-center" onClick={() => setMobileOpen(false)}>
               Track Shipment
             </LinkButton>
           </nav>

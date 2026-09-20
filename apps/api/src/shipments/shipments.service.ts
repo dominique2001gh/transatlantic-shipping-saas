@@ -1,7 +1,13 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { formatItemCode, ShipmentItemType } from '@transatlantic/shared';
 import type { Prisma } from '@prisma/client';
-import { ShipmentItemStatus, ShipmentStatus, TrackingEventSource, TrackingEventType } from '@prisma/client';
+import {
+  PreRegistrationStatus,
+  ShipmentItemStatus,
+  ShipmentStatus,
+  TrackingEventSource,
+  TrackingEventType,
+} from '@prisma/client';
 import { generateTrackingNumber } from '../common/numbering/numbering.util';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -213,6 +219,15 @@ export class ShipmentsService {
    * (itemType/weight/dimensions/declaredValue) from the DTO — a single
    * odd-one-out package is still editable afterward via the existing
    * PATCH /shipments/:id/items/:itemId, unchanged by this feature.
+   *
+   * Customer Self-Service Pre-Registration, Stage 3: an optional
+   * `dto.preRegistrationId` links this transaction to a customer-submitted
+   * ShipmentPreRegistration (see that model's own schema doc comment). This
+   * never blindly trusts the pre-registration's data — the frontend only
+   * uses it to prefill the same fields below, which staff can freely
+   * correct before submitting, exactly like every other Quick Receive
+   * field. The PRE-* reference is a temporary arrival reference only; the
+   * `trackingNumber` generated below is what becomes authoritative.
    */
   async createQuickReceive(tenantId: string, actorUserId: string, dto: QuickReceiveDto) {
     const customer = await this.prisma.customer.findFirst({
@@ -220,6 +235,29 @@ export class ShipmentsService {
     });
     if (!customer) {
       throw new NotFoundException('Customer not found');
+    }
+
+    // Customer Self-Service Pre-Registration, Stage 3: validate up front so
+    // an invalid/ineligible reference fails fast with a clear message
+    // before any writes. Re-checked atomically inside the transaction below
+    // (see the conditional updateMany there) so two concurrent Quick
+    // Receive submissions against the same pre-registration can never both
+    // succeed — the loser's whole transaction (shipment included) rolls
+    // back rather than leaving an orphan shipment behind.
+    let preRegistration: { id: string; status: PreRegistrationStatus } | null = null;
+    if (dto.preRegistrationId) {
+      preRegistration = await this.prisma.shipmentPreRegistration.findFirst({
+        where: { id: dto.preRegistrationId, tenantId },
+        select: { id: true, status: true },
+      });
+      if (!preRegistration) {
+        throw new NotFoundException('Pre-registration not found');
+      }
+      if (preRegistration.status !== PreRegistrationStatus.SUBMITTED) {
+        throw new ConflictException(
+          `This pre-registration is ${preRegistration.status} and cannot be received. Only a SUBMITTED drop-off can be converted.`,
+        );
+      }
     }
 
     const warehouse = await this.prisma.warehouse.findFirst({
@@ -371,6 +409,26 @@ export class ShipmentsService {
         where: { id: shipment.id },
         data: { status: ShipmentStatus.WAREHOUSE_RECEIVED },
       });
+
+      if (preRegistration) {
+        // Conditional (compare-and-swap) update, not a plain write: this is
+        // the actual duplicate-conversion guard, atomic with the shipment
+        // creation above. `count !== 1` means something else already
+        // converted or cancelled this pre-registration between the
+        // pre-check above and here — throwing here rolls back the entire
+        // transaction, so no orphan shipment is left behind for the loser.
+        const conversion = await tx.shipmentPreRegistration.updateMany({
+          where: { id: preRegistration.id, tenantId, status: PreRegistrationStatus.SUBMITTED },
+          data: {
+            status: PreRegistrationStatus.CONVERTED,
+            convertedShipmentId: shipment.id,
+            convertedAt: receivedAt,
+          },
+        });
+        if (conversion.count !== 1) {
+          throw new ConflictException('This pre-registration was already converted.');
+        }
+      }
 
       return shipment.id;
     });

@@ -7,6 +7,7 @@ import { Public } from '../common/decorators/public.decorator';
 import { AcceptInviteDto } from '../staff-invitations/dto/accept-invite.dto';
 import { StaffInvitationsService } from '../staff-invitations/staff-invitations.service';
 import { AuthService } from './auth.service';
+import { CustomerSignupDto } from './dto/customer-signup.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { LoginDto } from './dto/login.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
@@ -33,6 +34,29 @@ export class AuthController {
    * one new endpoint an attacker could otherwise use to enumerate emails
    * by timing, or to spam a real user's inbox.
    */
+  /**
+   * Customer Self-Service Pre-Registration, Stage 2: the smallest safe
+   * first-time-customer signup path — see AuthService.customerSignup's own
+   * doc comment. Throttled like every other public account-creation
+   * endpoint in this controller, but at a higher limit than accept-invite
+   * (a rare one-time action per employee, sent by staff): a prospective
+   * customer signing up directly is a much more frequent, self-serve
+   * action and may legitimately retry after a typo — 20/min matches this
+   * module's own ThrottlerModule default rather than the tighter
+   * per-route override accept-invite/forgot-password use.
+   */
+  @Public()
+  @HttpCode(HttpStatus.CREATED)
+  @UseGuards(ThrottlerGuard)
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
+  @Post('customer-signup')
+  async customerSignup(@Body() dto: CustomerSignupDto): Promise<LoginResponseDto> {
+    if (dto.password !== dto.confirmPassword) {
+      throw new BadRequestException('Passwords do not match');
+    }
+    return this.authService.customerSignup(dto);
+  }
+
   @Public()
   @HttpCode(HttpStatus.OK)
   @UseGuards(ThrottlerGuard)

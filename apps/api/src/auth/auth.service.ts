@@ -1,18 +1,29 @@
-import { BadRequestException, Inject, Injectable, Logger, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Inject, Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
-import { AccountTokenPurpose } from '@prisma/client';
+import { AccountTokenPurpose, Prisma, UserRole } from '@prisma/client';
 import type { AuthenticatedUser, CustomerEntryPointResponse, JwtPayload, LoginResponseDto } from '@transatlantic/shared';
 import * as bcrypt from 'bcrypt';
+import { generateCustomerNumber } from '../common/numbering/numbering.util';
 import { generateToken, hashToken } from '../common/token/token.util';
 import { passwordResetEmail } from '../notifications/templates/platform-emails';
 import { resolvePlatformEmailSender } from '../notifications/providers/platform-email-sender.util';
 import { EMAIL_PROVIDER } from '../notifications/providers/provider.types';
 import type { EmailProvider } from '../notifications/providers/provider.types';
 import { PrismaService } from '../prisma/prisma.service';
+import { CustomerSignupDto } from './dto/customer-signup.dto';
 
 /** How long a forgot-password link stays valid — short by design; see AuthService.requestPasswordReset's own doc comment. */
 const PASSWORD_RESET_TTL_MINUTES = 30;
+
+/**
+ * Customer Self-Service Pre-Registration, Stage 2: the one tenant with a
+ * real, working customer-portal entry point today — same hardcoded slug
+ * already used by resolveCustomerEntryPoint below. See customerSignup's
+ * own doc comment for why this is intentionally not a client-supplied
+ * value.
+ */
+const TRANS_ATLANTIC_TENANT_SLUG = 'transatlantic';
 
 @Injectable()
 export class AuthService {
@@ -113,6 +124,114 @@ export class AuthService {
 
   static async hashPassword(plainTextPassword: string, saltRounds = 10): Promise<string> {
     return bcrypt.hash(plainTextPassword, saltRounds);
+  }
+
+  /**
+   * Customer Self-Service Pre-Registration, Stage 2: the smallest safe
+   * first-time-customer signup path. Stage 1's own audit found there was
+   * previously no production way for a customer to obtain portal
+   * credentials at all — this closes that gap without inventing a second
+   * authentication system: it creates a normal CUSTOMER-role `User` and
+   * reuses `buildLoginResponse` to issue the exact same JWT shape `login`
+   * does, so every existing guard/decorator downstream (JwtStrategy,
+   * RolesGuard, requireTenantId/requireCustomerId) needs zero changes to
+   * recognize the resulting session.
+   *
+   * Tenant resolution is hardcoded to Trans Atlantic — never a client-
+   * supplied tenantId or slug. Per the Stage 1 audit, real host/custom-
+   * domain tenant resolution doesn't exist anywhere in this codebase yet
+   * (Tenant.customDomain is reserved, unused); building generic signup on
+   * top of that gap would let a caller reach an arbitrary tenant. Trans
+   * Atlantic is the one tenant with a real, working customer-portal entry
+   * point today (same slug already hardcoded in
+   * resolveCustomerEntryPoint above) — this is the safe, narrow version of
+   * this feature until per-tenant domain resolution is real infrastructure.
+   *
+   * Only a CUSTOMER-role User is ever created here — there is no `role`
+   * field on CustomerSignupDto for a caller to set even if it tried (the
+   * global ValidationPipe's forbidNonWhitelisted config rejects it
+   * outright), and this method's own Prisma call hardcodes `role:
+   * UserRole.CUSTOMER` unconditionally.
+   */
+  async customerSignup(dto: CustomerSignupDto): Promise<LoginResponseDto> {
+    const normalizedEmail = dto.email.toLowerCase().trim();
+
+    const tenant = await this.prisma.tenant.findFirst({
+      where: { slug: TRANS_ATLANTIC_TENANT_SLUG, isActive: true },
+    });
+    if (!tenant) {
+      throw new BadRequestException('Customer sign-up is not available right now.');
+    }
+
+    const existingUser = await this.prisma.user.findUnique({
+      where: { tenantId_email: { tenantId: tenant.id, email: normalizedEmail } },
+    });
+    if (existingUser) {
+      throw new ConflictException('An account with this email already exists. Please sign in instead.');
+    }
+
+    // A Customer row may already exist for this email/tenant from
+    // staff-side shipment history (e.g. New Shipment/Quick Receive created
+    // it before this person ever had a portal login) — link the new
+    // account to that existing record instead of creating a duplicate, so
+    // their shipment history is preserved rather than orphaned under a
+    // second, disconnected Customer row. A Customer already linked to a
+    // User here would mean its User.email no longer matches this email
+    // (the existingUser check above would otherwise have caught it) —
+    // rejected rather than silently re-linking someone else's account.
+    const existingCustomer = await this.prisma.customer.findFirst({
+      where: { tenantId: tenant.id, email: { equals: normalizedEmail, mode: 'insensitive' } },
+    });
+    if (existingCustomer?.userId) {
+      throw new ConflictException('An account with this email already exists. Please sign in instead.');
+    }
+
+    const passwordHash = await AuthService.hashPassword(dto.password);
+    const firstName = dto.firstName.trim();
+    const lastName = dto.lastName.trim();
+    const phone = dto.phone?.trim() || undefined;
+
+    let user;
+    let customerId: string;
+    try {
+      user = await this.prisma.user.create({
+        data: { tenantId: tenant.id, email: normalizedEmail, passwordHash, firstName, lastName, role: UserRole.CUSTOMER },
+      });
+
+      if (existingCustomer) {
+        await this.prisma.customer.update({
+          where: { id: existingCustomer.id },
+          data: { userId: user.id, phone: existingCustomer.phone ?? phone },
+        });
+        customerId = existingCustomer.id;
+      } else {
+        const customerNumber = await generateCustomerNumber(this.prisma, tenant.id);
+        const customer = await this.prisma.customer.create({
+          data: { tenantId: tenant.id, customerNumber, firstName, lastName, email: dto.email.trim(), phone, userId: user.id },
+        });
+        customerId = customer.id;
+      }
+    } catch (err) {
+      // Concurrency backstop: two signups racing on the same email both
+      // pass the findUnique check above before either commits — the
+      // User(tenantId, email) unique constraint is the real guarantee,
+      // this just turns that DB-level conflict into the same friendly
+      // message as the check above, instead of a raw 500.
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+        throw new ConflictException('An account with this email already exists. Please sign in instead.');
+      }
+      throw err;
+    }
+
+    return this.buildLoginResponse({
+      id: user.id,
+      email: user.email,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      role: user.role,
+      tenantId: user.tenantId,
+      customer: { id: customerId },
+    });
   }
 
   /**

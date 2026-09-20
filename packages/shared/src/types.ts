@@ -1672,3 +1672,77 @@ export interface SaasAnalyticsResponse {
   canceledTenants: number;
   planDistribution: SaasPlanDistributionItem[];
 }
+
+// ==========================================================================
+// CUSTOMER SELF-SERVICE PRE-REGISTRATION (Stage 1 API, Stage 2 frontend)
+// ==========================================================================
+
+/**
+ * Mirrors the Prisma-generated PreRegistrationStatus enum as a plain string
+ * union — the frontend only ever displays/compares values the API already
+ * returned, it never constructs or validates one, so a lightweight type
+ * alias is enough here (unlike ShipmentMode/ShipmentItemType, which the
+ * customer-facing form also has to populate a <select> from).
+ */
+export type PreRegistrationStatus = 'DRAFT' | 'SUBMITTED' | 'CONVERTED' | 'CANCELLED' | 'EXPIRED';
+
+/** The full set of fields a customer can submit/edit on a pre-registration — shared by create and update requests, matching CreatePreRegistrationDto/UpdatePreRegistrationDto's identical field lists on the API. */
+export interface PreRegistrationFormFields {
+  shipmentMode?: ShipmentMode;
+  destinationCountry?: string;
+  destinationLocation?: string;
+  itemType?: ShipmentItemType;
+  description?: string;
+  packageCount?: number;
+  notes?: string;
+  recipientName?: string;
+  recipientPhone?: string;
+  recipientEmail?: string;
+  recipientAddressLine1?: string;
+  recipientAddressLine2?: string;
+  recipientCity?: string;
+  recipientState?: string;
+  recipientCountry?: string;
+  recipientPostalCode?: string;
+}
+
+/** GET/POST/PATCH /portal/pre-registrations response shape — the full record as the customer portal sees it. */
+export interface PortalPreRegistration extends PreRegistrationFormFields {
+  id: string;
+  status: PreRegistrationStatus;
+  referenceNumber: string | null;
+  submittedAt: string | null;
+  convertedAt: string | null;
+  cancelledAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Minimal customer identity staff need when reviewing a pre-registration lookup — same shape as PreRegistrationsService's STAFF_CUSTOMER_SELECT on the API. */
+export interface PreRegistrationStaffCustomer {
+  id: string;
+  customerNumber: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone: string | null;
+}
+
+/**
+ * Customer Self-Service Pre-Registration, Stage 3: GET /pre-registrations/
+ * scan|search|:id response shape — the staff-facing read of a
+ * pre-registration. Always tenant-scoped, never customer-scoped (any
+ * customer's record within the caller's own tenant is visible to staff).
+ */
+export interface StaffPreRegistrationLookup extends PreRegistrationFormFields {
+  id: string;
+  status: PreRegistrationStatus;
+  referenceNumber: string | null;
+  convertedShipmentId: string | null;
+  submittedAt: string | null;
+  convertedAt: string | null;
+  cancelledAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  customer: PreRegistrationStaffCustomer;
+}

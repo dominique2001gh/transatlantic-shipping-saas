@@ -1,5 +1,5 @@
 import { INestApplication } from '@nestjs/common';
-import { PrismaClient, ShipmentMode, UserRole } from '@prisma/client';
+import { PreRegistrationStatus, PrismaClient, ShipmentMode, UserRole } from '@prisma/client';
 import request from 'supertest';
 import { createTestTenant, createUserInTenant, deleteTestTenant, TestTenantFixture } from './utils/fixtures';
 import { createTestApp } from './utils/test-app';
@@ -389,6 +389,135 @@ describe('Quick Receive (e2e)', () => {
       // same-code collision is possible in principle; the @@unique([tenantId, ...])
       // indexes (not just app-level care) are what make it safe regardless.
       expect(resA.body.id).not.toBe(resB.body.id);
+    });
+  });
+
+  // -- Customer Self-Service Pre-Registration, Stage 3: warehouse handoff ----
+
+  describe('pre-registration conversion (Stage 3)', () => {
+    /** Directly inserts a ShipmentPreRegistration in the given status — bypasses the customer-portal HTTP flow (already covered by pre-registrations.e2e-spec.ts) since this suite only needs to exercise the Quick Receive conversion side. */
+    function createPreRegistration(overrides: {
+      tenantId: string;
+      customerId: string;
+      status?: PreRegistrationStatus;
+      referenceNumber?: string | null;
+      convertedShipmentId?: string | null;
+    }) {
+      const status = overrides.status ?? PreRegistrationStatus.SUBMITTED;
+      return prisma.shipmentPreRegistration.create({
+        data: {
+          tenantId: overrides.tenantId,
+          customerId: overrides.customerId,
+          status,
+          referenceNumber:
+            overrides.referenceNumber !== undefined
+              ? overrides.referenceNumber
+              : status === PreRegistrationStatus.DRAFT
+                ? null
+                : `PRE-TEST-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          submittedAt: status === PreRegistrationStatus.DRAFT ? null : new Date(),
+          convertedShipmentId: overrides.convertedShipmentId ?? null,
+          recipientName: 'Pre-Reg Recipient',
+          recipientPhone: '+233209999999',
+          destinationCountry: 'GH',
+          shipmentMode: ShipmentMode.OCEAN_LCL,
+          packageCount: 2,
+        },
+      });
+    }
+
+    it('converts a SUBMITTED pre-registration: creates a normal shipment with real tracking/item codes and marks it CONVERTED with convertedShipmentId set', async () => {
+      const preReg = await createPreRegistration({ tenantId: tenant.tenantId, customerId: tenant.customerId });
+
+      const res = await quickReceive(managerToken, basePayload({ packageCount: 2, preRegistrationId: preReg.id }));
+      expect(res.status).toBe(201);
+      expect(res.body.trackingNumber).toBeTruthy();
+      expect(res.body.items).toHaveLength(2);
+      expect(res.body.items[0].status).toBe('RECEIVED_ORIGIN_WAREHOUSE');
+
+      const updated = await prisma.shipmentPreRegistration.findUniqueOrThrow({ where: { id: preReg.id } });
+      expect(updated.status).toBe('CONVERTED');
+      expect(updated.convertedShipmentId).toBe(res.body.id);
+      expect(updated.convertedAt).toBeTruthy();
+    });
+
+    it('rejects converting the same pre-registration twice — second attempt is a 409, and no second shipment is created', async () => {
+      const preReg = await createPreRegistration({ tenantId: tenant.tenantId, customerId: tenant.customerId });
+
+      const first = await quickReceive(managerToken, basePayload({ packageCount: 1, preRegistrationId: preReg.id }));
+      expect(first.status).toBe(201);
+
+      const shipmentCountBefore = await prisma.shipment.count({ where: { tenantId: tenant.tenantId } });
+      const second = await quickReceive(managerToken, basePayload({ packageCount: 1, preRegistrationId: preReg.id }));
+      expect(second.status).toBe(409);
+      const shipmentCountAfter = await prisma.shipment.count({ where: { tenantId: tenant.tenantId } });
+      expect(shipmentCountAfter).toBe(shipmentCountBefore);
+
+      const stillConverted = await prisma.shipmentPreRegistration.findUniqueOrThrow({ where: { id: preReg.id } });
+      expect(stillConverted.convertedShipmentId).toBe(first.body.id); // unchanged by the rejected second attempt
+    });
+
+    it('two concurrent conversion attempts against the same pre-registration: exactly one succeeds', async () => {
+      const preReg = await createPreRegistration({ tenantId: tenant.tenantId, customerId: tenant.customerId });
+
+      const [a, b] = await Promise.all([
+        quickReceive(managerToken, basePayload({ packageCount: 1, preRegistrationId: preReg.id })),
+        quickReceive(managerToken, basePayload({ packageCount: 1, preRegistrationId: preReg.id })),
+      ]);
+      const statuses = [a.status, b.status].sort();
+      expect(statuses).toEqual([201, 409]);
+    });
+
+    it('rejects a DRAFT pre-registration — cannot be converted, and creates no shipment', async () => {
+      const preReg = await createPreRegistration({ tenantId: tenant.tenantId, customerId: tenant.customerId, status: PreRegistrationStatus.DRAFT });
+      const shipmentCountBefore = await prisma.shipment.count({ where: { tenantId: tenant.tenantId } });
+
+      const res = await quickReceive(managerToken, basePayload({ packageCount: 1, preRegistrationId: preReg.id }));
+      expect(res.status).toBe(409);
+
+      const shipmentCountAfter = await prisma.shipment.count({ where: { tenantId: tenant.tenantId } });
+      expect(shipmentCountAfter).toBe(shipmentCountBefore);
+    });
+
+    it('rejects a CANCELLED pre-registration — cannot be converted', async () => {
+      const preReg = await createPreRegistration({ tenantId: tenant.tenantId, customerId: tenant.customerId, status: PreRegistrationStatus.CANCELLED });
+      const res = await quickReceive(managerToken, basePayload({ packageCount: 1, preRegistrationId: preReg.id }));
+      expect(res.status).toBe(409);
+    });
+
+    it('rejects an already-CONVERTED pre-registration passed in again', async () => {
+      const preReg = await createPreRegistration({
+        tenantId: tenant.tenantId,
+        customerId: tenant.customerId,
+        status: PreRegistrationStatus.CONVERTED,
+        convertedShipmentId: 'already-converted-fixture-id',
+      });
+      const res = await quickReceive(managerToken, basePayload({ packageCount: 1, preRegistrationId: preReg.id }));
+      expect(res.status).toBe(409);
+    });
+
+    it("404s (not found) on another tenant's preRegistrationId — no cross-tenant conversion, no partial shipment left behind", async () => {
+      const otherPreReg = await createPreRegistration({ tenantId: otherTenant.tenantId, customerId: otherTenant.customerId });
+      const shipmentCountBefore = await prisma.shipment.count({ where: { tenantId: tenant.tenantId } });
+
+      const res = await quickReceive(managerToken, basePayload({ packageCount: 1, preRegistrationId: otherPreReg.id }));
+      expect(res.status).toBe(404);
+
+      const shipmentCountAfter = await prisma.shipment.count({ where: { tenantId: tenant.tenantId } });
+      expect(shipmentCountAfter).toBe(shipmentCountBefore);
+
+      const untouched = await prisma.shipmentPreRegistration.findUniqueOrThrow({ where: { id: otherPreReg.id } });
+      expect(untouched.status).toBe('SUBMITTED'); // never converted by the wrong tenant's attempt
+    });
+
+    it('an unknown preRegistrationId 404s cleanly, same as a missing customer/warehouse', async () => {
+      const res = await quickReceive(managerToken, basePayload({ packageCount: 1, preRegistrationId: 'does-not-exist' }));
+      expect(res.status).toBe(404);
+    });
+
+    it('omitting preRegistrationId entirely still works exactly like normal walk-in Quick Receive (regression)', async () => {
+      const res = await quickReceive(managerToken, basePayload({ packageCount: 1 }));
+      expect(res.status).toBe(201);
     });
   });
 

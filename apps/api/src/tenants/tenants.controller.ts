@@ -1,11 +1,15 @@
 import { Body, Controller, ForbiddenException, Get, Param, Post } from '@nestjs/common';
+import { EntitlementFeature } from '@prisma/client';
 import type { AuthenticatedUser } from '@transatlantic/shared';
-import { UserRole } from '@transatlantic/shared';
+import { OPERATIONS_ROLES, UserRole } from '@transatlantic/shared';
 import { AllowWhenSuspended } from '../common/decorators/allow-when-suspended.decorator';
 import { AnyAuthenticatedRole } from '../common/decorators/any-authenticated-role.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { RequireEntitlement } from '../common/decorators/require-entitlement.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
+import { requireTenantId } from '../common/tenant/tenant.util';
 import { CreateTenantDto } from './dto/create-tenant.dto';
+import { SendDropoffLinkDto } from './dto/send-dropoff-link.dto';
 import { SuspendTenantDto } from './dto/suspend-tenant.dto';
 import { TenantsService } from './tenants.service';
 
@@ -22,6 +26,22 @@ export class TenantsController {
       throw new ForbiddenException('No tenant context for this account');
     }
     return this.tenantsService.findOwnTenant(user.tenantId);
+  }
+
+  /** Quick Receive's "Send Drop-Off Link" card — same OPERATIONS_ROLES gate as Quick Receive itself. */
+  @Get('me/dropoff-link')
+  @Roles(...OPERATIONS_ROLES)
+  @RequireEntitlement(EntitlementFeature.OPERATIONS_SOFTWARE)
+  getDropoffLink(@CurrentUser() user: AuthenticatedUser) {
+    return this.tenantsService.getDropoffLink(requireTenantId(user.tenantId));
+  }
+
+  @Post('me/dropoff-link/email')
+  @Roles(...OPERATIONS_ROLES)
+  @RequireEntitlement(EntitlementFeature.OPERATIONS_SOFTWARE)
+  async emailDropoffLink(@CurrentUser() user: AuthenticatedUser, @Body() dto: SendDropoffLinkDto) {
+    await this.tenantsService.sendDropoffLinkEmail(requireTenantId(user.tenantId), dto.email);
+    return { success: true };
   }
 
   @Get()

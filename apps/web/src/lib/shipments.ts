@@ -90,6 +90,8 @@ export interface QuickReceiveInput extends RecipientInput {
   dimensionUnit?: DimensionUnit;
   declaredValue?: number;
   notes?: string;
+  /** Customer Self-Service Pre-Registration, Stage 3 — see ShipmentsService.createQuickReceive's own doc comment. */
+  preRegistrationId?: string;
 }
 
 export interface CreateTrackingEventInput {

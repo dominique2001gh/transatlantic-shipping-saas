@@ -406,6 +406,82 @@ export function shipmentPickedUpEmail(params: BaseParams): ShipmentCustomerEmail
 }
 
 // ---------------------------------------------------------------------------
+// 8. Prepared Drop-Off link (Customer Self-Service Pre-Registration)
+// ---------------------------------------------------------------------------
+
+/**
+ * Staff-initiated "Send Drop-Off Link" (Quick Receive convenience) —
+ * distinct enough from the shipment-lifecycle emails above (no tracking
+ * number exists yet; the whole point is a customer hasn't shipped anything
+ * yet) that it doesn't reuse renderShell/renderButtonRow/renderPlainText,
+ * which are all tracking-number-shaped. Reuses only the tenant-branding
+ * chrome (header/footer/escaping/greeting) so this still looks like the
+ * same family of email, tenant-branded exactly the same way.
+ */
+export function dropoffLinkEmail(params: {
+  tenant: ShipmentEmailTenantBranding;
+  customerFirstName?: string | null;
+  dropoffUrl: string;
+}): ShipmentCustomerEmail {
+  const { tenant, dropoffUrl } = params;
+  const accent = tenant.primaryColor?.trim() || DEFAULT_ACCENT;
+  const greeting = greetingFor(params.customerFirstName);
+  const heading = 'Prepare your drop-off before you arrive';
+  const paragraphsHtml = [
+    'Save time at our warehouse by entering your shipment information online before you arrive.',
+    "When you're finished, you'll get a QR code to show our staff when you drop off your packages.",
+  ];
+  const paragraphs = [greeting, ...paragraphsHtml]
+    .map(
+      (p) =>
+        `<p style="margin:0 0 14px 0;font-size:15px;line-height:1.5;color:#1e293b;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;">${p}</p>`,
+    )
+    .join('');
+  const html = `<!doctype html>
+<html>
+  <body style="margin:0;padding:24px;background-color:#f1f5f9;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background-color:#ffffff;border-radius:8px;overflow:hidden;">
+            ${renderHeaderRow(tenant, accent)}
+            <tr>
+              <td style="padding:28px 32px 0 32px;">
+                <h1 style="margin:0 0 16px 0;font-size:20px;color:#0f172a;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;">${escapeHtml(heading)}</h1>
+                ${paragraphs}
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:8px 32px 0 32px;">
+                <a href="${escapeHtml(dropoffUrl)}" style="display:inline-block;background-color:${accent};color:#ffffff;text-decoration:none;font-weight:600;font-size:14px;padding:12px 24px;border-radius:6px;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;">Prepare Your Drop-Off</a>
+              </td>
+            </tr>
+            ${renderFooterRow(tenant)}
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>`;
+
+  const text = [
+    greeting,
+    '',
+    heading,
+    '',
+    ...paragraphsHtml,
+    '',
+    `Prepare your drop-off: ${dropoffUrl}`,
+    '',
+    '—',
+    tenant.legalName?.trim() || tenant.name,
+    ...[tenant.phone, tenant.email, tenant.website].filter((v): v is string => !!v?.trim()),
+  ].join('\n');
+
+  return { subject: `Prepare your drop-off at ${tenant.name}`, html, text };
+}
+
+// ---------------------------------------------------------------------------
 // internals
 // ---------------------------------------------------------------------------
 

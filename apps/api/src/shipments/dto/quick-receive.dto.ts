@@ -165,4 +165,17 @@ export class QuickReceiveDto {
   @IsOptional()
   @IsString()
   notes?: string;
+
+  /**
+   * Customer Self-Service Pre-Registration, Stage 3: when set, this Quick
+   * Receive transaction also marks the named SUBMITTED pre-registration as
+   * CONVERTED and links it to the resulting Shipment — see
+   * ShipmentsService.createQuickReceive's own doc comment for the atomic
+   * guard against converting the same one twice. Optional and purely
+   * additive: omitting it is the exact same normal walk-in Quick Receive
+   * this DTO already supported.
+   */
+  @IsOptional()
+  @IsString()
+  preRegistrationId?: string;
 }

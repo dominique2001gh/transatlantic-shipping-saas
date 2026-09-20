@@ -1,19 +1,32 @@
 'use client';
 
-import { useEffect, useRef, useState, type FormEvent } from 'react';
-import type { CustomerSummary, ShipmentSummary, WarehouseSummary } from '@transatlantic/shared';
+import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
+import type { CustomerSummary, ShipmentSummary, StaffPreRegistrationLookup, WarehouseSummary } from '@transatlantic/shared';
 import { OPERATIONS_ROLES, ShipmentItemType, ShipmentMode, WeightUnit } from '@transatlantic/shared';
 import { LoadingScreen } from '@/components/layout/LoadingScreen';
 import { SelectInput, TextArea, TextInput } from '@/components/forms/FormField';
 import { SearchableSelect } from '@/components/forms/SearchableSelect';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
+import { SendDropoffLinkCard } from '@/components/warehouse/SendDropoffLinkCard';
 import { ApiError } from '@/lib/api';
 import { createCustomer, listCustomers, type DuplicateCustomerErrorBody } from '@/lib/customers';
 import { humanizeEnumValue } from '@/lib/format';
+import { scanPreRegistrationForStaff } from '@/lib/pre-registrations';
 import { createQuickReceive } from '@/lib/shipments';
 import { useRequireAuth } from '@/lib/useRequireAuth';
 import { listWarehouseLocations } from '@/lib/warehouse';
+
+/** Messages for a found-but-ineligible pre-registration — the exact-match /pre-registrations/scan lookup returns any status, never just SUBMITTED, so this page decides what's loadable. DRAFT is included for completeness even though a draft has no referenceNumber yet and so can never actually match a scan. */
+const PRE_REGISTRATION_STATUS_MESSAGES: Record<string, string> = {
+  DRAFT: 'This drop-off is still a draft — the customer has not submitted it yet.',
+  CANCELLED: 'This drop-off was cancelled by the customer.',
+  CONVERTED: 'This drop-off has already been received and converted into a shipment.',
+  EXPIRED: 'This drop-off expired before it reached the warehouse.',
+};
+
+/** SearchableSelect's option shape only ever needs these fields — both CustomerSummary (from listCustomers/createCustomer) and PreRegistrationStaffCustomer (from a loaded pre-registration) satisfy it structurally. */
+type QuickReceiveCustomerOption = Pick<CustomerSummary, 'id' | 'customerNumber' | 'firstName' | 'lastName' | 'email' | 'phone'>;
 
 const CUSTOMER_SEARCH_DEBOUNCE_MS = 250;
 /** Staff must type at least this many characters before a server search fires — an empty/near-empty query would otherwise ask the API to return every tenant customer, exactly what Phase 2 removed. */
@@ -97,7 +110,7 @@ export default function QuickReceivePage() {
   // state) still can't read or mutate anything through the API.
   const { user, loading: authLoading } = useRequireAuth(OPERATIONS_ROLES);
 
-  const [customers, setCustomers] = useState<CustomerSummary[]>([]);
+  const [customers, setCustomers] = useState<QuickReceiveCustomerOption[]>([]);
   const [customerId, setCustomerId] = useState('');
   const [customerSearching, setCustomerSearching] = useState(false);
   const [warehouses, setWarehouses] = useState<WarehouseSummary[] | null>(null);
@@ -117,6 +130,16 @@ export default function QuickReceivePage() {
   const [itemDescription, setItemDescription] = useState('');
   const [weight, setWeight] = useState('');
   const [weightUnit, setWeightUnit] = useState<WeightUnit>(WeightUnit.LB);
+  const [notes, setNotes] = useState('');
+
+  // Customer Self-Service Pre-Registration, Stage 3: "Prepared Drop-Off?"
+  // lookup. `loadedPreReg` is the only thing that makes this a conversion —
+  // its `id` is sent as `preRegistrationId` on submit; everything else
+  // below is identical to normal walk-in Quick Receive.
+  const [preRegCode, setPreRegCode] = useState('');
+  const [preRegLoading, setPreRegLoading] = useState(false);
+  const [preRegError, setPreRegError] = useState<string | null>(null);
+  const [loadedPreReg, setLoadedPreReg] = useState<StaffPreRegistrationLookup | null>(null);
 
   const [showNewCustomer, setShowNewCustomer] = useState(false);
   const [newFirstName, setNewFirstName] = useState('');
@@ -178,6 +201,84 @@ export default function QuickReceivePage() {
           setCustomerSearching(false);
         });
     }, CUSTOMER_SEARCH_DEBOUNCE_MS);
+  }
+
+  /**
+   * Prefills from a loaded SUBMITTED pre-registration — never overwrites a
+   * field the customer left blank, and never blindly creates anything by
+   * itself: this only populates the same form fields below, which staff
+   * still review/correct and submit through the normal handleSubmit path.
+   */
+  function applyPreRegistration(record: StaffPreRegistrationLookup) {
+    setCustomers((prev) => (prev.some((c) => c.id === record.customer.id) ? prev : [record.customer, ...prev]));
+    setCustomerId(record.customer.id);
+    if (record.shipmentMode) setShipmentMode(record.shipmentMode);
+    if (record.destinationCountry) setDestinationCountry(record.destinationCountry);
+    if (record.destinationLocation) setDestinationLocation(record.destinationLocation);
+    setRecipient((prev) => ({
+      recipientName: record.recipientName ?? prev.recipientName,
+      recipientPhone: record.recipientPhone ?? prev.recipientPhone,
+      recipientEmail: record.recipientEmail ?? prev.recipientEmail,
+      recipientAddressLine1: record.recipientAddressLine1 ?? prev.recipientAddressLine1,
+      recipientAddressLine2: record.recipientAddressLine2 ?? prev.recipientAddressLine2,
+      recipientCity: record.recipientCity ?? prev.recipientCity,
+      recipientState: record.recipientState ?? prev.recipientState,
+      recipientCountry: record.recipientCountry ?? prev.recipientCountry,
+      recipientPostalCode: record.recipientPostalCode ?? prev.recipientPostalCode,
+    }));
+    if (record.recipientAddressLine1 || record.recipientCity || record.recipientState) {
+      setShowRecipientAddress(true);
+    }
+    if (record.packageCount) setPackageCount(Math.max(1, Math.min(50, record.packageCount)));
+    if (record.itemType) setItemType(record.itemType);
+    // Pre-registration's "description" is the customer's own package
+    // description (e.g. "Household goods, mixed boxes") — the same concept
+    // as this form's per-package `itemDescription`, not the shipment-level
+    // `description` field below.
+    if (record.description) setItemDescription(record.description);
+    if (record.notes) setNotes(record.notes);
+    setFieldErrors({});
+    setLoadedPreReg(record);
+    setPreRegCode('');
+    setPreRegError(null);
+  }
+
+  async function loadPreRegistration() {
+    const code = preRegCode.trim();
+    if (!code) return;
+    setPreRegError(null);
+    setPreRegLoading(true);
+    try {
+      const record = await scanPreRegistrationForStaff(code);
+      if (record.status !== 'SUBMITTED') {
+        setPreRegError(
+          PRE_REGISTRATION_STATUS_MESSAGES[record.status] ?? `This drop-off cannot be loaded (status: ${record.status}).`,
+        );
+        return;
+      }
+      applyPreRegistration(record);
+    } catch (err) {
+      if (err instanceof ApiError && err.statusCode === 404) {
+        setPreRegError('No prepared drop-off found for that reference.');
+      } else {
+        setPreRegError(err instanceof ApiError ? err.message : 'Failed to look up that reference.');
+      }
+    } finally {
+      setPreRegLoading(false);
+    }
+  }
+
+  /** USB/Bluetooth HID scanners "type" the payload then send Enter — same convention as ScanInput elsewhere in Warehouse. No click needed after a scan. */
+  function handlePreRegKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      loadPreRegistration();
+    }
+  }
+
+  function clearLoadedPreRegistration() {
+    setLoadedPreReg(null);
+    setPreRegError(null);
   }
 
   const selectedOriginWarehouse = warehouses?.find((warehouse) => warehouse.id === originWarehouseId) ?? null;
@@ -299,6 +400,8 @@ export default function QuickReceivePage() {
         itemDescription: itemDescription.trim() || undefined,
         weight: weight ? Number(weight) : undefined,
         weightUnit,
+        notes: notes.trim() || undefined,
+        preRegistrationId: loadedPreReg?.id,
       });
       setReceipt(shipment);
     } catch (err) {
@@ -333,11 +436,15 @@ export default function QuickReceivePage() {
     setItemDescription('');
     setWeight('');
     setWeightUnit(WeightUnit.LB);
+    setNotes('');
     setShowNewCustomer(false);
     setDuplicateMatches(null);
     setCustomerError(null);
     setFieldErrors({});
     setError(null);
+    setLoadedPreReg(null);
+    setPreRegCode('');
+    setPreRegError(null);
     setOriginWarehouseId(keepOriginWarehouseId); // static for a receiving session — re-picking it every time is the friction Receive Another exists to remove
     setFormInstanceKey((key) => key + 1); // remounts the customer field so autoFocus re-fires
   }
@@ -359,6 +466,11 @@ export default function QuickReceivePage() {
                 {receipt.customer ? `${receipt.customer.firstName} ${receipt.customer.lastName} — ` : ''}
                 Tracking <span className="font-medium text-slate-700">{receipt.trackingNumber}</span>
               </p>
+              {loadedPreReg && (
+                <p className="mt-1 text-xs text-slate-400">
+                  Converted from prepared drop-off {loadedPreReg.referenceNumber}
+                </p>
+              )}
             </div>
             <div className="flex gap-3">
               <Button onClick={handlePrintLabels}>Print Labels</Button>
@@ -380,7 +492,60 @@ export default function QuickReceivePage() {
         codes are assigned automatically, and every package is marked received at the warehouse you select below.
       </p>
 
+      <SendDropoffLinkCard />
+
       <Card className="mt-6">
+        <h2 className="text-sm font-semibold text-slate-900">Customer has a Prepared Drop-Off?</h2>
+        <p className="mt-1 text-xs text-slate-500">Scan the customer&apos;s QR code or enter their reference number.</p>
+        <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-start">
+          <div className="flex-1">
+            <label htmlFor="preRegCode" className="sr-only">
+              Scan or enter PRE reference
+            </label>
+            <input
+              id="preRegCode"
+              type="text"
+              inputMode="text"
+              autoComplete="off"
+              placeholder="Scan or enter PRE reference"
+              value={preRegCode}
+              disabled={preRegLoading}
+              onChange={(event) => {
+                setPreRegCode(event.target.value);
+                if (preRegError) setPreRegError(null);
+              }}
+              onKeyDown={handlePreRegKeyDown}
+              className="w-full rounded-lg border-2 border-primary-200 bg-white px-4 py-2.5 font-mono text-sm tracking-wide text-slate-900 placeholder:font-sans placeholder:text-slate-400 focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500/30 disabled:cursor-not-allowed disabled:bg-slate-50"
+            />
+          </div>
+          <Button type="button" variant="secondary" disabled={preRegLoading || !preRegCode.trim()} onClick={loadPreRegistration}>
+            {preRegLoading ? 'Loading…' : 'Load Drop-Off'}
+          </Button>
+        </div>
+        {preRegError && (
+          <p role="alert" className="mt-2 text-sm font-medium text-amber-700">
+            {preRegError}
+          </p>
+        )}
+        {loadedPreReg && (
+          <div className="mt-3 flex items-center justify-between gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3">
+            <p className="text-sm text-emerald-800">
+              Loaded <span className="font-mono font-semibold">{loadedPreReg.referenceNumber}</span> —{' '}
+              {loadedPreReg.customer.firstName} {loadedPreReg.customer.lastName}. Verify the details below against what
+              physically arrived.
+            </p>
+            <button
+              type="button"
+              onClick={clearLoadedPreRegistration}
+              className="shrink-0 text-sm font-medium text-emerald-700 hover:text-emerald-900"
+            >
+              Clear
+            </button>
+          </div>
+        )}
+      </Card>
+
+      <Card className="mt-4">
         <form className="flex flex-col gap-6" onSubmit={handleSubmit} noValidate>
           <div>
             <div className="flex items-end justify-between gap-3">
@@ -739,6 +904,14 @@ export default function QuickReceivePage() {
                 </SelectInput>
               </div>
             </div>
+            <TextArea
+              label="Notes for the warehouse (optional)"
+              id="notes"
+              rows={2}
+              className="mt-3"
+              value={notes}
+              onChange={(event) => setNotes(event.target.value)}
+            />
           </div>
 
           {error && (

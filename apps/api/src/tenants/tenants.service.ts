@@ -1,11 +1,20 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import type { PlatformTenantListItem, TenantSubscriptionSummary } from '@transatlantic/shared';
+import { resolveTenantPublicSiteUrl } from '../common/tenant/tenant-web-app-url.util';
+import { dropoffLinkEmail } from '../notifications/templates/shipment-customer-emails';
+import { EMAIL_PROVIDER } from '../notifications/providers/provider.types';
+import type { EmailProvider } from '../notifications/providers/provider.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateTenantDto } from './dto/create-tenant.dto';
 
 @Injectable()
 export class TenantsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly config: ConfigService,
+    @Inject(EMAIL_PROVIDER) private readonly emailProvider: EmailProvider,
+  ) {}
 
   /** PLATFORM_ADMIN only — lists every tenant on the platform. */
   findAll() {
@@ -129,6 +138,60 @@ export class TenantsService {
           }
         : null,
     };
+  }
+
+  /**
+   * Quick Receive's "Send Drop-Off Link" card: the customer-facing
+   * "Prepare Your Drop-Off" URL for this tenant. Uses
+   * resolveTenantPublicSiteUrl — NOT resolveTenantWebAppUrl (that one is
+   * for staff-invitation-style links and, for the legacy-slugged tenant,
+   * deliberately resolves to the staff hostname) — see that function's own
+   * doc comment for exactly why a customer-facing link needs a different
+   * legacy resolution. Never hardcodes talogisticssolutions.com: this
+   * generalizes to any future tenant the moment it has a real customDomain,
+   * with no further code change here.
+   */
+  async getDropoffLink(tenantId: string): Promise<{ url: string }> {
+    const tenant = await this.prisma.tenant.findUniqueOrThrow({
+      where: { id: tenantId },
+      select: { slug: true, customDomain: true },
+    });
+    const baseUrl = resolveTenantPublicSiteUrl(tenant, this.config);
+    return { url: `${baseUrl.replace(/\/$/, '')}/dropoff` };
+  }
+
+  /**
+   * Emails the same link above to a customer, branded as this tenant —
+   * same "a tenant emailing their own shipping customer" posture as
+   * NotificationsService's shipment-lifecycle emails (see
+   * shipment-customer-emails.ts's own doc comment), never
+   * resolvePlatformEmailSender/AnanseLogix branding, which is for the
+   * opposite direction (AnanseLogix-the-platform mailing a tenant about
+   * their own account).
+   */
+  async sendDropoffLinkEmail(tenantId: string, toEmail: string): Promise<void> {
+    const tenant = await this.prisma.tenant.findUniqueOrThrow({ where: { id: tenantId } });
+    const baseUrl = resolveTenantPublicSiteUrl(tenant, this.config);
+    const dropoffUrl = `${baseUrl.replace(/\/$/, '')}/dropoff`;
+
+    const email = dropoffLinkEmail({
+      tenant: {
+        name: tenant.name,
+        legalName: tenant.legalName,
+        logoUrl: tenant.logoUrl,
+        primaryColor: tenant.primaryColor,
+        secondaryColor: tenant.secondaryColor,
+        email: tenant.email,
+        phone: tenant.phone,
+        website: tenant.website,
+      },
+      dropoffUrl,
+    });
+
+    const result = await this.emailProvider.send({ to: toEmail, subject: email.subject, body: email.text, html: email.html });
+    if (!result.success) {
+      throw new BadRequestException(result.errorMessage ?? 'Failed to send the email — try Copy Link instead.');
+    }
   }
 
   /**

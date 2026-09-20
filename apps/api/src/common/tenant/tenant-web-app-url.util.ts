@@ -58,3 +58,56 @@ export function resolveTenantWebAppUrl(tenant: TenantForWebAppUrl, config: Confi
 
   return config.get<string>('ANANSELOGIX_BASE_URL', 'http://localhost:3000')!;
 }
+
+/**
+ * Removes a leading "app." from a hostname — e.g.
+ * "https://app.talogisticssolutions.com" -> "https://talogisticssolutions.com".
+ * Mirrors this codebase's own existing convention (see middleware.ts's
+ * STAFF_HOSTNAME doc comment: "app.talogisticssolutions.com" is Trans
+ * Atlantic's staff-only hostname; the bare domain is reserved for the
+ * public site + customer portal/login"). Falls back to the input unchanged
+ * if it isn't a parseable URL or has no "app." prefix — never throws.
+ */
+function stripAppSubdomain(url: string): string {
+  try {
+    const parsed = new URL(url);
+    if (parsed.hostname === 'app' || parsed.hostname.startsWith('app.')) {
+      parsed.hostname = parsed.hostname.slice('app.'.length);
+    }
+    return parsed.origin;
+  } catch {
+    return url;
+  }
+}
+
+/**
+ * Customer Self-Service Pre-Registration ("Send Drop-Off Link"): resolves
+ * where a *customer-facing* link for this tenant should point — distinct
+ * from resolveTenantWebAppUrl above, which is specifically for staff-
+ * invitation-style links and, for the one legacy-slugged tenant (Trans
+ * Atlantic today), deliberately resolves to WEB_APP_URL
+ * (app.talogisticssolutions.com — the staff hostname). A customer-facing
+ * link must never point at the staff subdomain.
+ *
+ * Same precedence and same extension point as resolveTenantWebAppUrl (a
+ * future tenant's own customDomain always wins, with zero further code
+ * change here) — the only difference is what the legacy branch resolves
+ * to: the bare public domain (WEB_APP_URL with any "app." prefix
+ * stripped), not WEB_APP_URL itself. In local dev, WEB_APP_URL has no
+ * "app." prefix (defaults to http://localhost:3000), so this is a no-op
+ * there — identical behavior to resolveTenantWebAppUrl for every
+ * environment that isn't Trans Atlantic's real production domain.
+ */
+export function resolveTenantPublicSiteUrl(tenant: TenantForWebAppUrl, config: ConfigLike): string {
+  if (tenant.customDomain) {
+    return `https://${tenant.customDomain}`;
+  }
+
+  const legacySlug = config.get<string>('LEGACY_CUSTOM_DOMAIN_TENANT_SLUG');
+  if (legacySlug && tenant.slug === legacySlug) {
+    const webAppUrl = config.get<string>('WEB_APP_URL', 'http://localhost:3000')!;
+    return stripAppSubdomain(webAppUrl);
+  }
+
+  return config.get<string>('ANANSELOGIX_BASE_URL', 'http://localhost:3000')!;
+}
