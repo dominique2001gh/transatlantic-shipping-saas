@@ -122,6 +122,18 @@ enum ShipmentItemStatus {
   CANCELLED
 }
 
+/// Customer Self-Service Pre-Registration, Stage 1 — see ShipmentPreRegistration's
+/// own doc comment. Deliberately its own enum, never reusing ShipmentStatus:
+/// a pre-registration is not a Shipment and must never be able to collide
+/// with, or be mistaken for, real shipment-status values in a query/filter.
+enum PreRegistrationStatus {
+  DRAFT
+  SUBMITTED
+  CONVERTED
+  CANCELLED
+  EXPIRED
+}
+
 enum DimensionUnit {
   IN
   CM
@@ -452,6 +464,7 @@ model Tenant {
   routes                Route[]
   shipments             Shipment[]
   shipmentItems         ShipmentItem[]
+  shipmentPreRegistrations ShipmentPreRegistration[]
   itemInspections       ItemInspection[]
   pickupDeliveryRecords PickupDeliveryRecord[]
   vehicleDetails        VehicleDetails[]
@@ -540,6 +553,15 @@ model TenantSettings {
 
   manifestNumberPrefix   String @default("MAN")
   manifestNumberSequence Int    @default(0)
+
+  /// Customer Self-Service Pre-Registration, Stage 1: a customer-facing
+  /// reference in its own namespace (e.g. "PRE-2026-000001"), deliberately
+  /// never TAL- or the tenant's own trackingNumberPrefix — a pre-registration
+  /// is not, and must never be confused with, an official shipment/item
+  /// tracking number. Same atomic-increment generation pattern as every
+  /// other counter on this model.
+  preRegistrationNumberPrefix   String @default("PRE")
+  preRegistrationNumberSequence Int    @default(0)
 
   defaultOriginCountry      String?
   defaultDestinationCountry String?
@@ -758,6 +780,7 @@ model Customer {
   payments      Payment[]
   documents     Document[]
   notifications Notification[]
+  preRegistrations ShipmentPreRegistration[]
 
   @@unique([tenantId, customerNumber])
   @@index([tenantId])
@@ -1052,6 +1075,94 @@ model ShipmentItem {
   @@index([status])
   @@index([currentWarehouseId])
   @@map("shipment_items")
+}
+
+/// Customer Self-Service Pre-Registration, Stage 1: a customer's
+/// preliminary "I'm preparing a drop-off" submission, made from the
+/// customer portal before ever physically arriving at a warehouse.
+///
+/// Deliberately NOT a Shipment and NOT a ShipmentItem, and must never
+/// become one implicitly:
+///   - Shipment.trackingNumber is a required, non-nullable, unique
+///     column — there is no way to create a Shipment row at all without
+///     immediately minting a real official tracking number. Reusing
+///     Shipment for this would force generating that official number (and,
+///     once printed, an official barcode/label) the instant a customer
+///     submits a home form, which is exactly the outcome this feature must
+///     not produce.
+///   - This table carries no relation to Container/Manifest/Invoice/
+///     Payment/TrackingEvent/ItemInspection/PickupDeliveryRecord — a
+///     pre-registration cannot appear in warehouse scan history, container
+///     loading, manifests, analytics-as-a-real-shipment, or billing, by
+///     construction (there is no code path that could join it into any of
+///     those tables).
+///   - `referenceNumber` lives in its own tenant-scoped namespace
+///     (TenantSettings.preRegistrationNumberPrefix, default "PRE") and is
+///     assigned only once, on submit — never TAL- or the tenant's own
+///     trackingNumberPrefix namespace. Nullable because a DRAFT that's
+///     never submitted never needs one (Postgres allows multiple NULLs
+///     under a unique index, so many unsubmitted DRAFTs coexist safely).
+///   - `convertedShipmentId` is the structural guard against converting the
+///     same pre-registration twice: a later stage's conversion step sets
+///     it exactly once, and its own @unique constraint makes a second
+///     Shipment ever claiming the same pre-registration a DB-level
+///     impossibility, not just an application-level check. No relation is
+///     declared to Shipment here — Stage 1 does no shipment/item creation
+///     at all, so this column is a bare, unenforced-at-the-relation-level
+///     forward reference until that later stage exists.
+///
+/// Lifecycle: DRAFT (editable) -> SUBMITTED (reference minted, staff-
+/// visible, still cancellable) -> CONVERTED (terminal, a later stage's
+/// Quick Receive integration point) or CANCELLED (terminal) or EXPIRED
+/// (terminal, a future unattended sweep for abandoned SUBMITTED rows).
+model ShipmentPreRegistration {
+  id         String                @id @default(cuid())
+  tenantId   String
+  customerId String
+  status     PreRegistrationStatus @default(DRAFT)
+
+  /// Assigned only on submit — see this model's own doc comment.
+  referenceNumber String?
+
+  shipmentMode        ShipmentMode?
+  destinationCountry  String?
+  destinationLocation String?
+  itemType            ShipmentItemType?
+  description         String?
+  packageCount        Int?
+  notes               String?
+
+  recipientName         String?
+  recipientPhone        String?
+  recipientEmail        String?
+  recipientAddressLine1 String?
+  recipientAddressLine2 String?
+  recipientCity         String?
+  recipientState        String?
+  recipientCountry      String?
+  recipientPostalCode   String?
+
+  /// Set exactly once, by a later stage's Quick Receive integration —
+  /// Stage 1 never writes this column. @unique is the DB-level duplicate-
+  /// conversion guard described in this model's own doc comment.
+  convertedShipmentId String? @unique
+
+  submittedAt DateTime?
+  convertedAt DateTime?
+  cancelledAt DateTime?
+  expiresAt   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, referenceNumber])
+  @@index([tenantId])
+  @@index([tenantId, status])
+  @@index([customerId])
+  @@map("shipment_pre_registrations")
 }
 
 /// One warehouse inspection/processing event for a single ShipmentItem

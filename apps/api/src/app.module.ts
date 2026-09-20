@@ -22,6 +22,7 @@ import { ManifestsModule } from './manifests/manifests.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { OnboardingModule } from './onboarding/onboarding.module';
 import { PlatformLeadsModule } from './platform-leads/platform-leads.module';
+import { PreRegistrationsModule } from './pre-registrations/pre-registrations.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { PublicAiAgentModule } from './public-ai-agent/public-ai-agent.module';
 import { SaasAnalyticsModule } from './saas-analytics/saas-analytics.module';
@@ -56,6 +57,7 @@ import { WebhooksModule } from './webhooks/webhooks.module';
     HealthModule,
     TrackingModule,
     CustomerPortalModule,
+    PreRegistrationsModule,
     InvoicesModule,
     WebhooksModule,
     DocumentsModule,

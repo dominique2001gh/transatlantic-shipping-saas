@@ -72,3 +72,25 @@ export async function generateManifestNumber(prisma: PrismaClient, tenantId: str
     settings.manifestNumberSequence,
   );
 }
+
+/**
+ * Customer Self-Service Pre-Registration, Stage 1: same prefix+year+sequence
+ * shape and same atomic-increment safety as every generator above, but its
+ * own dedicated TenantSettings prefix/sequence pair (default prefix "PRE")
+ * — deliberately never trackingNumberPrefix/trackingNumberSequence. A
+ * pre-registration reference (e.g. "PRE-2026-000001") must never be able to
+ * collide with, or be mistaken for, an official shipment tracking number
+ * (e.g. "TAL-2026-000001") — separate namespaces, separate counters.
+ */
+export async function generatePreRegistrationNumber(prisma: PrismaClient, tenantId: string): Promise<string> {
+  const settings = await prisma.tenantSettings.update({
+    where: { tenantId },
+    data: { preRegistrationNumberSequence: { increment: 1 } },
+    select: { preRegistrationNumberPrefix: true, preRegistrationNumberSequence: true },
+  });
+  return formatTrackingNumber(
+    settings.preRegistrationNumberPrefix,
+    new Date().getFullYear(),
+    settings.preRegistrationNumberSequence,
+  );
+}
