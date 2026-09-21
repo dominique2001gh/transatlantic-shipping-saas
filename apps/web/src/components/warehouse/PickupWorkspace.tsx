@@ -21,9 +21,14 @@ type ActionMode = 'PICKUP' | 'DISPATCH' | 'DELIVER' | 'RETURN' | null;
  *     Customer Pickup or Dispatch for Delivery. (Simplified Operational
  *     Scanning Workflow, Phase 2: the destination-warehouse receiving
  *     scan is optional — an item that arrived but was never individually
- *     re-scanned at destination is just as eligible here as one that was;
- *     the backend's own currentWarehouseId check still guarantees the
- *     handoff only happens from the warehouse actually holding it.)
+ *     re-scanned at destination is just as eligible here as one that was.
+ *     The backend still hard-guarantees the handoff only happens from the
+ *     correct warehouse either way, but *how* differs: a re-scanned item
+ *     is checked against its real currentWarehouseId, while a skipped one
+ *     is checked against its shipment/tenant's declared destination
+ *     warehouse — see WarehouseService.resolveEligibleDestinationWarehouseId.
+ *     This component's "Currently at" vs "Last scanned at" label below
+ *     reflects that same distinction, not just cosmetic wording.)
  *   - OUT_FOR_DELIVERY -> choose Confirm Delivered or Record Failed
  *     Attempt / Return to Warehouse.
  *   - anything else (PICKED_UP, DELIVERED, EXCEPTION, not yet received,
@@ -354,19 +359,39 @@ export function PickupWorkspace({
               <p className="mt-1 text-sm text-slate-600">
                 Destination: {resolvedItem.shipment.destinationLocation ?? resolvedItem.shipment.destinationCountry}
               </p>
-              <p className="mt-1 text-sm text-slate-600">
-                {resolvedItem.currentWarehouse ? 'Currently at: ' : 'Current custody: '}
-                <span className="font-medium text-slate-900">
-                  {resolvedItem.currentWarehouse?.name ??
-                    (resolvedItem.status === 'PICKED_UP'
-                      ? 'Released to recipient'
-                      : resolvedItem.status === 'DELIVERED'
-                        ? 'Delivered to recipient'
-                        : resolvedItem.status === 'OUT_FOR_DELIVERY'
-                          ? 'Out for delivery'
-                          : 'Unknown')}
-                </span>
-              </p>
+              {/*
+                Phase 2 (skipped destination-receive): an ARRIVED_DESTINATION
+                item's currentWarehouse still reflects its *last physical
+                scan* (almost always origin — see WarehouseService's
+                resolveEligibleDestinationWarehouseId doc comment), not
+                where it currently is or where it's eligible for handoff.
+                There is no trustworthy "current location" to display for
+                this case, so this line is omitted entirely rather than
+                showing a stale, misleading warehouse name — the
+                "Destination" line above and the note below already say
+                everything truthfully known about where this item stands.
+              */}
+              {resolvedItem.status !== 'ARRIVED_DESTINATION' && (
+                <p className="mt-1 text-sm text-slate-600">
+                  {resolvedItem.currentWarehouse ? 'Currently at: ' : 'Current custody: '}
+                  <span className="font-medium text-slate-900">
+                    {resolvedItem.currentWarehouse?.name ??
+                      (resolvedItem.status === 'PICKED_UP'
+                        ? 'Released to recipient'
+                        : resolvedItem.status === 'DELIVERED'
+                          ? 'Delivered to recipient'
+                          : resolvedItem.status === 'OUT_FOR_DELIVERY'
+                            ? 'Out for delivery'
+                            : 'Unknown')}
+                  </span>
+                </p>
+              )}
+              {resolvedItem.status === 'ARRIVED_DESTINATION' && (
+                <p className="mt-1 text-sm text-slate-600">
+                  Destination-receive was skipped for this item — its container/manifest has arrived, so it is
+                  eligible for Pickup or Dispatch at the appropriate destination warehouse.
+                </p>
+              )}
             </div>
             <StatusBadge status={resolvedItem.status} />
           </div>
