@@ -121,12 +121,12 @@ const ITEM_AT_DESTINATION_OR_LATER: DbShipmentItemStatus[] = [
  * also accept an item straight off ARRIVED_DESTINATION (manifest/container
  * arrival) so final pickup/delivery is never blocked by a skipped optional
  * step. Every other status is still rejected exactly as before — this is
- * an explicit allow-list, not a loosened inequality. currentWarehouseId's
- * own hard equality check (unchanged, see pickupItem/dispatchItem) is what
- * keeps this safe: ManifestsService.arrive now sets currentWarehouseId to
- * the shipment's known destination warehouse the moment cargo arrives, so
- * an ARRIVED_DESTINATION item only passes this combined guard when it is
- * actually, physically at the warehouse staff selected.
+ * an explicit allow-list, not a loosened inequality.
+ *
+ * Location safety for the two cases is deliberately asymmetric — see
+ * resolveEligibleDestinationWarehouseId's own doc comment for why an
+ * ARRIVED_DESTINATION item cannot reuse currentWarehouseId the same way
+ * RECEIVED_DESTINATION_WAREHOUSE does.
  */
 const PICKUP_DISPATCH_ELIGIBLE_STATUSES: DbShipmentItemStatus[] = [
   DbShipmentItemStatus.RECEIVED_DESTINATION_WAREHOUSE,
@@ -633,6 +633,61 @@ export class WarehouseService {
   }
 
   /**
+   * Resolves which warehouse an ARRIVED_DESTINATION item (transport unit
+   * landed, but never individually destination-receive-scanned) may be
+   * picked up or dispatched from — WITHOUT trusting currentWarehouseId.
+   *
+   * Why not currentWarehouseId: it is a live "last physical scan" pointer,
+   * updated only by an actual receiving-type event (origin receive or
+   * destination-receive — see ShipmentsService.createTrackingEvent's
+   * isReceivingEvent branch). A container/manifest arrival is not a
+   * per-item scan, so an item that skipped destination-receive still has
+   * currentWarehouseId pointing at wherever it was last physically
+   * scanned — its origin warehouse. Trusting that value here would either
+   * wrongly block a legitimate skip-the-scan pickup (comparing against a
+   * stale origin id) or, worse, wrongly allow one from an arbitrary
+   * warehouse if it were ever mutated to "fix" this. Instead, eligibility
+   * is computed fresh, every time, from data that actually describes
+   * *intended* destination, in priority order:
+   *   1. The shipment's own declared destinationWarehouseId, when staff
+   *      set one (same source destinationReceiveItem's soft warning and
+   *      ManifestsService.arrive's currentWarehouseId write already use).
+   *   2. Failing that, the tenant's own Warehouse.isDestinationWarehouse
+   *      flag (set once at onboarding — see OnboardingService) — but only
+   *      when it identifies exactly one warehouse. Two or more flagged
+   *      destination warehouses is a genuine ambiguity this must not
+   *      guess through; zero is "not configured." Either way this
+   *      resolves to null, and the caller keeps rejecting the pickup/
+   *      dispatch (fail closed, matching the existing "never guess a
+   *      location" posture already used elsewhere in this service).
+   *
+   * This never writes anything — it is a pure read used only to decide
+   * whether dto.warehouseId is the right place to hand cargo over. It
+   * deliberately does NOT fabricate a RECEIVED_DESTINATION_WAREHOUSE
+   * status, TrackingEvent, or ItemInspection row: an item handled this
+   * way keeps showing, forever, that it was never individually
+   * destination-received — only that its container/manifest arrived and
+   * it was later picked up/dispatched from the resolved warehouse. The
+   * RECEIVED_DESTINATION_WAREHOUSE case (currentWarehouseId IS trustworthy,
+   * having been set by a real scan) never calls this — see pickupItem/
+   * dispatchItem, which still do a hard exact currentWarehouseId compare
+   * for that case, completely unchanged from before Phase 2.
+   */
+  private async resolveEligibleDestinationWarehouseId(
+    tenantId: string,
+    shipmentDestinationWarehouseId: string | null,
+  ): Promise<string | null> {
+    if (shipmentDestinationWarehouseId) {
+      return shipmentDestinationWarehouseId;
+    }
+    const flaggedDestinationWarehouses = await this.prisma.warehouse.findMany({
+      where: { tenantId, isDestinationWarehouse: true, isActive: true },
+      select: { id: true },
+    });
+    return flaggedDestinationWarehouses.length === 1 ? flaggedDestinationWarehouses[0].id : null;
+  }
+
+  /**
    * Customer Pickup milestone. Records a customer taking physical
    * possession of an item that has already been verified at the
    * destination warehouse (RECEIVED_DESTINATION_WAREHOUSE) — this method
@@ -641,27 +696,34 @@ export class WarehouseService {
    * left the building, and closes out this item's handoff.
    *
    * Eligibility and safety, in order:
-   *   - item.status must be RECEIVED_DESTINATION_WAREHOUSE. Anything else
-   *     (already PICKED_UP/DELIVERED, still ARRIVED_DESTINATION and never
-   *     received, EXCEPTION, etc.) is a hard reject with a specific
-   *     message — this is also what makes a duplicate pickup, a stale
-   *     double-submit, or a pickup attempted before the item ever reached
-   *     the destination warehouse all safe: whichever request the DB
-   *     commits first flips the status, and every subsequent one re-reads
-   *     the now-changed status and is rejected here, the same idempotent
-   *     read-then-reject pattern destinationReceiveItem already uses for
-   *     "already received."
-   *   - item.currentWarehouseId must equal dto.warehouseId exactly — a
-   *     HARD reject, unlike destinationReceiveItem's soft
-   *     destinationWarning. Handing cargo to someone at a warehouse that
-   *     isn't physically holding it is not something to merely flag.
+   *   - item.status must be RECEIVED_DESTINATION_WAREHOUSE or
+   *     ARRIVED_DESTINATION (Phase 2: destination-receive is optional).
+   *     Anything else (already PICKED_UP/DELIVERED, still in transit,
+   *     EXCEPTION, etc.) is a hard reject with a specific message — this
+   *     is also what makes a duplicate pickup, a stale double-submit, or
+   *     a pickup attempted before the item ever reached the destination
+   *     all safe: whichever request the DB commits first flips the
+   *     status, and every subsequent one re-reads the now-changed status
+   *     and is rejected here, the same idempotent read-then-reject
+   *     pattern destinationReceiveItem already uses for "already
+   *     received."
+   *   - The location check is a HARD reject either way, unlike
+   *     destinationReceiveItem's soft destinationWarning — handing cargo
+   *     to someone at a warehouse that isn't physically/eligibly holding
+   *     it is not something to merely flag. Which check runs depends on
+   *     how the item got here: a physically destination-receive-scanned
+   *     item (RECEIVED_DESTINATION_WAREHOUSE) must match
+   *     item.currentWarehouseId exactly, the strongest possible fact. An
+   *     item that skipped that scan (still ARRIVED_DESTINATION) has no
+   *     trustworthy currentWarehouseId to check — see
+   *     resolveEligibleDestinationWarehouseId's own doc comment.
    *   - tenantId scoping on every query makes cross-tenant access
    *     structurally impossible, same as every other method here.
    */
   async pickupItem(tenantId: string, actorUserId: string, itemId: string, dto: PickupItemDto) {
     const item = await this.prisma.shipmentItem.findFirst({
       where: { id: itemId, tenantId },
-      include: { shipment: { select: { id: true, status: true } } },
+      include: { shipment: { select: { id: true, status: true, destinationWarehouseId: true } } },
     });
     if (!item) {
       throw new NotFoundException('Item not found');
@@ -695,10 +757,32 @@ export class WarehouseService {
       throw new NotFoundException('Warehouse not found');
     }
 
-    if (item.currentWarehouseId !== dto.warehouseId) {
-      throw new ConflictException(
-        "This item is not currently at the selected warehouse — pickup must happen from the warehouse actually holding it.",
+    if (item.status === DbShipmentItemStatus.RECEIVED_DESTINATION_WAREHOUSE) {
+      if (item.currentWarehouseId !== dto.warehouseId) {
+        throw new ConflictException(
+          "This item is not currently at the selected warehouse — pickup must happen from the warehouse actually holding it.",
+        );
+      }
+    } else {
+      // ARRIVED_DESTINATION, destination-receive skipped — see
+      // resolveEligibleDestinationWarehouseId for why currentWarehouseId
+      // (still pointing at this item's last physical scan, i.e. origin)
+      // is not the right thing to compare against here.
+      const eligibleWarehouseId = await this.resolveEligibleDestinationWarehouseId(
+        tenantId,
+        item.shipment.destinationWarehouseId,
       );
+      if (!eligibleWarehouseId) {
+        throw new ConflictException(
+          "This item's destination warehouse could not be determined automatically. " +
+            'Complete Destination Receive for this item, or set a destination warehouse for this shipment or tenant, before pickup.',
+        );
+      }
+      if (eligibleWarehouseId !== dto.warehouseId) {
+        throw new ConflictException(
+          'This item arrived at a different destination than the warehouse selected here — pickup must happen from the warehouse actually eligible to hold it.',
+        );
+      }
     }
 
     const event = await this.shipmentsService.createTrackingEvent(
@@ -768,9 +852,11 @@ export class WarehouseService {
 
   /**
    * Delivery/Driver Dispatch milestone. Hands an item off to a driver or
-   * courier — RECEIVED_DESTINATION_WAREHOUSE -> OUT_FOR_DELIVERY. Same
-   * eligibility/safety shape as pickupItem (status guard doubles as
-   * duplicate/stale-submit protection, hard currentWarehouseId match,
+   * courier — RECEIVED_DESTINATION_WAREHOUSE (or, Phase 2, ARRIVED_DESTINATION
+   * with destination-receive skipped) -> OUT_FOR_DELIVERY. Same eligibility/
+   * safety shape as pickupItem (status guard doubles as duplicate/stale-
+   * submit protection, the same asymmetric hard location check — see
+   * pickupItem's own doc comment and resolveEligibleDestinationWarehouseId —
    * tenant scoping throughout), plus one extra rule: at least one of
    * driverUserId or courierName must identify who is taking the item.
    * Deliberately flexible rather than a required single field or a
@@ -788,7 +874,7 @@ export class WarehouseService {
 
     const item = await this.prisma.shipmentItem.findFirst({
       where: { id: itemId, tenantId },
-      include: { shipment: { select: { id: true, status: true } } },
+      include: { shipment: { select: { id: true, status: true, destinationWarehouseId: true } } },
     });
     if (!item) {
       throw new NotFoundException('Item not found');
@@ -823,10 +909,30 @@ export class WarehouseService {
       throw new NotFoundException('Warehouse not found');
     }
 
-    if (item.currentWarehouseId !== dto.warehouseId) {
-      throw new ConflictException(
-        "This item is not currently at the selected warehouse — dispatch must happen from the warehouse actually holding it.",
+    if (item.status === DbShipmentItemStatus.RECEIVED_DESTINATION_WAREHOUSE) {
+      if (item.currentWarehouseId !== dto.warehouseId) {
+        throw new ConflictException(
+          "This item is not currently at the selected warehouse — dispatch must happen from the warehouse actually holding it.",
+        );
+      }
+    } else {
+      // ARRIVED_DESTINATION, destination-receive skipped — see
+      // resolveEligibleDestinationWarehouseId (defined above pickupItem).
+      const eligibleWarehouseId = await this.resolveEligibleDestinationWarehouseId(
+        tenantId,
+        item.shipment.destinationWarehouseId,
       );
+      if (!eligibleWarehouseId) {
+        throw new ConflictException(
+          "This item's destination warehouse could not be determined automatically. " +
+            'Complete Destination Receive for this item, or set a destination warehouse for this shipment or tenant, before dispatch.',
+        );
+      }
+      if (eligibleWarehouseId !== dto.warehouseId) {
+        throw new ConflictException(
+          'This item arrived at a different destination than the warehouse selected here — dispatch must happen from the warehouse actually eligible to hold it.',
+        );
+      }
     }
 
     if (dto.driverUserId) {
