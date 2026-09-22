@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Param, Patch, Post, Res } from '@nestjs/common';
 import { EntitlementFeature } from '@prisma/client';
-import type { AuthenticatedUser } from '@transatlantic/shared';
+import type { AuthenticatedUser, EnabledPaymentMethod } from '@transatlantic/shared';
 import { UserRole } from '@transatlantic/shared';
 import type { Response } from 'express';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -8,6 +8,7 @@ import { RequireEntitlement } from '../common/decorators/require-entitlement.dec
 import { Roles } from '../common/decorators/roles.decorator';
 import { requireCustomerId, requireTenantId } from '../common/tenant/tenant.util';
 import { sendDownload } from '../documents/documents.controller';
+import { TenantPaymentMethodsService } from '../tenant-payments/tenant-payment-methods.service';
 import { CustomerPortalService } from './customer-portal.service';
 import { UpdateNotificationPreferencesDto } from './dto/update-notification-preferences.dto';
 import { UpdatePortalProfileDto } from './dto/update-portal-profile.dto';
@@ -28,7 +29,10 @@ import { UpdatePortalProfileDto } from './dto/update-portal-profile.dto';
 @Roles(UserRole.CUSTOMER)
 @RequireEntitlement(EntitlementFeature.CUSTOMER_PORTAL)
 export class CustomerPortalController {
-  constructor(private readonly customerPortalService: CustomerPortalService) {}
+  constructor(
+    private readonly customerPortalService: CustomerPortalService,
+    private readonly tenantPaymentMethodsService: TenantPaymentMethodsService,
+  ) {}
 
   @Get('me')
   me(@CurrentUser() user: AuthenticatedUser) {
@@ -109,6 +113,25 @@ export class CustomerPortalController {
       requireCustomerId(user.customerId),
       id,
     );
+  }
+
+  /**
+   * Tenant Payment Configuration Phase E: the tenant's own manual payment
+   * methods + customer-facing instructions — see
+   * TenantPaymentMethodsService.getEnabledForPortal's own doc comment.
+   * tenantId comes from the verified JWT exactly like every other route
+   * here, so this can never return another tenant's configuration; it is
+   * a pure, side-effect-free read — nothing on this route, or anywhere
+   * this response is used on the frontend, can ever change an invoice's
+   * status. `requireCustomerId` is called (unused) purely to keep this
+   * route's shape consistent with every other CUSTOMER-only route here —
+   * the actual data returned is tenant-wide configuration, not anything
+   * customer-specific.
+   */
+  @Get('payment-methods')
+  paymentMethods(@CurrentUser() user: AuthenticatedUser): Promise<EnabledPaymentMethod[]> {
+    requireCustomerId(user.customerId);
+    return this.tenantPaymentMethodsService.getEnabledForPortal(requireTenantId(user.tenantId));
   }
 
   /** Stage 3G: only ever the caller's own customer-visible documents — see DocumentsService.findAllForCustomer/findByIdForCustomer for the visibility + ownership rules. */

@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useParams, useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import type { PortalInvoiceDetail } from '@transatlantic/shared';
+import type { EnabledPaymentMethod, PortalInvoiceDetail } from '@transatlantic/shared';
 import { PAYABLE_INVOICE_STATUSES, PaymentSource, PaymentStatus } from '@transatlantic/shared';
 import { StatusBadge } from '@/components/dashboard/StatusBadge';
 import { Button } from '@/components/ui/Button';
@@ -11,6 +11,7 @@ import { Card } from '@/components/ui/Card';
 import { ApiError } from '@/lib/api';
 import { formatCurrency, formatDate, formatDateTime, humanizeEnumValue } from '@/lib/format';
 import { createPortalInvoiceCheckoutSession, getPortalInvoiceDetail } from '@/lib/portal-invoices';
+import { getPortalPaymentMethods } from '@/lib/portal-payment-methods';
 
 function Detail({ label, value }: { label: string; value: string }) {
   return (
@@ -54,6 +55,7 @@ export default function PortalInvoiceDetailPage() {
   const [error, setError] = useState(false);
   const [payingNow, setPayingNow] = useState(false);
   const [payError, setPayError] = useState<string | null>(null);
+  const [manualMethods, setManualMethods] = useState<EnabledPaymentMethod[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -96,6 +98,24 @@ export default function PortalInvoiceDetailPage() {
       cancelled = true;
     };
   }, [invoiceId, paymentResult]);
+
+  // Tenant Payment Configuration Phase E: tenant-wide config, not
+  // invoice-specific — fetched once, independent of invoiceId/paymentResult.
+  // Silently shows nothing manual on failure (canPayOnline/Pay Now are
+  // completely unaffected either way).
+  useEffect(() => {
+    let cancelled = false;
+    getPortalPaymentMethods()
+      .then((data) => {
+        if (!cancelled) setManualMethods(data);
+      })
+      .catch(() => {
+        // Leave manualMethods empty — Pay Now still works independently.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   async function handlePayNow() {
     setPayingNow(true);
@@ -215,6 +235,26 @@ export default function PortalInvoiceDetailPage() {
               </div>
             </div>
           </Card>
+
+          {canPayOnline && manualMethods.length > 0 && (
+            <section>
+              <h2 className="text-lg font-semibold text-slate-900">Other ways to pay</h2>
+              <Card className="mt-3">
+                <ul className="flex flex-col gap-3 text-sm">
+                  {manualMethods.map((item) => (
+                    <li key={item.method}>
+                      <span className="font-medium text-slate-900">{humanizeEnumValue(item.method)}</span>
+                      {item.instructions && <span className="text-slate-600">: {item.instructions}</span>}
+                    </li>
+                  ))}
+                </ul>
+                <p className="mt-4 text-xs text-slate-400">
+                  Paid this way? Let us know — a payment made outside Pay Now above is only reflected here once
+                  we&apos;ve confirmed it on our end.
+                </p>
+              </Card>
+            </section>
+          )}
 
           <section>
             <h2 className="text-lg font-semibold text-slate-900">Line Items</h2>

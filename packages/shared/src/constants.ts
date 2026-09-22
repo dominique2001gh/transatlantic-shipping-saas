@@ -1,4 +1,4 @@
-import { InvoiceStatus, UserRole, STAFF_ROLES } from './enums';
+import { InvoiceStatus, PaymentMethod, UserRole, STAFF_ROLES } from './enums';
 
 /**
  * Fallback prefixes used only when a tenant has not configured its own
@@ -98,6 +98,49 @@ export const PAYABLE_INVOICE_STATUSES: InvoiceStatus[] = [
   InvoiceStatus.SENT,
   InvoiceStatus.PARTIALLY_PAID,
   InvoiceStatus.OVERDUE,
+];
+
+/**
+ * Tenant Payment Configuration Phase C: every PaymentMethod a tenant may
+ * enable/disable and attach customer-facing instructions to via
+ * TenantPaymentMethodConfig — deliberately excludes CARD, which is never
+ * tenant-toggled here: online card payments are governed entirely by
+ * whether the invoice itself is payable (PAYABLE_INVOICE_STATUSES) and,
+ * once connected, TenantPaymentSettings/Stripe Connect — see
+ * TenantPaymentMethodsService's own doc comment for why mixing that
+ * concern into this table was deliberately avoided. Single source of
+ * truth for the backend's write-validation (rejects CARD or any other
+ * value) and the frontend Settings → Payments form's rendered rows.
+ */
+export const MANUAL_PAYMENT_METHODS: PaymentMethod[] = [
+  PaymentMethod.CASH,
+  PaymentMethod.BANK_TRANSFER,
+  PaymentMethod.MOBILE_MONEY,
+  PaymentMethod.CHECK,
+  PaymentMethod.OTHER,
+  PaymentMethod.CASH_APP,
+  PaymentMethod.ZELLE,
+];
+
+/**
+ * Tenant Payment Configuration Phase C: the exact 5 methods the Record
+ * Payment dropdown has always hard-coded (see the frontend's own prior
+ * MANUAL_PAYMENT_METHODS constant, now superseded by a tenant-configured
+ * fetch) — used server-side by TenantPaymentMethodsService.getEnabledForStaff
+ * as the fallback when a tenant has zero TenantPaymentMethodConfig rows
+ * (every tenant before this feature, and every tenant who never opens
+ * Settings → Payments afterward), so existing behavior is preserved byte
+ * -for-byte until a tenant explicitly configures something. Cash App and
+ * Zelle are deliberately NOT in this fallback set — they are new,
+ * opt-in-only methods, never silently enabled for a tenant who never
+ * asked for them.
+ */
+export const LEGACY_MANUAL_PAYMENT_METHODS: PaymentMethod[] = [
+  PaymentMethod.CASH,
+  PaymentMethod.BANK_TRANSFER,
+  PaymentMethod.MOBILE_MONEY,
+  PaymentMethod.CHECK,
+  PaymentMethod.OTHER,
 ];
 
 /**

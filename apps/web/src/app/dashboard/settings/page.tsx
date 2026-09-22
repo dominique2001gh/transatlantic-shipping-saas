@@ -2,7 +2,7 @@
 
 import { useEffect, useState, type FormEvent } from 'react';
 import { TextArea, TextInput } from '@/components/forms/FormField';
-import { Button } from '@/components/ui/Button';
+import { Button, LinkButton } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { PasswordSection } from '@/components/account/PasswordSection';
 import { ApiError } from '@/lib/api';
@@ -89,6 +89,19 @@ export default function SettingsPage() {
       </div>
 
       <PasswordSection />
+
+      <section>
+        <h2 className="text-lg font-semibold text-slate-900">Payments</h2>
+        <p className="mt-1 text-sm text-slate-500">Connect Stripe and configure how customers pay their invoices.</p>
+        <Card className="mt-3 max-w-2xl">
+          <div className="flex items-center justify-between gap-4">
+            <p className="text-sm text-slate-600">Card payments (Stripe), Cash App, Zelle, cash, check, and bank transfer.</p>
+            <LinkButton href="/dashboard/settings/payments" variant="secondary">
+              Manage
+            </LinkButton>
+          </div>
+        </Card>
+      </section>
 
       <section>
         <h2 className="text-lg font-semibold text-slate-900">Website content</h2>

@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
 import { NotificationsModule } from '../notifications/notifications.module';
-import { StripeModule } from '../stripe/stripe.module';
+import { TenantPaymentsModule } from '../tenant-payments/tenant-payments.module';
 import { PaymentsController } from './payments.controller';
 import { PaymentsService } from './payments.service';
 
@@ -11,13 +11,15 @@ import { PaymentsService } from './payments.service';
  * ShipmentsController's :id/items and :id/tracking-events) — that's why
  * InvoicesModule still imports this module for PaymentsService.
  * PaymentsController here only adds the Stage 3D tenant-wide GET
- * /payments list, which doesn't belong under /invoices. StripeModule
- * (Stage 3F) is imported here, not re-exported, since PaymentsService is
- * the only consumer of StripeService — WebhooksModule imports StripeModule
- * directly for its own, separate need (verifying webhook signatures).
+ * /payments list, which doesn't belong under /invoices. TenantPaymentsModule
+ * (platform-billing vs. tenant-customer-payments separation — see
+ * TenantPaymentsStripeService's own doc comment) is imported here, not
+ * re-exported, since PaymentsService is the only consumer of it —
+ * WebhooksModule imports TenantPaymentsModule directly for its own,
+ * separate need (verifying connected-account webhook signatures).
  */
 @Module({
-  imports: [StripeModule, NotificationsModule],
+  imports: [TenantPaymentsModule, NotificationsModule],
   controllers: [PaymentsController],
   providers: [PaymentsService],
   exports: [PaymentsService],

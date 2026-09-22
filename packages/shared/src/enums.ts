@@ -254,6 +254,10 @@ export enum PaymentMethod {
   MOBILE_MONEY = 'MOBILE_MONEY',
   CHECK = 'CHECK',
   OTHER = 'OTHER',
+  /** Tenant Payment Configuration Phase C: manual method, tenant configures its own $Cashtag as free-text instructions — see MANUAL_PAYMENT_METHODS/TenantPaymentMethodConfig. */
+  CASH_APP = 'CASH_APP',
+  /** Tenant Payment Configuration Phase C: manual method, tenant configures its own Zelle identifier/instructions as free text — see MANUAL_PAYMENT_METHODS/TenantPaymentMethodConfig. */
+  ZELLE = 'ZELLE',
 }
 
 export enum PaymentStatus {

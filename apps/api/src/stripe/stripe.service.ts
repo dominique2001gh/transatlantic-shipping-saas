@@ -6,10 +6,18 @@ import Stripe from 'stripe';
  * Stage 3F: the only place the `stripe` SDK/API surface is touched
  * directly — every other service talks to this wrapper, never to Stripe
  * itself, the same delegation principle TrackingService/InvoicesService
- * already establish for their own single-owner concerns. `STRIPE_SECRET_KEY`
- * is read once at construction via `getOrThrow` — a missing key fails
- * fast at boot (module init), not on the first customer's checkout
- * attempt.
+ * already establish for their own single-owner concerns. This client is
+ * the platform's own Stripe account — TenantPaymentsStripeService reuses
+ * it (never a second client) for a tenant's own Connect account, adding
+ * `{ stripeAccount: <id> }` as a per-call option; see that service's own
+ * doc comment for the full platform-billing-vs-tenant-payments split.
+ * `PLATFORM_STRIPE_SECRET_KEY` is read once at construction via
+ * `getOrThrow` — a missing key fails fast at boot (module init), not on
+ * the first customer's checkout attempt. Named with the `PLATFORM_`
+ * prefix (not bare `STRIPE_SECRET_KEY`) specifically so it can never be
+ * confused with a tenant's own Connect credentials — there is no such
+ * thing as a tenant-specific secret key to configure here even once
+ * tenants connect their own accounts (see TenantPaymentsStripeService).
  */
 @Injectable()
 export class StripeService {
@@ -17,7 +25,7 @@ export class StripeService {
   readonly client: Stripe;
 
   constructor(private readonly config: ConfigService) {
-    const secretKey = this.config.getOrThrow<string>('STRIPE_SECRET_KEY');
+    const secretKey = this.config.getOrThrow<string>('PLATFORM_STRIPE_SECRET_KEY');
     this.client = new Stripe(secretKey);
   }
 
@@ -171,16 +179,22 @@ export class StripeService {
 
   /**
    * Verifies a webhook payload's signature against
-   * `STRIPE_WEBHOOK_SECRET` and returns the parsed event. This is
+   * `PLATFORM_STRIPE_WEBHOOK_SECRET` and returns the parsed event. This is
    * the entire security boundary for the unauthenticated /webhooks/stripe
    * route — throws on any mismatch (wrong secret, tampered payload,
    * expired timestamp), which the controller turns into a 400. Must be
    * called with the *raw* request body bytes (see main.ts's
    * `rawBody: true`); a JSON-parsed and reserialized body cannot reproduce
    * the signature Stripe computed over what it actually sent.
+   *
+   * Deliberately a distinct env var from `STRIPE_CONNECT_WEBHOOK_SECRET`
+   * (TenantPaymentsStripeService.constructConnectWebhookEvent) — Stripe
+   * issues one signing secret per registered endpoint, and this app must
+   * never accept a tenant-Connect-account event's signature here, or vice
+   * versa.
    */
   constructWebhookEvent(rawBody: Buffer, signature: string): Stripe.Event {
-    const webhookSecret = this.config.getOrThrow<string>('STRIPE_WEBHOOK_SECRET');
+    const webhookSecret = this.config.getOrThrow<string>('PLATFORM_STRIPE_WEBHOOK_SECRET');
     return this.client.webhooks.constructEvent(rawBody, signature, webhookSecret);
   }
 }

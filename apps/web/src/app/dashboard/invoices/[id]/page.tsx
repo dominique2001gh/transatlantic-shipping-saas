@@ -13,8 +13,20 @@ import { ApiError } from '@/lib/api';
 import { formatCurrency, formatDate, formatDateTime, humanizeEnumValue } from '@/lib/format';
 import { getInvoice, issueInvoice } from '@/lib/invoices';
 import { listPaymentsForInvoice, recordPayment } from '@/lib/payments';
+import { getEnabledPaymentMethodsForStaff } from '@/lib/tenant-payments';
 
-/** Excludes CARD on purpose — reserved for a future online-payment flow, not manual staff recording (see Stage 3B/3D scope). */
+/**
+ * Excludes CARD on purpose — reserved for the online-payment flow, not
+ * manual staff recording (see Stage 3B/3D scope). Tenant Payment
+ * Configuration Phase D: this is now only the fallback shown before the
+ * tenant-configured list loads (or if that fetch fails) — see
+ * RecordPaymentForm's own effect, which replaces it with GET
+ * /tenant-payments/methods/enabled the moment that resolves. The backend
+ * applies the exact same 5-method fallback when a tenant has never
+ * configured anything (see TenantPaymentMethodsService.getEnabledForStaff's
+ * own doc comment), so this constant intentionally still matches that list
+ * byte-for-byte.
+ */
 const MANUAL_PAYMENT_METHODS = [
   PaymentMethod.CASH,
   PaymentMethod.BANK_TRANSFER,
@@ -229,12 +241,44 @@ export default function InvoiceDetailPage() {
 function RecordPaymentForm({ invoice, onRecorded }: { invoice: InvoiceDetail; onRecorded: () => Promise<void> }) {
   const today = new Date().toISOString().slice(0, 10);
   const [amount, setAmount] = useState('');
+  const [availableMethods, setAvailableMethods] = useState<PaymentMethod[]>(MANUAL_PAYMENT_METHODS);
   const [method, setMethod] = useState<PaymentMethod>(PaymentMethod.CASH);
   const [paidAt, setPaidAt] = useState(today);
   const [referenceNumber, setReferenceNumber] = useState('');
   const [notes, setNotes] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  // Tenant Payment Configuration Phase D: replaces the hard-coded default
+  // above with this tenant's own enabled methods (Cash App/Zelle included,
+  // if configured) the moment it resolves. Silently keeps the hard-coded
+  // fallback on any failure — a Record Payment form that can't load
+  // tenant-specific config must never become unusable, since staff still
+  // need to record CASH/CHECK/etc. payments either way.
+  useEffect(() => {
+    let cancelled = false;
+    getEnabledPaymentMethodsForStaff()
+      .then((data) => {
+        if (cancelled || data.length === 0) return;
+        setAvailableMethods(data.map((item) => item.method));
+      })
+      .catch(() => {
+        // Fallback list already set; nothing further to do.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Keeps the selected method valid if availableMethods changes out from
+  // under it (e.g. the fetch above resolves after the user already opened
+  // the dropdown) — never leaves `method` pointing at something no longer
+  // offered.
+  useEffect(() => {
+    if (!availableMethods.includes(method)) {
+      setMethod(availableMethods[0] ?? PaymentMethod.CASH);
+    }
+  }, [availableMethods, method]);
 
   const balanceDue = Number(invoice.balanceDue);
 
@@ -298,7 +342,7 @@ function RecordPaymentForm({ invoice, onRecorded }: { invoice: InvoiceDetail; on
           value={method}
           onChange={(event) => setMethod(event.target.value as PaymentMethod)}
         >
-          {MANUAL_PAYMENT_METHODS.map((value) => (
+          {availableMethods.map((value) => (
             <option key={value} value={value}>
               {humanizeEnumValue(value)}
             </option>

@@ -1746,3 +1746,63 @@ export interface StaffPreRegistrationLookup extends PreRegistrationFormFields {
   updatedAt: string;
   customer: PreRegistrationStaffCustomer;
 }
+
+// ==========================================================================
+// TENANT PAYMENT CONFIGURATION: STRIPE CONNECT STATUS + MANUAL METHODS
+// ==========================================================================
+
+/**
+ * GET /tenant-payments/connect/status (OWNER only). Pure DB read, never a
+ * live Stripe API call — see TenantPaymentsStripeService.getConnectionStatus's
+ * own doc comment. `connected` = a Stripe account id is on file at all;
+ * `isActive` = the account has actually passed Stripe's own
+ * charges_enabled + payouts_enabled readiness check (synced via the
+ * account.updated webhook) — a tenant can be `connected: true, isActive:
+ * false` mid-onboarding or if Stripe later restricts the account.
+ */
+export interface TenantStripeConnectStatus {
+  connected: boolean;
+  isActive: boolean;
+}
+
+/**
+ * One row of a tenant's manual-payment-method configuration — GET/PUT
+ * /tenant-payments/methods (OWNER only). `instructions` is free text the
+ * tenant authors themselves (e.g. a Cash App $Cashtag or Zelle identifier)
+ * — never validated/parsed, never treated as a credential. A method with
+ * no TenantPaymentMethodConfig row yet is synthesized by the API with
+ * `enabled` defaulting to whatever the pre-Phase-C hard-coded behavior
+ * already was (true for CASH/BANK_TRANSFER/MOBILE_MONEY/CHECK/OTHER,
+ * false for the brand-new CASH_APP/ZELLE) and `instructions: null` — see
+ * TenantPaymentMethodsService.getConfigForTenant's own doc comment — so
+ * the Settings → Payments form always renders every configurable method,
+ * never just the ones a tenant has already touched.
+ */
+export interface TenantPaymentMethodConfigItem {
+  method: PaymentMethod;
+  enabled: boolean;
+  instructions: string | null;
+}
+
+/** PUT /tenant-payments/methods request body — see TenantPaymentMethodConfigItem; always the full set, upserted atomically. */
+export interface UpsertPaymentMethodsRequest {
+  methods: { method: PaymentMethod; enabled: boolean; instructions?: string | null }[];
+}
+
+/**
+ * GET /tenant-payments/methods/enabled (staff, INVOICE_MANAGE_ROLES) and
+ * GET /portal/payment-methods (customer). Deliberately narrower than
+ * TenantPaymentMethodConfigItem — no `enabled` field (every row returned
+ * is already enabled, by construction, on both endpoints) and no internal
+ * config detail beyond what the tenant intentionally authored as
+ * customer-facing text. The staff endpoint falls back to
+ * LEGACY_MANUAL_PAYMENT_METHODS (instructions: null) when a tenant has no
+ * configuration at all; the portal endpoint never falls back — an
+ * unconfigured tenant's customers see no manual methods, only "Pay Now"
+ * when Stripe is payable. See TenantPaymentMethodsService's own doc
+ * comment for both rules.
+ */
+export interface EnabledPaymentMethod {
+  method: PaymentMethod;
+  instructions: string | null;
+}

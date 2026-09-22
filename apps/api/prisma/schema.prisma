@@ -305,6 +305,12 @@ enum PaymentMethod {
   MOBILE_MONEY
   CHECK
   OTHER
+  /// Tenant Payment Configuration Phase C: manual method, tenant-configured
+  /// $Cashtag stored as free-text instructions on TenantPaymentMethodConfig.
+  CASH_APP
+  /// Tenant Payment Configuration Phase C: manual method, tenant-configured
+  /// Zelle identifier/instructions stored as free text on TenantPaymentMethodConfig.
+  ZELLE
 }
 
 enum PaymentStatus {
@@ -493,6 +499,7 @@ model Tenant {
   signupSessions       SignupSession[]
   platformAuditLogsFor PlatformAuditLog[]
   paymentSettings      TenantPaymentSettings?
+  paymentMethodConfigs TenantPaymentMethodConfig[]
 
   @@map("tenants")
 }
@@ -518,6 +525,23 @@ model Tenant {
 /// was introduced. Onboarding a tenant onto their own connected account
 /// (the actual Connect OAuth flow) is deliberately not built yet — this
 /// table is the extension point for when it is.
+///
+/// Tenant Payments Phase 1 (approved architecture, not yet implemented):
+///   - Connected account type: Express — Stripe hosts the account's own
+///     dashboard/compliance UI, minimizing this platform's liability
+///     versus Custom, and giving tenants a real (if limited) Stripe
+///     dashboard versus Standard's fully-Stripe-branded experience.
+///   - Onboarding pattern: Account Links (Stripe-hosted onboarding),
+///     not the OAuth flow — no Connect Client ID to configure, and
+///     Stripe's own hosted flow handles the identity/compliance
+///     collection this table deliberately stores none of.
+///   - RBAC: connecting/replacing/configuring a tenant's own row here is
+///     OWNER-only (STAFF_ADMIN_ROLES's existing posture, not the wider
+///     STAFF_ROLES) once the onboarding endpoints exist — no other role
+///     may initiate or change a tenant's payment-processing identity.
+///   - Deliberately not gated behind a SaaS plan entitlement yet — that
+///     is separate, unrelated plan-tier work and must not be conflated
+///     with this table's own scope.
 model TenantPaymentSettings {
   id       String @id @default(cuid())
   tenantId String @unique
@@ -534,6 +558,50 @@ model TenantPaymentSettings {
   updatedAt DateTime @updatedAt
 
   @@map("tenant_payment_settings")
+}
+
+/// Tenant Payment Configuration Phase C: one row per manual PaymentMethod a
+/// tenant has explicitly configured (Cash App, Zelle, Cash, Bank Transfer,
+/// Mobile Money, Check, Other — never CARD, which stays governed entirely
+/// by TenantPaymentSettings/Stripe Connect + PAYABLE_INVOICE_STATUSES, not
+/// by this table). Deliberately its own normalized child table rather than
+/// more nullable columns bolted onto TenantPaymentSettings — matches this
+/// schema's existing pattern for per-tenant config lists (TenantLocation,
+/// TenantAgentKnowledgeEntry) and keeps the Stripe-Connect-only concern of
+/// TenantPaymentSettings unchanged.
+///
+/// `instructions` is free text the tenant authors itself (e.g. a Cash App
+/// $Cashtag, a Zelle email/phone, "pay at pickup counter") — never
+/// validated/parsed, never treated as a credential; this is explicitly NOT
+/// where any secret, password, or API key is ever stored (see
+/// TenantPaymentMethodsService's own doc comment).
+///
+/// A tenant with zero rows here is not "unconfigured" in the same sense
+/// TenantPaymentSettings's own doc comment describes for Stripe Connect —
+/// it means "still on the pre-Phase-C hard-coded behavior," which
+/// TenantPaymentMethodsService.getEnabledForStaff/getEnabledForPortal each
+/// interpret differently on purpose: the staff Record Payment dropdown
+/// falls back to the exact 5 methods it always hard-coded
+/// (LEGACY_MANUAL_PAYMENT_METHODS), so existing staff workflows never
+/// regress; the customer portal shows nothing manual at all until a
+/// tenant explicitly opts in, so a customer is never shown payment
+/// instructions nobody actually authored.
+model TenantPaymentMethodConfig {
+  id       String        @id @default(cuid())
+  tenantId String
+  method   PaymentMethod
+
+  enabled      Boolean @default(false)
+  instructions String? @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, method])
+  @@index([tenantId])
+  @@map("tenant_payment_method_configs")
 }
 
 /// Per-tenant configuration, including the configurable numbering prefixes

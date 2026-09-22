@@ -5,7 +5,7 @@ import type { CreateCheckoutSessionResponse, PaymentListItem, PaymentSummary } f
 import { formatMoney, toStripeAmount } from '../common/money/money.util';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { StripeService } from '../stripe/stripe.service';
+import { TenantPaymentsStripeService } from '../tenant-payments/tenant-payments-stripe.service';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 
 const PAYMENT_LIST_INCLUDE = {
@@ -47,7 +47,7 @@ export class PaymentsService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly stripeService: StripeService,
+    private readonly tenantPaymentsStripeService: TenantPaymentsStripeService,
     private readonly notificationsService: NotificationsService,
   ) {}
 
@@ -210,14 +210,15 @@ export class PaymentsService {
       where: { tenantId, invoiceId, source: PaymentSource.ONLINE, status: PaymentStatus.PENDING },
     });
     if (priorPending?.providerReference) {
-      await this.stripeService.expireCheckoutSession(priorPending.providerReference);
+      await this.tenantPaymentsStripeService.expireCheckoutSession(priorPending.providerReference, tenantId);
       await this.prisma.payment.update({
         where: { id: priorPending.id },
         data: { status: PaymentStatus.FAILED, notes: 'Superseded by a newer checkout session' },
       });
     }
 
-    const session = await this.stripeService.createCheckoutSession({
+    const session = await this.tenantPaymentsStripeService.createCheckoutSession({
+      tenantId,
       amount: toStripeAmount(balance),
       currency: invoice.currency,
       invoiceId: invoice.id,
@@ -281,11 +282,31 @@ export class PaymentsService {
    * exact same documented limitation recordPayment's own doc comment
    * already carries). Reconciling that discrepancy is a manual/staff
    * task; refunds are out of scope for this stage.
+   *
+   * Tenant Payments Phase 0: `expectedTenantId` is an additional
+   * verification layer, not the primary lookup key — `providerReference`
+   * alone is already `@unique` and sufficient to find the right row.
+   * It exists because the *caller's* confidence in which tenant this
+   * event belongs to varies by webhook source: the platform-account
+   * webhook (`/webhooks/stripe`) has no independent signal to check
+   * against (every tenant shares one Stripe account there by design, so
+   * omitting this param there is correct, not a gap) and passes nothing,
+   * preserving its exact existing behavior. The Connect webhook
+   * (`/webhooks/stripe-connect`) *does* have one — Stripe's own verified
+   * `event.account` — and passes it, so a payment row that somehow
+   * belongs to a different tenant than the connected account the event
+   * actually came from is rejected rather than silently mutated.
    */
-  async completeOnlinePayment(providerReference: string, paidAt: Date): Promise<PaymentSummary | null> {
+  async completeOnlinePayment(providerReference: string, paidAt: Date, expectedTenantId?: string): Promise<PaymentSummary | null> {
     const payment = await this.prisma.payment.findUnique({ where: { providerReference } });
     if (!payment) {
       this.logger.warn(`Stripe webhook for unknown session ${providerReference} — ignoring`);
+      return null;
+    }
+    if (expectedTenantId && payment.tenantId !== expectedTenantId) {
+      this.logger.error(
+        `Stripe Connect webhook for session ${providerReference} resolved to tenant ${expectedTenantId}, but the payment belongs to tenant ${payment.tenantId} — refusing to mutate a different tenant's payment.`,
+      );
       return null;
     }
     if (payment.status === PaymentStatus.COMPLETED) {
