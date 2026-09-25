@@ -4,6 +4,7 @@ import { ConsoleEmailProvider, ConsoleSmsProvider, ConsoleWhatsAppProvider } fro
 import { MetaWhatsAppProvider } from './meta-whatsapp.provider';
 import { EMAIL_PROVIDER, SMS_PROVIDER, WHATSAPP_PROVIDER } from './provider.types';
 import { ResendEmailProvider } from './resend-email.provider';
+import { TwilioSmsProvider } from './twilio-sms.provider';
 
 /**
  * Stage 3H / Website Launch Step 6: one place per channel where the
@@ -21,6 +22,11 @@ import { ResendEmailProvider } from './resend-email.provider';
  * API) alongside "console" — see that provider's own doc comment.
  * Defaults to "console" so no environment that hasn't explicitly opted in
  * (including local dev/test) ever attempts a real send.
+ *
+ * SMS/Twilio MVP: SMS_PROVIDER now also supports "twilio" (TwilioSmsProvider,
+ * real delivery via Twilio's REST API) alongside "console" — same
+ * "console" default, so SMS remains a safe no-op (simulated, logged only)
+ * everywhere that hasn't explicitly set SMS_PROVIDER=twilio.
  */
 @Module({
   providers: [
@@ -29,6 +35,7 @@ import { ResendEmailProvider } from './resend-email.provider';
     ConsoleWhatsAppProvider,
     ResendEmailProvider,
     MetaWhatsAppProvider,
+    TwilioSmsProvider,
     {
       provide: EMAIL_PROVIDER,
       useFactory: (config: ConfigService, console_: ConsoleEmailProvider, resend: ResendEmailProvider) => {
@@ -41,12 +48,13 @@ import { ResendEmailProvider } from './resend-email.provider';
     },
     {
       provide: SMS_PROVIDER,
-      useFactory: (config: ConfigService, console_: ConsoleSmsProvider) => {
+      useFactory: (config: ConfigService, console_: ConsoleSmsProvider, twilio: TwilioSmsProvider) => {
         const driver = config.get<string>('SMS_PROVIDER', 'console');
         if (driver === 'console') return console_;
-        throw new Error(`Unsupported SMS_PROVIDER "${driver}" — only "console" is implemented so far.`);
+        if (driver === 'twilio') return twilio;
+        throw new Error(`Unsupported SMS_PROVIDER "${driver}" — supported values are "console" and "twilio".`);
       },
-      inject: [ConfigService, ConsoleSmsProvider],
+      inject: [ConfigService, ConsoleSmsProvider, TwilioSmsProvider],
     },
     {
       provide: WHATSAPP_PROVIDER,

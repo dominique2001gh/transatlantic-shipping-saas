@@ -328,8 +328,14 @@ describe('Notifications & disruptions: firing rules, isolation, bulk fan-out (e2
       const c1Notifications = await prisma.notification.findMany({
         where: { tenantId: tenantA.tenantId, customerId: customer1A.customerId, event: { operationalExceptionId: created.body.id } },
       });
-      // IN_APP + EMAIL (default) + SMS (opted in) = 3 rows for customer1.
-      expect(c1Notifications.map((n) => n.channel).sort()).toEqual(['EMAIL', 'IN_APP', 'SMS']);
+      // IN_APP + EMAIL (default) for customer1 — SMS/Twilio MVP scopes SMS
+      // to exactly the 5 shipment-milestone occurrences (see
+      // isSmsSupportedShipmentStatus's own doc comment); a container
+      // disruption/hold is not one of them, so no SMS row is created here
+      // even though customer1 is opted into SMS in general. `willNotifyBySms`
+      // on the preview above still reflects the customer's raw preference,
+      // independent of whether this particular event type actually attempts SMS.
+      expect(c1Notifications.map((n) => n.channel).sort()).toEqual(['EMAIL', 'IN_APP']);
       expect(c1Notifications.every((n) => n.body === 'Your container is being held for customs inspection.')).toBe(true);
 
       const c2Notifications = await prisma.notification.findMany({

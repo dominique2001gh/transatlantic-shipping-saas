@@ -28,6 +28,7 @@ import {
   type ShipmentEmailTenantBranding,
 } from './templates/shipment-customer-emails';
 import { buildShipmentStatusWhatsAppTemplate, type WhatsAppTemplatePayload } from './whatsapp-template.util';
+import { buildShipmentSmsBody, isSmsSupportedShipmentStatus } from './shipment-sms.util';
 
 const WHATSAPP_DEFAULT_TEMPLATE_NAME = 'shipment_status_update';
 const WHATSAPP_DEFAULT_TEMPLATE_LANGUAGE = 'en_US';
@@ -155,6 +156,15 @@ export class NotificationsService {
       // see buildShipmentEmailContent's own doc comment.
       const emailContent = await this.buildShipmentEmailContent(tenantId, shipment, status as unknown as SharedShipmentStatus);
 
+      // SMS/Twilio MVP: a branded, terse SMS for exactly the 5 approved
+      // milestones (see isSmsSupportedShipmentStatus's own doc comment);
+      // `null` for every other notifiable status (no SMS attempt at all —
+      // EMAIL/IN_APP/WhatsApp above are completely unaffected either way),
+      // or the literal string 'suppress' for a COMPLETED that immediately
+      // follows an already-texted DELIVERED — see buildShipmentSmsContent's
+      // own doc comment.
+      const smsContent = await this.buildShipmentSmsContent(tenantId, shipment, status as unknown as SharedShipmentStatus);
+
       await this.fireEventForCustomer({
         tenantId,
         eventType: SharedNotificationEventType.SHIPMENT_STATUS_CHANGED,
@@ -165,6 +175,7 @@ export class NotificationsService {
         sourceRefs: { shipmentId },
         whatsappTemplate,
         emailContent,
+        smsContent,
       });
     } catch (err) {
       this.logger.error(`fireShipmentStatusChanged failed for shipment ${shipmentId}: ${err}`);
@@ -266,6 +277,56 @@ export class NotificationsService {
       default:
         return null;
     }
+  }
+
+  /**
+   * SMS/Twilio MVP: resolves the branded SMS body for one of the 5
+   * SMS-supported shipment milestones, or `null` (no SMS attempt at all)
+   * for anything outside that set, or the literal string `'suppress'` to
+   * skip the SMS channel entirely for this one occurrence.
+   *
+   * The `'suppress'` case mirrors buildShipmentEmailContent's own
+   * COMPLETED-after-DELIVERED handling exactly, and for the identical
+   * reason: `maybeRollupShipmentCompletion` fires COMPLETED for both a
+   * pure customer-pickup shipment AND, redundantly, right after a
+   * driver-delivery's own DELIVERED. Texting the customer twice within
+   * seconds for the same real-world event would read as a mistake, so if
+   * this shipment already has a `PickupDeliveryRecord` of type DELIVERY
+   * (i.e. a DELIVERED text already went out), the COMPLETED text is
+   * suppressed. A pure pickup shipment (no DELIVERY record) has no
+   * earlier text to duplicate, so COMPLETED renders as the "picked up"
+   * copy instead.
+   *
+   * Deliberately its own DB fetch (tenant name/website), not shared with
+   * buildShipmentEmailContent — keeps the two channels fully independent
+   * so a future change to one can never accidentally alter the other,
+   * at the cost of one small extra query only when the status is
+   * SMS-supported at all.
+   */
+  private async buildShipmentSmsContent(
+    tenantId: string,
+    shipment: { id: string; trackingNumber: string },
+    status: SharedShipmentStatus,
+  ): Promise<string | 'suppress' | null> {
+    if (!isSmsSupportedShipmentStatus(status)) {
+      return null;
+    }
+
+    if (status === SharedShipmentStatus.COMPLETED) {
+      const alreadyDelivered = await this.prisma.pickupDeliveryRecord.findFirst({
+        where: { tenantId, shipmentId: shipment.id, type: HandoffType.DELIVERY },
+        select: { id: true },
+      });
+      if (alreadyDelivered) {
+        return 'suppress';
+      }
+    }
+
+    const tenant = await this.prisma.tenant.findUnique({ where: { id: tenantId }, select: { name: true, website: true } });
+    if (!tenant) return null;
+
+    const trackingUrl = buildShipmentTrackingUrl(tenant.website, shipment.trackingNumber);
+    return buildShipmentSmsBody({ tenantName: tenant.name, trackingNumber: shipment.trackingNumber, status, trackingUrl });
   }
 
   /**
@@ -583,6 +644,17 @@ export class NotificationsService {
      * behavior: EMAIL uses the same generic title/body as IN_APP/SMS.
      */
     emailContent?: ShipmentCustomerEmail | 'suppress' | null;
+    /**
+     * SMS/Twilio MVP: only fireShipmentStatusChanged ever passes this —
+     * every other fire* method (documents, invoices, payments, the bulk
+     * disruption path) omits it, which means SMS is never attempted for
+     * those event types. Not a workaround: this is the literal scope
+     * boundary this MVP was approved for — see isSmsSupportedShipmentStatus's
+     * own doc comment for the milestone allow-list. `undefined`/omitted
+     * (every non-shipment-status fire* path) skips SMS entirely, same as
+     * `null`/`'suppress'`.
+     */
+    smsContent?: string | 'suppress' | null;
   }): Promise<void> {
     const event = await this.getOrCreateEvent({
       tenantId: params.tenantId,
@@ -594,7 +666,16 @@ export class NotificationsService {
     if (!event) {
       return; // dedupe hit — already fired for this exact occurrence
     }
-    await this.notifyCustomer(event.id, params.tenantId, params.customerId, params.title, params.body, params.whatsappTemplate, params.emailContent);
+    await this.notifyCustomer(
+      event.id,
+      params.tenantId,
+      params.customerId,
+      params.title,
+      params.body,
+      params.whatsappTemplate,
+      params.emailContent,
+      params.smsContent,
+    );
   }
 
   /** Returns null on a dedupe hit (unique constraint violation) rather than throwing — the caller treats that as "nothing to do", not an error. */
@@ -639,6 +720,7 @@ export class NotificationsService {
     body: string,
     whatsappTemplate?: WhatsAppTemplatePayload | null,
     emailContent?: ShipmentCustomerEmail | 'suppress' | null,
+    smsContent?: string | 'suppress' | null,
   ): Promise<void> {
     const customer = await this.prisma.customer.findFirst({
       where: { id: customerId, tenantId },
@@ -688,8 +770,15 @@ export class NotificationsService {
         await this.createAndDispatch(eventId, tenantId, customerId, NotificationChannel.EMAIL, title, body, customer.email);
       }
     }
-    if (customer.notifyBySms) {
-      await this.createAndDispatch(eventId, tenantId, customerId, NotificationChannel.SMS, title, body, customer.phone);
+    // SMS/Twilio MVP: 'suppress' skips SMS entirely for this occurrence
+    // (the redundant COMPLETED-after-DELIVERED case), same posture EMAIL's
+    // 'suppress' already uses. A real branded body sends that terse,
+    // GSM-7-safe text instead of the generic title/body; `undefined`/null
+    // (every non-shipment-status fire* path, or a shipment status outside
+    // the 5-milestone allow-list) skips SMS entirely — no Notification row
+    // created at all, same as if the customer had never opted in.
+    if (customer.notifyBySms && smsContent && smsContent !== 'suppress') {
+      await this.createAndDispatch(eventId, tenantId, customerId, NotificationChannel.SMS, title, smsContent, customer.phone);
     }
     // WhatsApp Integration (Stage 4C) Phase 1: no template means this
     // event type/status isn't WhatsApp-supported yet (see
@@ -760,6 +849,27 @@ export class NotificationsService {
           data: {
             status: NotificationStatus.FAILED,
             errorMessage: `Customer's WhatsApp number ("${target}") is not a valid phone number.`,
+          },
+        });
+        return;
+      }
+      dispatchTarget = normalized;
+    } else if (channel === NotificationChannel.SMS) {
+      // SMS/Twilio MVP: normalize/validate to E.164 right before dispatch,
+      // same "record a real FAILED attempt, never silently drop, never
+      // hand a raw value to the provider" posture WhatsApp already
+      // established above. `'US'` (not `defaultCountry`/tenant.country) is
+      // deliberate — Customer.phone is the U.S. sender's own number for
+      // every tenant in this MVP (see notifications-architecture audit),
+      // and tenant.country is not a reliable ISO alpha-2 value today (e.g.
+      // Trans Atlantic's is literally the string "United States").
+      const normalized = normalizeToE164(target, 'US');
+      if (!normalized) {
+        await this.prisma.notification.update({
+          where: { id: notification.id },
+          data: {
+            status: NotificationStatus.FAILED,
+            errorMessage: `Customer's phone number ("${target}") is not a valid phone number.`,
           },
         });
         return;
