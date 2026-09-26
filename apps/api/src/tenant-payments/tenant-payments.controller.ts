@@ -55,10 +55,10 @@ export class TenantPaymentsController {
   @Roles(...OWNER_ONLY_ROLES)
   async createOnboardingLink(@CurrentUser() user: AuthenticatedUser): Promise<{ url: string }> {
     const tenantId = requireTenantId(user.tenantId);
-    const tenant = await this.prisma.tenant.findUniqueOrThrow({ where: { id: tenantId }, select: { slug: true, customDomain: true } });
+    const tenant = await this.prisma.tenant.findUniqueOrThrow({ where: { id: tenantId }, select: { slug: true, customDomain: true, email: true } });
     const webAppUrl = resolveTenantWebAppUrl(tenant, this.config);
 
-    const accountId = await this.tenantPaymentsStripeService.getOrCreateConnectedAccount(tenantId);
+    const accountId = await this.tenantPaymentsStripeService.getOrCreateConnectedAccount(tenantId, tenant.email);
     const url = await this.tenantPaymentsStripeService.createOnboardingLink({
       accountId,
       refreshUrl: `${webAppUrl.replace(/\/$/, '')}/dashboard/settings/payments?stripeConnect=refresh`,

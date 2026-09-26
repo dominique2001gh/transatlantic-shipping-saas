@@ -5,7 +5,7 @@ import Stripe from 'stripe';
 import { randomUUID } from 'crypto';
 import { createTestTenant, createUserInTenant, deleteTestTenant, TestTenantFixture } from './utils/fixtures';
 import { createTestApp } from './utils/test-app';
-import { TenantPaymentsStripeService } from '../src/tenant-payments/tenant-payments-stripe.service';
+import { isCardPaymentsActiveV2, TenantPaymentsStripeService } from '../src/tenant-payments/tenant-payments-stripe.service';
 
 jest.setTimeout(30_000);
 
@@ -144,8 +144,8 @@ describe('Tenant Payments Phase 2: onboarding RBAC, isolation, and account statu
         data: { tenantId: tenantA.tenantId, stripeConnectedAccountId: fixtureAccountId, isActive: false },
       });
 
-      const first = await tenantPaymentsStripeService.getOrCreateConnectedAccount(tenantA.tenantId);
-      const second = await tenantPaymentsStripeService.getOrCreateConnectedAccount(tenantA.tenantId);
+      const first = await tenantPaymentsStripeService.getOrCreateConnectedAccount(tenantA.tenantId, 'reuse-test@example.com');
+      const second = await tenantPaymentsStripeService.getOrCreateConnectedAccount(tenantA.tenantId, 'reuse-test@example.com');
       expect(first).toBe(fixtureAccountId);
       expect(second).toBe(fixtureAccountId);
 
@@ -177,6 +177,59 @@ describe('Tenant Payments Phase 2: onboarding RBAC, isolation, and account statu
       // Reused, not replaced/duplicated.
       const settings = await prisma.tenantPaymentSettings.findUniqueOrThrow({ where: { tenantId: tenantA.tenantId } });
       expect(settings.stripeConnectedAccountId).toBe(fixtureAccountId);
+    });
+  });
+
+  // -- Accounts v2 compatibility fix (2026-09) -------------------------------
+
+  describe('isCardPaymentsActiveV2: pure v2 readiness check (no Stripe/DB call)', () => {
+    it('is true only when configuration.merchant.capabilities.card_payments.status is exactly "active"', () => {
+      expect(isCardPaymentsActiveV2({ configuration: { merchant: { capabilities: { card_payments: { status: 'active' } } } } })).toBe(true);
+    });
+
+    it.each(['pending', 'restricted', 'unsupported'] as const)('is false when card_payments.status is "%s"', (status) => {
+      expect(isCardPaymentsActiveV2({ configuration: { merchant: { capabilities: { card_payments: { status } } } } })).toBe(false);
+    });
+
+    it('is false when no merchant configuration exists at all', () => {
+      expect(isCardPaymentsActiveV2({ configuration: {} })).toBe(false);
+      expect(isCardPaymentsActiveV2({ configuration: undefined })).toBe(false);
+    });
+
+    it('is false when merchant configuration exists but card_payments capability was never requested', () => {
+      expect(isCardPaymentsActiveV2({ configuration: { merchant: { capabilities: {} } } })).toBe(false);
+    });
+  });
+
+  describe('Accounts v2 connected-account creation (real Stripe test-mode — never touches production)', () => {
+    it('creates a v2 (not v1) account with no legacy `type`, dashboard=full, and Stripe as both fees_collector and losses_collector', async () => {
+      const contactEmail = `v2-create-test-${randomUUID()}@example.com`;
+      const accountId = await tenantPaymentsStripeService.getOrCreateConnectedAccount(tenantA.tenantId, contactEmail);
+
+      const secretKey = process.env.PLATFORM_STRIPE_SECRET_KEY;
+      if (!secretKey) throw new Error('PLATFORM_STRIPE_SECRET_KEY must be configured to run this test.');
+      const stripe = new Stripe(secretKey);
+
+      try {
+        const account = await stripe.v2.core.accounts.retrieve(accountId, { include: ['configuration.merchant', 'defaults'] });
+
+        // Proves this is a genuine v2 object, not a v1 Account wearing a v2-shaped id —
+        // a legacy `type`-based create would never produce this object type.
+        expect(account.object).toBe('v2.core.account');
+        expect((account as unknown as { type?: unknown }).type).toBeUndefined();
+
+        expect(account.dashboard).toBe('full');
+        expect(account.defaults?.responsibilities?.fees_collector).toBe('stripe');
+        expect(account.defaults?.responsibilities?.losses_collector).toBe('stripe');
+        expect(account.configuration?.merchant?.capabilities?.card_payments).toBeDefined();
+
+        // Brand new, no KYC submitted yet — must never read as ready.
+        expect(isCardPaymentsActiveV2(account)).toBe(false);
+      } finally {
+        await stripe.v2.core.accounts.close(accountId, { applied_configurations: ['merchant'] }).catch(() => {
+          // Best-effort cleanup of the test-mode account — never affects the assertions above.
+        });
+      }
     });
   });
 

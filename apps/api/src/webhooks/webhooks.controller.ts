@@ -202,4 +202,48 @@ export class WebhooksController {
 
     return { received: true };
   }
+
+  /**
+   * Accounts v2 compatibility fix (2026-09): a separate route for Accounts
+   * v2 thin-event webhook deliveries, deliberately NOT layered onto
+   * `/webhooks/stripe-connect` above. Verified directly against Stripe (a
+   * real test-mode v2 account creation, checked which events it actually
+   * emitted) rather than assumed: Stripe's v2 Accounts API delivers a
+   * fundamentally different event model — "thin events" via a separate
+   * Event Destination object, not classic snapshot-event webhook endpoint
+   * subscriptions — with its own payload shape, its own signing secret,
+   * and its own SDK verification method (`stripe.notificationHandler`,
+   * not `stripe.webhooks.constructEvent`). Mixing both models on one route
+   * would mean branching on payload shape before even knowing which
+   * verification method to use; two routes keeps each one exactly as
+   * simple as its v1 counterpart already is, and leaves the existing v1
+   * route completely untouched (see TenantPaymentsStripeService.handleV2AccountWebhook's
+   * own doc comment for why the v1 account.updated handling above is kept,
+   * not removed).
+   *
+   * A new v2 Event Destination must be registered in Stripe's dashboard
+   * pointing at this route, subscribed to (at minimum)
+   * `v2.core.account[configuration.merchant].capability_status_updated` —
+   * this is a manual Stripe Dashboard step, deliberately not performed by
+   * this change (out of scope — no Stripe dashboard configuration was
+   * touched by this fix). Until that destination exists, this route
+   * simply never receives traffic, the same "dormant until configured"
+   * posture `/webhooks/stripe-connect` itself originally shipped with.
+   */
+  @Post('stripe-connect-v2')
+  @Public()
+  async handleStripeConnectV2Webhook(@Req() req: RawBodyRequest<Request>, @Headers('stripe-signature') signature?: string) {
+    if (!req.rawBody || !signature) {
+      throw new BadRequestException('Missing Stripe signature or request body');
+    }
+
+    try {
+      await this.tenantPaymentsStripeService.handleV2AccountWebhook(req.rawBody, signature);
+    } catch (err) {
+      this.logger.warn(`Rejected Stripe Connect v2 webhook: ${err}`);
+      throw new BadRequestException('Invalid Stripe signature');
+    }
+
+    return { received: true };
+  }
 }
