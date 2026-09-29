@@ -836,6 +836,31 @@ model Customer {
   /// the specific number the customer opted in with, not just "whatever
   /// phone number happens to be on file."
   whatsappPhone    String?
+  /// SMS/Twilio A2P Phase 1: affirmative consent, deliberately distinct
+  /// from `notifyBySms` above. `notifyBySms` is only ever the operative
+  /// on/off switch NotificationsService checks at send time; it must never
+  /// be treated as proof of consent by itself (it could already be true on
+  /// a pre-existing row from before this consent infrastructure existed).
+  /// `smsConsentGiven` stays false until a real affirmative action (the
+  /// registration form's unchecked-by-default checkbox today) sets it —
+  /// existing customers are never migrated to true. Tenant-scoped, unlike
+  /// SmsOptOut below: consent is always granted to one specific tenant and
+  /// must never be inferred to apply to any other tenant, even for the
+  /// same phone number.
+  smsConsentGiven   Boolean   @default(false)
+  smsConsentAt      DateTime?
+  /// Where consent was captured, e.g. "register_web_form" — null until the
+  /// first real consent action.
+  smsConsentSource  String?
+  /// Version tag of the disclosure text agreed to (see
+  /// SMS_CONSENT_DISCLOSURE_VERSION), so a future wording change is
+  /// distinguishable from consent given under older copy.
+  smsConsentVersion String?
+  /// Set by TwilioWebhookController when this tenant's own Customer row
+  /// shares a phone number with an inbound STOP — a per-tenant mirror for
+  /// this tenant's own staff/customer-facing views only. The actual
+  /// cross-tenant enforcement gate is SmsOptOut below, never this field.
+  smsOptOutAt       DateTime?
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
@@ -854,7 +879,47 @@ model Customer {
   @@index([tenantId])
   /// Stage 4: customer-growth-over-time analytics group by tenantId+createdAt.
   @@index([tenantId, createdAt])
+  /// SMS/Twilio A2P Phase 1: the inbound Twilio webhook looks up every
+  /// Customer row across every tenant that shares an inbound STOP's phone
+  /// number (see SmsOptOut's own doc comment for why this must be
+  /// cross-tenant) — this index keeps that lookup from ever needing a full
+  /// table scan.
+  @@index([phone])
   @@map("customers")
+}
+
+/// SMS/Twilio A2P Phase 1: opt-out registry keyed by phone number, NOT by
+/// tenant or customer — deliberately global. Every tenant's SMS sends
+/// through the same shared Twilio sending number (TWILIO_FROM_NUMBER); a
+/// STOP reply is a fact about that phone number's relationship with *that
+/// shared number*, not about any one tenant's customer record. A phone
+/// that opts out must stop receiving app-generated SMS regardless of which
+/// tenant's shipment would have triggered it — otherwise a second tenant
+/// whose customer happens to share the same phone number could still text
+/// it via the same shared sender, which is exactly what STOP is supposed
+/// to prevent.
+///
+/// This is the opposite direction from consent: `Customer.smsConsentGiven`
+/// is additive and always tenant-scoped (granting tenant A permission
+/// never implies tenant B has it too); this table is subtractive and
+/// always global (once a phone says STOP to the shared number, every
+/// tenant must honor it). A future SMS send path (not wired in Phase 1)
+/// must check both: the sending tenant's own Customer.notifyBySms/
+/// smsConsentGiven, AND that the target phone has no row here — this table
+/// always wins if present.
+///
+/// Never exposed through any tenant-scoped API — written only by
+/// TwilioWebhookController; read only by a future SMS send path.
+model SmsOptOut {
+  id         String   @id @default(cuid())
+  phoneE164  String   @unique
+  optedOutAt DateTime @default(now())
+  /// e.g. "twilio_stop_webhook".
+  source     String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@map("sms_opt_outs")
 }
 
 /// Billing / shipping / destination addresses for a customer.

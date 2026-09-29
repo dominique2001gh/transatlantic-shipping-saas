@@ -297,3 +297,149 @@ describe('Customer signup does not leak into unrelated tenants (e2e)', () => {
     await prisma.user.deleteMany({ where: { email, tenantId: res.body.user.tenantId } });
   });
 });
+
+/**
+ * SMS/Twilio A2P Phase 1: proves the registration checkbox is the only
+ * thing that can ever set Customer.smsConsentGiven, and that it's recorded
+ * distinctly from Customer.notifyBySms — see AuthService.customerSignup's
+ * own doc comment for why the two must never be conflated.
+ */
+describe('Customer signup: SMS consent (Phase 1, e2e)', () => {
+  let app: INestApplication;
+  const prisma = new PrismaClient();
+  let transAtlanticTenantId: string;
+
+  const createdUserIds: string[] = [];
+  const createdCustomerIds: string[] = [];
+
+  beforeAll(async () => {
+    app = await createTestApp();
+    const tenant = await prisma.tenant.findFirst({ where: { slug: 'transatlantic' } });
+    if (!tenant) {
+      throw new Error('This suite requires the real "transatlantic" tenant to exist in the target database.');
+    }
+    transAtlanticTenantId = tenant.id;
+  });
+
+  afterEach(async () => {
+    if (createdCustomerIds.length > 0) {
+      await prisma.customer.deleteMany({ where: { id: { in: createdCustomerIds } } });
+      createdCustomerIds.length = 0;
+    }
+    if (createdUserIds.length > 0) {
+      await prisma.user.deleteMany({ where: { id: { in: createdUserIds } } });
+      createdUserIds.length = 0;
+    }
+  });
+
+  afterAll(async () => {
+    await app.close();
+    await prisma.$disconnect();
+  });
+
+  function uniqueEmail(): string {
+    return `e2e-sms-consent-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@example.test`;
+  }
+
+  it('omitting smsConsent leaves consent and notifyBySms both false, and registration still succeeds (SMS declined)', async () => {
+    const email = uniqueEmail();
+    const res = await request(app.getHttpServer()).post('/auth/customer-signup').send({
+      firstName: 'Ama',
+      lastName: 'Boateng',
+      email,
+      password: 'CorrectHorse123',
+      confirmPassword: 'CorrectHorse123',
+    });
+    expect(res.status).toBe(201); // registration succeeds even though SMS was declined
+
+    const dbCustomer = await prisma.customer.findUniqueOrThrow({ where: { id: res.body.user.customerId } });
+    expect(dbCustomer.notifyBySms).toBe(false);
+    expect(dbCustomer.smsConsentGiven).toBe(false);
+    expect(dbCustomer.smsConsentAt).toBeNull();
+    expect(dbCustomer.smsConsentSource).toBeNull();
+
+    createdUserIds.push(res.body.user.id);
+    createdCustomerIds.push(res.body.user.customerId);
+  });
+
+  it('explicitly unchecked (smsConsent: false) behaves identically to omitted', async () => {
+    const email = uniqueEmail();
+    const res = await request(app.getHttpServer()).post('/auth/customer-signup').send({
+      firstName: 'Ama',
+      lastName: 'Boateng',
+      email,
+      password: 'CorrectHorse123',
+      confirmPassword: 'CorrectHorse123',
+      smsConsent: false,
+    });
+    expect(res.status).toBe(201);
+
+    const dbCustomer = await prisma.customer.findUniqueOrThrow({ where: { id: res.body.user.customerId } });
+    expect(dbCustomer.notifyBySms).toBe(false);
+    expect(dbCustomer.smsConsentGiven).toBe(false);
+
+    createdUserIds.push(res.body.user.id);
+    createdCustomerIds.push(res.body.user.customerId);
+  });
+
+  it('smsConsent: true records affirmative consent with a timestamp, source, and version, and enables notifyBySms', async () => {
+    const email = uniqueEmail();
+    const before = new Date();
+    const res = await request(app.getHttpServer()).post('/auth/customer-signup').send({
+      firstName: 'Kwame',
+      lastName: 'Mensah',
+      email,
+      password: 'CorrectHorse123',
+      confirmPassword: 'CorrectHorse123',
+      smsConsent: true,
+    });
+    expect(res.status).toBe(201);
+
+    const dbCustomer = await prisma.customer.findUniqueOrThrow({ where: { id: res.body.user.customerId } });
+    expect(dbCustomer.notifyBySms).toBe(true);
+    expect(dbCustomer.smsConsentGiven).toBe(true);
+    expect(dbCustomer.smsConsentAt).not.toBeNull();
+    expect(dbCustomer.smsConsentAt!.getTime()).toBeGreaterThanOrEqual(before.getTime() - 1000);
+    expect(dbCustomer.smsConsentSource).toBe('register_web_form');
+    expect(dbCustomer.smsConsentVersion).toBe('v1');
+
+    createdUserIds.push(res.body.user.id);
+    createdCustomerIds.push(res.body.user.customerId);
+  });
+
+  it('a pre-existing Customer row with notifyBySms already true is NOT treated as having given consent', async () => {
+    const email = uniqueEmail();
+    // Simulates a staff-created (or pre-Phase-1) Customer row that already
+    // has notifyBySms:true from before consent infrastructure existed —
+    // exactly the scenario Phase 1 must never silently "grandfather in".
+    const preExisting = await prisma.customer.create({
+      data: {
+        tenantId: transAtlanticTenantId,
+        customerNumber: `E2E-CONSENT-${Date.now()}`,
+        firstName: 'Existing',
+        lastName: 'Shopper',
+        email,
+        notifyBySms: true,
+      },
+    });
+    createdCustomerIds.push(preExisting.id);
+    expect(preExisting.smsConsentGiven).toBe(false); // schema default, confirms the premise
+
+    const res = await request(app.getHttpServer()).post('/auth/customer-signup').send({
+      firstName: 'Existing',
+      lastName: 'Shopper',
+      email,
+      password: 'CorrectHorse123',
+      confirmPassword: 'CorrectHorse123',
+      // smsConsent omitted — this signup does not itself grant consent
+    });
+    expect(res.status).toBe(201);
+    expect(res.body.user.customerId).toBe(preExisting.id); // linked, not duplicated
+
+    const dbCustomer = await prisma.customer.findUniqueOrThrow({ where: { id: preExisting.id } });
+    expect(dbCustomer.notifyBySms).toBe(true); // untouched, pre-existing value preserved
+    expect(dbCustomer.smsConsentGiven).toBe(false); // still never inferred from notifyBySms
+
+    createdUserIds.push(res.body.user.id);
+  });
+});

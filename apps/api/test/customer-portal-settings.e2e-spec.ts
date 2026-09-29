@@ -249,6 +249,35 @@ describe('Customer Portal: profile, notification preferences, password (e2e)', (
       expect(res.body.notifyByWhatsapp).toBe(true); // untouched
     });
 
+    it('SMS/Twilio A2P Phase 2: toggling notifyBySms on via the portal does NOT itself create affirmative SMS consent — closes the "toggle equals consent" loophole', async () => {
+      const res = await request(app.getHttpServer())
+        .patch('/portal/me/notification-preferences')
+        .set('Authorization', `Bearer ${customerA2Token}`)
+        .send({ notifyBySms: true });
+      expect(res.status).toBe(200);
+      expect(res.body.notifyBySms).toBe(true);
+
+      // The endpoint's own DTO has no smsConsentGiven field at all (the
+      // global whitelist would reject it outright if a client tried), and
+      // CustomerPortalService.updateNotificationPreferences never writes
+      // it — this is the field NotificationsService's send-time gate
+      // actually checks, so this toggle alone can never authorize a real
+      // send, however many times it's flipped.
+      const dbCustomer = await prisma.customer.findUniqueOrThrow({ where: { id: customerA2.customerId } });
+      expect(dbCustomer.smsConsentGiven).toBe(false);
+      expect(dbCustomer.smsConsentAt).toBeNull();
+
+      // Confirms a client can't smuggle the field in directly either.
+      const attempt = await request(app.getHttpServer())
+        .patch('/portal/me/notification-preferences')
+        .set('Authorization', `Bearer ${customerA2Token}`)
+        .send({ notifyBySms: true, smsConsentGiven: true });
+      expect(attempt.status).toBe(400); // forbidNonWhitelisted rejects the extra field outright
+
+      const dbCustomerAfter = await prisma.customer.findUniqueOrThrow({ where: { id: customerA2.customerId } });
+      expect(dbCustomerAfter.smsConsentGiven).toBe(false);
+    });
+
     it("customer A1's preferences are never affected by A2's updates above", async () => {
       const res = await request(app.getHttpServer())
         .get('/portal/me/notification-preferences')
@@ -290,7 +319,14 @@ describe('Customer Portal: profile, notification preferences, password (e2e)', (
         .set('Authorization', `Bearer ${token}`)
         .send({ notifyBySms: true, whatsappPhone: null });
       expect(prefUpdate.status).toBe(200);
-      await prisma.customer.update({ where: { id: customer.customerId }, data: { phone: '+15559998888' } });
+      // SMS/Twilio A2P Phase 2: the portal toggle above deliberately does
+      // NOT grant consent (see this file's own dedicated loophole-closure
+      // test) — this direct Prisma write stands in for a real consent
+      // event elsewhere in the system, purely so step 4 below can still
+      // prove the actual thing this test is about (forward-only effect,
+      // never a retroactive rewrite), not a re-assertion that the portal
+      // toggle alone is sufficient.
+      await prisma.customer.update({ where: { id: customer.customerId }, data: { phone: '+15559998888', smsConsentGiven: true } });
 
       // 3) The EARLIER notification batch must be completely unchanged — no retroactive SMS row added to it.
       const firstBatchAfter = await prisma.notification.findMany({ where: { eventId: firstEvent!.id } });

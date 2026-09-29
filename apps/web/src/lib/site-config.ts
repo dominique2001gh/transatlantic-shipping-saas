@@ -56,6 +56,16 @@ export const siteConfig = {
   tenantSlug: 'transatlantic',
   companyName: 'Trans Atlantic Logistics Solutions',
   shortName: 'Trans Atlantic',
+  /**
+   * SMS/Twilio A2P: the actual registered legal entity name — matches
+   * Tenant.legalName as already rendered in this tenant's real production
+   * shipment emails (see shipment-customer-emails.ts's own use of
+   * `tenant.legalName?.trim() || tenant.name`), not a name invented for
+   * the Privacy Policy/Terms pages. Used wherever those pages need the
+   * full legal name rather than the shorter public-facing brand name.
+   */
+  legalName: 'Trans Atlantic Logistics Solutions LLC',
+  website: 'https://talogisticssolutions.com',
   initials: 'TA',
   tagline: 'International Shipping. Simplified.',
   description:

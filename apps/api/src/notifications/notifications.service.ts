@@ -730,6 +730,10 @@ export class NotificationsService {
         whatsappPhone: true,
         notifyByEmail: true,
         notifyBySms: true,
+        // SMS/Twilio A2P Phase 2: the consent gate below never treats
+        // notifyBySms alone as authorization to send — see its own doc
+        // comment.
+        smsConsentGiven: true,
         notifyByWhatsapp: true,
         // WhatsApp Integration (Stage 4C) Phase 1: the tenant's own
         // `country` (already on Tenant, no schema change) is the
@@ -777,8 +781,25 @@ export class NotificationsService {
     // (every non-shipment-status fire* path, or a shipment status outside
     // the 5-milestone allow-list) skips SMS entirely — no Notification row
     // created at all, same as if the customer had never opted in.
-    if (customer.notifyBySms && smsContent && smsContent !== 'suppress') {
-      await this.createAndDispatch(eventId, tenantId, customerId, NotificationChannel.SMS, title, smsContent, customer.phone);
+    //
+    // SMS/Twilio A2P Phase 2 (consent gate): `notifyBySms` is only ever the
+    // operative send-time switch — it is deliberately NOT sufficient on
+    // its own. A real send additionally requires `smsConsentGiven` (the
+    // auditable affirmative-consent record; see Customer.smsConsentGiven's
+    // own doc comment — never inferred from notifyBySms) AND that the
+    // customer's phone carries no global SmsOptOut block (a STOP against
+    // the shared Twilio sending number; see SmsOptOut's own doc comment
+    // for why this check is cross-tenant). Any of the three failing is a
+    // silent skip — no Notification row created — identical in shape to
+    // "customer never opted in" today, so this closes the compliance gap
+    // without introducing a new observable state.
+    if (customer.notifyBySms && customer.smsConsentGiven && smsContent && smsContent !== 'suppress') {
+      const blockedByOptOut = await this.isPhoneOptedOutOfSms(customer.phone);
+      if (!blockedByOptOut) {
+        await this.createAndDispatch(eventId, tenantId, customerId, NotificationChannel.SMS, title, smsContent, customer.phone);
+      } else {
+        this.logger.log(`SMS skipped for customer ${customerId}: phone is on the global SmsOptOut list.`);
+      }
     }
     // WhatsApp Integration (Stage 4C) Phase 1: no template means this
     // event type/status isn't WhatsApp-supported yet (see
@@ -799,6 +820,27 @@ export class NotificationsService {
         customer.tenant?.country,
       );
     }
+  }
+
+  /**
+   * SMS/Twilio A2P Phase 2: the actual enforcement check against the
+   * global, cross-tenant SmsOptOut registry a STOP webhook writes to (see
+   * that model's own doc comment for why it is deliberately not
+   * tenant-scoped — every tenant shares one Twilio sending number, so a
+   * STOP against that number must block every tenant's sends to that
+   * phone, not just the tenant that happened to trigger this occurrence).
+   * Normalizes the same way `createAndDispatch`'s own SMS dispatch target
+   * normalization does (`'US'`, matching Customer.phone's documented
+   * assumption) so this check and the actual send always agree on which
+   * phone they mean. A phone that fails to normalize is not blocked here
+   * — `createAndDispatch`'s own normalization further down already
+   * records that case as a real FAILED attempt with a clear reason.
+   */
+  private async isPhoneOptedOutOfSms(phone: string | null): Promise<boolean> {
+    const normalized = normalizeToE164(phone, 'US');
+    if (!normalized) return false;
+    const optOut = await this.prisma.smsOptOut.findUnique({ where: { phoneE164: normalized } });
+    return !!optOut;
   }
 
   private async createAndDispatch(

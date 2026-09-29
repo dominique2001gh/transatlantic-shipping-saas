@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/Button';
 import { apiFetch, ApiError } from '@/lib/api';
 import { storeSession } from '@/lib/auth';
 import { resolvePostLoginRoute, resolveSafeNextPath } from '@/lib/post-login';
+import { siteConfig } from '@/lib/site-config';
 
 /**
  * /dropoff entry point: see the identical reader on the login page's own
@@ -45,6 +46,10 @@ export default function RegisterPage() {
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  // SMS/Twilio A2P Phase 1: must default to unchecked — affirmative
+  // consent only, never assumed. See CustomerSignupDto.smsConsent's own
+  // doc comment for how this is recorded server-side.
+  const [smsConsent, setSmsConsent] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [nextPath, setNextPath] = useState<string | null>(null);
@@ -69,6 +74,7 @@ export default function RegisterPage() {
           phone: phone || undefined,
           password,
           confirmPassword,
+          smsConsent,
         }),
       });
       storeSession(response.accessToken, response.user);
@@ -146,6 +152,39 @@ export default function RegisterPage() {
           value={confirmPassword}
           onChange={(event) => setConfirmPassword(event.target.value)}
         />
+
+        {/*
+         * SMS/Twilio A2P Phase 1: unchecked by default (see the smsConsent
+         * state above) — declining SMS here never blocks account creation.
+         * Tenant name reads from this deployment's own siteConfig (the
+         * same single source of truth AuthShell already uses for every
+         * other piece of branding on this page), never a hardcoded
+         * literal, so the copy stays correct if this page is ever served
+         * for a different tenant's own deployment.
+         */}
+        <label className="flex items-start gap-2.5 rounded-lg border border-slate-200 p-3.5 text-sm">
+          <input
+            type="checkbox"
+            id="smsConsent"
+            className="mt-0.5"
+            checked={smsConsent}
+            onChange={(event) => setSmsConsent(event.target.checked)}
+          />
+          <span className="text-slate-600">
+            I agree to receive SMS messages from {siteConfig.shortName} about my shipments, including
+            tracking, arrival, pickup, delivery, and service updates. Message frequency varies. Message
+            and data rates may apply. Reply STOP to opt out or HELP for help. Consent is not a condition
+            of purchase. See our{' '}
+            <Link href="/privacy" className="font-medium text-primary-700 hover:underline">
+              Privacy Policy
+            </Link>{' '}
+            and{' '}
+            <Link href="/terms" className="font-medium text-primary-700 hover:underline">
+              Terms &amp; Conditions
+            </Link>
+            .
+          </span>
+        </label>
 
         {error && (
           <p role="alert" className="text-sm text-red-600">

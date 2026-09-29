@@ -6,6 +6,7 @@ import type { AuthenticatedUser, CustomerEntryPointResponse, JwtPayload, LoginRe
 import * as bcrypt from 'bcrypt';
 import { generateCustomerNumber } from '../common/numbering/numbering.util';
 import { generateToken, hashToken } from '../common/token/token.util';
+import { SMS_CONSENT_DISCLOSURE_VERSION } from '../notifications/sms-consent.constants';
 import { passwordResetEmail } from '../notifications/templates/platform-emails';
 import { resolvePlatformEmailSender } from '../notifications/providers/platform-email-sender.util';
 import { EMAIL_PROVIDER } from '../notifications/providers/provider.types';
@@ -191,6 +192,27 @@ export class AuthService {
     const lastName = dto.lastName.trim();
     const phone = dto.phone?.trim() || undefined;
 
+    /**
+     * SMS/Twilio A2P Phase 1: the checkbox is the only thing that can ever
+     * set these — left unchecked/omitted, every field here stays at its
+     * schema default (false/null), never inferred from anything else.
+     * Deliberately sets `notifyBySms` too (not just the consent fields):
+     * the disclosure text IS the "I want SMS" ask, so checking it is both
+     * the affirmative consent and the send-time opt-in in one action —
+     * but the two stay separately recorded (see Customer.smsConsentGiven's
+     * own doc comment) so `notifyBySms` alone is never later read back as
+     * proof of consent.
+     */
+    const smsConsentData = dto.smsConsent
+      ? {
+          notifyBySms: true,
+          smsConsentGiven: true,
+          smsConsentAt: new Date(),
+          smsConsentSource: 'register_web_form',
+          smsConsentVersion: SMS_CONSENT_DISCLOSURE_VERSION,
+        }
+      : {};
+
     let user;
     let customerId: string;
     try {
@@ -201,13 +223,13 @@ export class AuthService {
       if (existingCustomer) {
         await this.prisma.customer.update({
           where: { id: existingCustomer.id },
-          data: { userId: user.id, phone: existingCustomer.phone ?? phone },
+          data: { userId: user.id, phone: existingCustomer.phone ?? phone, ...smsConsentData },
         });
         customerId = existingCustomer.id;
       } else {
         const customerNumber = await generateCustomerNumber(this.prisma, tenant.id);
         const customer = await this.prisma.customer.create({
-          data: { tenantId: tenant.id, customerNumber, firstName, lastName, email: dto.email.trim(), phone, userId: user.id },
+          data: { tenantId: tenant.id, customerNumber, firstName, lastName, email: dto.email.trim(), phone, userId: user.id, ...smsConsentData },
         });
         customerId = customer.id;
       }

@@ -1,4 +1,4 @@
-import { IsEmail, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import { IsBoolean, IsEmail, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
 
 /**
  * Customer Self-Service Pre-Registration, Stage 2: the smallest safe
@@ -38,4 +38,15 @@ export class CustomerSignupDto {
 
   @IsString()
   confirmPassword!: string;
+
+  /**
+   * SMS/Twilio A2P Phase 1: affirmative SMS consent from the registration
+   * form's checkbox — unchecked/omitted means no consent, never assumed.
+   * Deliberately optional (not required) so signup succeeds identically
+   * whether or not SMS is declined; see AuthService.customerSignup for how
+   * this is recorded (never inferred from notifyBySms alone).
+   */
+  @IsOptional()
+  @IsBoolean()
+  smsConsent?: boolean;
 }

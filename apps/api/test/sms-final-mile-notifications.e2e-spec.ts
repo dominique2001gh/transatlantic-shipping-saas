@@ -63,7 +63,7 @@ describe('SMS final-mile notifications (e2e)', () => {
     // end to end, not just in the pure phone-normalization unit test.
     await prisma.customer.update({
       where: { id: tenantA.customerId },
-      data: { notifyBySms: true, phone: '2147232121' },
+      data: { notifyBySms: true, smsConsentGiven: true, phone: '2147232121' },
     });
   });
 
@@ -109,7 +109,7 @@ describe('SMS final-mile notifications (e2e)', () => {
 
   it('3. a customer with no phone number on file gets a FAILED record, and does not block the shipment operation', async () => {
     const customer = await createCustomer(app, tokenA, 'No Number');
-    await prisma.customer.update({ where: { id: customer.id }, data: { notifyBySms: true, phone: null } });
+    await prisma.customer.update({ where: { id: customer.id }, data: { notifyBySms: true, smsConsentGiven: true, phone: null } });
 
     const shipment = await createSingleShipment(app, tokenA, customer.id, 1);
     const res = await receiveItemRaw(app, tokenA, shipment.items[0].id, tenantA.warehouseId);
@@ -125,7 +125,7 @@ describe('SMS final-mile notifications (e2e)', () => {
 
   it('4. an invalid/unparseable phone number gets a FAILED record with a clear reason, and does not block the shipment operation', async () => {
     const customer = await createCustomer(app, tokenA, 'Bad Number');
-    await prisma.customer.update({ where: { id: customer.id }, data: { notifyBySms: true, phone: 'not-a-real-number' } });
+    await prisma.customer.update({ where: { id: customer.id }, data: { notifyBySms: true, smsConsentGiven: true, phone: 'not-a-real-number' } });
 
     const shipment = await createSingleShipment(app, tokenA, customer.id, 1);
     const res = await receiveItemRaw(app, tokenA, shipment.items[0].id, tenantA.warehouseId);
@@ -157,6 +157,53 @@ describe('SMS final-mile notifications (e2e)', () => {
       where: { tenantId: tenantA.tenantId, customerId: customer.id, channel: 'EMAIL' },
     });
     expect(emailRow?.status).toBe('SENT');
+  });
+
+  it('5b. SMS/Twilio A2P Phase 2: notifyBySms=true alone (no smsConsentGiven) never gets an SMS attempt — the exact gap this phase closes', async () => {
+    const customer = await createCustomer(app, tokenA, 'No Consent');
+    // Simulates a legacy/pre-Phase-1 row, or a portal toggle that never
+    // went through a real consent flow — notifyBySms true, consent absent.
+    await prisma.customer.update({ where: { id: customer.id }, data: { notifyBySms: true, smsConsentGiven: false, phone: '2147232121' } });
+
+    const shipment = await createSingleShipment(app, tokenA, customer.id, 1);
+    await receiveItem(app, tokenA, shipment.items[0].id, tenantA.warehouseId);
+
+    expect(sent).toHaveLength(0); // never reached the provider
+    const notificationRow = await prisma.notification.findFirst({
+      where: { tenantId: tenantA.tenantId, customerId: customer.id, channel: 'SMS' },
+    });
+    expect(notificationRow).toBeNull(); // no row at all, same shape as "never opted in"
+
+    // Email for the same occurrence is completely unaffected.
+    const emailRow = await prisma.notification.findFirst({
+      where: { tenantId: tenantA.tenantId, customerId: customer.id, channel: 'EMAIL' },
+    });
+    expect(emailRow?.status).toBe('SENT');
+  });
+
+  it('5c. SMS/Twilio A2P Phase 2: a phone on the global SmsOptOut list never gets an SMS attempt, even with full consent', async () => {
+    const customer = await createCustomer(app, tokenA, 'Opted Out Via Stop');
+    const phoneE164 = '+12147232121';
+    await prisma.customer.update({ where: { id: customer.id }, data: { notifyBySms: true, smsConsentGiven: true, phone: '2147232121' } });
+    await prisma.smsOptOut.create({ data: { phoneE164, source: 'test_fixture' } });
+
+    try {
+      const shipment = await createSingleShipment(app, tokenA, customer.id, 1);
+      await receiveItem(app, tokenA, shipment.items[0].id, tenantA.warehouseId);
+
+      expect(sent).toHaveLength(0);
+      const notificationRow = await prisma.notification.findFirst({
+        where: { tenantId: tenantA.tenantId, customerId: customer.id, channel: 'SMS' },
+      });
+      expect(notificationRow).toBeNull();
+
+      const emailRow = await prisma.notification.findFirst({
+        where: { tenantId: tenantA.tenantId, customerId: customer.id, channel: 'EMAIL' },
+      });
+      expect(emailRow?.status).toBe('SENT'); // email is completely unaffected by the SMS-only opt-out
+    } finally {
+      await prisma.smsOptOut.delete({ where: { phoneE164 } });
+    }
   });
 
   it('6. a provider-level failure is recorded as FAILED, and does not block the shipment operation or affect email', async () => {
@@ -203,7 +250,7 @@ describe('SMS final-mile notifications (e2e)', () => {
   it('8. tenant isolation: tenant B customers never receive an SMS triggered by tenant A activity', async () => {
     await prisma.customer.update({
       where: { id: tenantB.customerId },
-      data: { notifyBySms: true, phone: '2147232121' },
+      data: { notifyBySms: true, smsConsentGiven: true, phone: '2147232121' },
     });
     sent.length = 0;
 
@@ -305,7 +352,7 @@ describe('SMS provider defaults to console when SMS_PROVIDER is unset (e2e)', ()
     app = await createTestApp();
     tenant = await createTestTenant(prisma, 'SmsConsoleDefault', UserRole.MANAGER);
     token = await login(app, tenant.user.email, tenant.user.password);
-    await prisma.customer.update({ where: { id: tenant.customerId }, data: { notifyBySms: true, phone: '2147232121' } });
+    await prisma.customer.update({ where: { id: tenant.customerId }, data: { notifyBySms: true, smsConsentGiven: true, phone: '2147232121' } });
   });
 
   afterAll(async () => {

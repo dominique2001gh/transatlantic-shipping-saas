@@ -113,9 +113,17 @@ export function PublicFooter() {
           <span>
             &copy; {new Date().getFullYear()} {siteConfig.companyName}. All rights reserved.
           </span>
-          <Link href="/credits" className="hover:text-white">
-            Photo Credits
-          </Link>
+          <span className="flex items-center gap-4">
+            <Link href="/privacy" className="hover:text-white">
+              Privacy Policy
+            </Link>
+            <Link href="/terms" className="hover:text-white">
+              Terms &amp; Conditions
+            </Link>
+            <Link href="/credits" className="hover:text-white">
+              Photo Credits
+            </Link>
+          </span>
         </div>
       </Container>
     </footer>
