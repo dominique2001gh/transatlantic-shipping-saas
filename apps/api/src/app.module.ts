@@ -22,6 +22,7 @@ import { ManifestsModule } from './manifests/manifests.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { OnboardingModule } from './onboarding/onboarding.module';
 import { PlatformLeadsModule } from './platform-leads/platform-leads.module';
+import { PlatformSmsConsentModule } from './platform-sms-consent/platform-sms-consent.module';
 import { PreRegistrationsModule } from './pre-registrations/pre-registrations.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { PublicAiAgentModule } from './public-ai-agent/public-ai-agent.module';
@@ -75,6 +76,7 @@ import { WebhooksModule } from './webhooks/webhooks.module';
     SubscriptionsModule,
     OnboardingModule,
     PlatformLeadsModule,
+    PlatformSmsConsentModule,
     EntitlementsModule,
     AiAgentModule,
     PublicAiAgentModule,

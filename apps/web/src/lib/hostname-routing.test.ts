@@ -34,6 +34,10 @@ test('ananselogix.com public routes resolve at the root without exposing /ananse
     ['/login', '/ananselogix/login'],
     ['/signup', '/ananselogix/signup'],
     ['/signup/success', '/ananselogix/signup/success'],
+    // Twilio A2P Campaign compliance pages (Brand: Sole Proprietor Debrah Atuahene).
+    ['/privacy', '/ananselogix/privacy'],
+    ['/terms', '/ananselogix/terms'],
+    ['/sms-consent', '/ananselogix/sms-consent'],
   ];
   for (const [requestedPath, expectedRewrite] of cases) {
     assert.deepEqual(
@@ -84,6 +88,12 @@ test('the bare Trans Atlantic apex and www are unaffected on the public site\'s 
     for (const path of ['/', '/login', '/how-it-works', '/track', '/register']) {
       assert.deepEqual(resolveHostnameRouting(host, path), { type: 'next' }, `expected ${host}${path} to pass through untouched`);
     }
+  }
+});
+
+test('Trans Atlantic\'s own existing /privacy and /terms pages are unaffected — the ananselogix.com rewrite for these same paths never applies to this hostname', () => {
+  for (const path of ['/privacy', '/terms']) {
+    assert.deepEqual(resolveHostnameRouting('talogisticssolutions.com', path), { type: 'next' }, `expected talogisticssolutions.com${path} to pass through untouched`);
   }
 });
 

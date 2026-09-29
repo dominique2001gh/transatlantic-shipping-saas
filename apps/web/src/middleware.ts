@@ -93,5 +93,11 @@ export const config = {
     '/demo',
     '/login',
     '/signup/:path*',
+    // Twilio A2P Campaign compliance (platform-level pages for the
+    // approved Brand: Sole Proprietor Debrah Atuahene) — same rewrite
+    // extension point this file's own doc comment describes.
+    '/privacy',
+    '/terms',
+    '/sms-consent',
   ],
 };

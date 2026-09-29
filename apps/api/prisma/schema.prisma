@@ -2084,6 +2084,28 @@ model WebsiteLead {
   @@map("website_leads")
 }
 
+/// Twilio A2P Campaign compliance: Ananse Logix's own PLATFORM-level SMS
+/// consent capture — deliberately not a WebsiteLead (which is always
+/// tenant-scoped; every real WebsiteLead belongs to a customer-facing
+/// tenant like Trans Atlantic) and deliberately has no tenantId at all.
+/// This form lives at ananselogix.com/sms-consent to support Twilio's A2P
+/// review of the approved Brand (Sole Proprietor: Debrah Atuahene) for
+/// the Ananse Logix platform itself — entirely separate from any one
+/// tenant's own customer consent flow (see Customer.smsConsentGiven for
+/// that). Never wired to any actual SMS send path.
+model PlatformSmsConsentSubmission {
+  id         String    @id @default(cuid())
+  name       String
+  phone      String
+  /// Unchecked/omitted on submit leaves this false and consentAt null —
+  /// never inferred from the mere existence of a submission row.
+  smsConsent Boolean   @default(false)
+  consentAt  DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@map("platform_sms_consent_submissions")
+}
+
 // ==========================================================================
 // SAAS PLATFORM — PLANS, SIGNUP, SUBSCRIPTIONS, ONBOARDING, ENTITLEMENTS
 // ==========================================================================
