@@ -7,6 +7,7 @@ import { PageHero } from '@/components/marketing/PageHero';
 import { LinkButton } from '@/components/ui/Button';
 import { Container } from '@/components/ui/Container';
 import { getStoredToken, getStoredUser } from '@/lib/auth';
+import { fetchPublicSiteConfig } from '@/lib/public-site-config';
 
 /**
  * Multi-tenant Drop-Off: the tenant-scoped counterpart to
@@ -25,12 +26,24 @@ import { getStoredToken, getStoredUser } from '@/lib/auth';
  * behavior for Trans Atlantic, and this route's only job is to carry
  * `tenantSlug` through — keeping them independent means a future change to
  * one can never accidentally alter the other's behavior.
+ *
+ * Branding: the surrounding (public) layout already swaps in generic
+ * AnanseLogix chrome (never Trans Atlantic's) on ananselogix.com — see
+ * that layout's own doc comment. This page additionally fetches the
+ * specific tenant's own name via the already-live, unauthenticated
+ * GET /public/site-config/:slug (fetchPublicSiteConfig) and shows it in
+ * the kicker once loaded, so Gold Coast sees "Gold Coast" and Titanic
+ * sees its own name — no hardcoding, works for any future tenant with a
+ * PUBLIC_WEBSITE entitlement. A 404 (no config yet) is silently ignored;
+ * the kicker just stays generic, never an error shown to the customer.
  */
 export default function TenantDropoffPage() {
   const router = useRouter();
   const params = useParams<{ tenantSlug: string }>();
   const tenantSlug = params.tenantSlug;
   const [checkedSession, setCheckedSession] = useState(false);
+  /** Null until the fetch resolves — the kicker/title stay at their generic default the whole time this is null, never a flash of the wrong name. See fetchPublicSiteConfig's own doc comment: a 404 (no PUBLIC_WEBSITE entitlement, or no config saved yet) is expected and normal, not an error — this page must never fail or show anything alarming because of it. */
+  const [tenantName, setTenantName] = useState<string | null>(null);
 
   useEffect(() => {
     const user = getStoredUser();
@@ -40,6 +53,14 @@ export default function TenantDropoffPage() {
     }
     setCheckedSession(true);
   }, [router]);
+
+  useEffect(() => {
+    fetchPublicSiteConfig(tenantSlug)
+      .then((config) => setTenantName(config.companyName))
+      .catch(() => {
+        /* no public branding for this tenant yet — keep the generic kicker/title below */
+      });
+  }, [tenantSlug]);
 
   if (!checkedSession) {
     return null;
@@ -56,7 +77,7 @@ export default function TenantDropoffPage() {
   return (
     <>
       <PageHero
-        kicker="Customer Drop-Off"
+        kicker={tenantName ? `${tenantName} — Customer Drop-Off` : 'Customer Drop-Off'}
         title="Prepare Your Drop-Off"
         description="Save time at the warehouse by entering your shipment information before you arrive. When you're finished, we'll give you a QR code to show our staff when you drop off your packages."
       />
