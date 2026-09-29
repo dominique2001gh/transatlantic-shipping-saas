@@ -60,10 +60,18 @@ describe('Send Drop-Off Link (e2e)', () => {
   }
 
   describe('tenant-aware URL resolution', () => {
-    it('always ends at /dropoff', async () => {
+    it('without a customDomain, resolves under /dropoff/{tenantSlug} — a shared-domain tenant\'s link must carry its own slug (see resolveTenantDropoffUrl)', async () => {
       const res = await getLink(managerTokenA);
       expect(res.status).toBe(200);
-      expect(res.body.url).toMatch(/\/dropoff$/);
+      expect(res.body.url).toMatch(new RegExp(`/dropoff/${tenantA.slug}$`));
+    });
+
+    it('two different tenants with no customDomain get DIFFERENT dropoff URLs — never the same shared "/dropoff" link (the actual reported bug)', async () => {
+      const resA = await getLink(managerTokenA);
+      const resB = await getLink(managerTokenB);
+      expect(resA.body.url).not.toBe(resB.body.url);
+      expect(resA.body.url).toMatch(new RegExp(`/dropoff/${tenantA.slug}$`));
+      expect(resB.body.url).toMatch(new RegExp(`/dropoff/${tenantB.slug}$`));
     });
 
     it("two different tenants with their own customDomain each get their OWN domain reflected — never a shared/hardcoded URL", async () => {

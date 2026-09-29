@@ -111,3 +111,47 @@ export function resolveTenantPublicSiteUrl(tenant: TenantForWebAppUrl, config: C
 
   return config.get<string>('ANANSELOGIX_BASE_URL', 'http://localhost:3000')!;
 }
+
+/**
+ * True when this tenant's public site resolves to the shared, multi-tenant
+ * ANANSELOGIX_BASE_URL fallback branch of resolveTenantPublicSiteUrl above
+ * (neither a verified customDomain nor the one legacy-grandfathered slug) —
+ * i.e. when its public hostname is shared with every other such tenant and
+ * therefore cannot, by itself, disambiguate which tenant a request is for.
+ * Exported so any caller that needs to know whether a tenant-identifying
+ * path segment is required (see resolveTenantDropoffUrl) — or will need to,
+ * for the same reason, as more tenant-facing routes go multi-tenant — can
+ * ask this one function instead of re-deriving the same precedence.
+ */
+export function isSharedAnanseLogixDomain(tenant: TenantForWebAppUrl, config: ConfigLike): boolean {
+  if (tenant.customDomain) return false;
+  const legacySlug = config.get<string>('LEGACY_CUSTOM_DOMAIN_TENANT_SLUG');
+  return !(legacySlug && tenant.slug === legacySlug);
+}
+
+/**
+ * Customer Self-Service Pre-Registration ("Send Drop-Off Link"): the actual
+ * /dropoff URL for this tenant, building on resolveTenantPublicSiteUrl.
+ *
+ * A tenant with its own domain (customDomain, or the one legacy-grandfathered
+ * slug) has a public hostname dedicated to exactly one tenant — "/dropoff"
+ * on that domain is already unambiguous, so the URL is unchanged from
+ * before this function existed (zero behavior change for Trans Atlantic,
+ * and for any future customDomain tenant).
+ *
+ * Every other tenant shares ANANSELOGIX_BASE_URL with every other
+ * non-custom-domain tenant — "https://ananselogix.com/dropoff" alone cannot
+ * say which tenant it's for, so the tenant's own slug is appended as a path
+ * segment: "/dropoff/{slug}". The corresponding frontend route,
+ * apps/web/src/app/(public)/dropoff/[tenantSlug]/page.tsx, reads that same
+ * segment and threads it through Create Account/Sign In so
+ * AuthService.customerSignup resolves the correct tenant — see that
+ * function's own doc comment for the rest of this chain.
+ */
+export function resolveTenantDropoffUrl(tenant: TenantForWebAppUrl, config: ConfigLike): string {
+  const baseUrl = resolveTenantPublicSiteUrl(tenant, config).replace(/\/$/, '');
+  if (isSharedAnanseLogixDomain(tenant, config)) {
+    return `${baseUrl}/dropoff/${tenant.slug}`;
+  }
+  return `${baseUrl}/dropoff`;
+}

@@ -138,27 +138,37 @@ export class AuthService {
    * RolesGuard, requireTenantId/requireCustomerId) needs zero changes to
    * recognize the resulting session.
    *
-   * Tenant resolution is hardcoded to Trans Atlantic — never a client-
-   * supplied tenantId or slug. Per the Stage 1 audit, real host/custom-
-   * domain tenant resolution doesn't exist anywhere in this codebase yet
-   * (Tenant.customDomain is reserved, unused); building generic signup on
-   * top of that gap would let a caller reach an arbitrary tenant. Trans
-   * Atlantic is the one tenant with a real, working customer-portal entry
-   * point today (same slug already hardcoded in
-   * resolveCustomerEntryPoint above) — this is the safe, narrow version of
-   * this feature until per-tenant domain resolution is real infrastructure.
+   * Multi-tenant Drop-Off: tenant resolution is by `dto.tenantSlug` when the
+   * caller supplies one — carried through from the tenant-specific
+   * /dropoff/{tenantSlug} public link (see resolveTenantDropoffUrl's own
+   * doc comment for how that URL is generated, and
+   * apps/web/src/app/(public)/dropoff/[tenantSlug]/page.tsx for how it's
+   * threaded to this call). `tenantSlug` is a caller-supplied *lookup key*,
+   * never trusted as an authorization decision by itself: it only selects
+   * which tenant's `findFirst({ slug, isActive: true })` row this signup
+   * attaches to — every check below it (existing-user, existing-customer,
+   * the User(tenantId, email) unique constraint) is already scoped to
+   * whatever tenant.id that lookup resolved, exactly as before, so a
+   * mistaken or malicious slug can at most land the signup on a *different
+   * real, active* tenant — never leak or modify another tenant's existing
+   * account, and never create anything above a CUSTOMER-role account (no
+   * `role` field exists on CustomerSignupDto for a caller to set even if it
+   * tried — the global ValidationPipe's forbidNonWhitelisted config rejects
+   * it outright, and this method's own Prisma call hardcodes `role:
+   * UserRole.CUSTOMER` unconditionally).
    *
-   * Only a CUSTOMER-role User is ever created here — there is no `role`
-   * field on CustomerSignupDto for a caller to set even if it tried (the
-   * global ValidationPipe's forbidNonWhitelisted config rejects it
-   * outright), and this method's own Prisma call hardcodes `role:
-   * UserRole.CUSTOMER` unconditionally.
+   * When `dto.tenantSlug` is omitted — every existing caller of this
+   * endpoint today, e.g. Trans Atlantic's own /register reached directly at
+   * talogisticssolutions.com/register — resolution falls back to
+   * TRANS_ATLANTIC_TENANT_SLUG exactly as before this change. Zero behavior
+   * change for that path.
    */
   async customerSignup(dto: CustomerSignupDto): Promise<LoginResponseDto> {
     const normalizedEmail = dto.email.toLowerCase().trim();
 
+    const targetSlug = dto.tenantSlug?.trim() || TRANS_ATLANTIC_TENANT_SLUG;
     const tenant = await this.prisma.tenant.findFirst({
-      where: { slug: TRANS_ATLANTIC_TENANT_SLUG, isActive: true },
+      where: { slug: targetSlug, isActive: true },
     });
     if (!tenant) {
       throw new BadRequestException('Customer sign-up is not available right now.');

@@ -1,7 +1,7 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { PlatformTenantListItem, TenantSubscriptionSummary } from '@transatlantic/shared';
-import { resolveTenantPublicSiteUrl } from '../common/tenant/tenant-web-app-url.util';
+import { resolveTenantDropoffUrl } from '../common/tenant/tenant-web-app-url.util';
 import { dropoffLinkEmail } from '../notifications/templates/shipment-customer-emails';
 import { EMAIL_PROVIDER } from '../notifications/providers/provider.types';
 import type { EmailProvider } from '../notifications/providers/provider.types';
@@ -143,11 +143,13 @@ export class TenantsService {
   /**
    * Quick Receive's "Send Drop-Off Link" card: the customer-facing
    * "Prepare Your Drop-Off" URL for this tenant. Uses
-   * resolveTenantPublicSiteUrl — NOT resolveTenantWebAppUrl (that one is
+   * resolveTenantDropoffUrl — NOT resolveTenantWebAppUrl (that one is
    * for staff-invitation-style links and, for the legacy-slugged tenant,
    * deliberately resolves to the staff hostname) — see that function's own
    * doc comment for exactly why a customer-facing link needs a different
-   * legacy resolution. Never hardcodes talogisticssolutions.com: this
+   * legacy resolution, and for why every tenant sharing ANANSELOGIX_BASE_URL
+   * gets its own slug appended so this link is never identical to another
+   * such tenant's. Never hardcodes talogisticssolutions.com: this
    * generalizes to any future tenant the moment it has a real customDomain,
    * with no further code change here.
    */
@@ -156,8 +158,7 @@ export class TenantsService {
       where: { id: tenantId },
       select: { slug: true, customDomain: true },
     });
-    const baseUrl = resolveTenantPublicSiteUrl(tenant, this.config);
-    return { url: `${baseUrl.replace(/\/$/, '')}/dropoff` };
+    return { url: resolveTenantDropoffUrl(tenant, this.config) };
   }
 
   /**
@@ -171,8 +172,7 @@ export class TenantsService {
    */
   async sendDropoffLinkEmail(tenantId: string, toEmail: string): Promise<void> {
     const tenant = await this.prisma.tenant.findUniqueOrThrow({ where: { id: tenantId } });
-    const baseUrl = resolveTenantPublicSiteUrl(tenant, this.config);
-    const dropoffUrl = `${baseUrl.replace(/\/$/, '')}/dropoff`;
+    const dropoffUrl = resolveTenantDropoffUrl(tenant, this.config);
 
     const email = dropoffLinkEmail({
       tenant: {

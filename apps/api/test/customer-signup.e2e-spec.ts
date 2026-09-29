@@ -5,17 +5,20 @@ import { createTestTenant, deleteTestTenant, TestTenantFixture } from './utils/f
 import { createTestApp } from './utils/test-app';
 
 /**
- * Customer Self-Service Pre-Registration, Stage 2: POST /auth/customer-signup.
+ * Customer Self-Service Pre-Registration: POST /auth/customer-signup.
  *
- * This endpoint is hardcoded to the real "transatlantic" tenant (see
- * AuthService.customerSignup's own doc comment) — there is no way to
- * request signup into an arbitrary/test tenant, which is exactly the
- * safety property this suite exists to prove. Since e2e fixtures never
+ * Without a `tenantSlug` in the request body, this endpoint resolves to the
+ * real "transatlantic" tenant — unchanged default behavior, still true
+ * today for every existing caller (Trans Atlantic's own /register reached
+ * directly). See AuthService.customerSignup's own doc comment for the full
+ * multi-tenant resolution rules now layered on top of that default; the
+ * "Customer signup: multi-tenant tenantSlug resolution" describe block
+ * below covers the `tenantSlug` path specifically. Since e2e fixtures never
  * touch the real seeded "transatlantic" tenant (see fixtures.ts's own
- * doc comment), this suite drives the endpoint against whatever tenant
- * actually has that slug in the target database — local dev's seeded
- * tenant — and cleans up every User/Customer row it creates itself
- * afterward rather than deleting the tenant.
+ * doc comment), this suite drives the default-path endpoint against
+ * whatever tenant actually has that slug in the target database — local
+ * dev's seeded tenant — and cleans up every User/Customer row it creates
+ * itself afterward rather than deleting the tenant.
  */
 describe('Customer signup (Stage 2, e2e)', () => {
   let app: INestApplication;
@@ -295,6 +298,216 @@ describe('Customer signup does not leak into unrelated tenants (e2e)', () => {
     // Clean up — this account did land in the real transatlantic tenant.
     await prisma.customer.deleteMany({ where: { email, tenantId: res.body.user.tenantId } });
     await prisma.user.deleteMany({ where: { email, tenantId: res.body.user.tenantId } });
+  });
+});
+
+/**
+ * Multi-tenant Drop-Off: proves `tenantSlug` (carried through from a
+ * tenant-scoped /dropoff/{tenantSlug} link, see AuthService.customerSignup's
+ * own doc comment) resolves signup to the correct tenant, that two
+ * different such tenants never cross-contaminate each other's accounts, and
+ * that an inactive/unrecognized slug fails safely without leaking which
+ * slugs are real.
+ */
+describe('Customer signup: multi-tenant tenantSlug resolution (e2e)', () => {
+  let app: INestApplication;
+  const prisma = new PrismaClient();
+  let goldCoast: TestTenantFixture;
+  let titanic: TestTenantFixture;
+  let inactiveTenant: TestTenantFixture;
+
+  beforeAll(async () => {
+    app = await createTestApp();
+    goldCoast = await createTestTenant(prisma, 'GoldCoast', UserRole.MANAGER);
+    titanic = await createTestTenant(prisma, 'Titanic', UserRole.MANAGER);
+    inactiveTenant = await createTestTenant(prisma, 'Inactive', UserRole.MANAGER);
+    await prisma.tenant.update({ where: { id: inactiveTenant.tenantId }, data: { isActive: false } });
+  });
+
+  afterAll(async () => {
+    await app.close();
+    await deleteTestTenant(prisma, goldCoast.tenantId);
+    await deleteTestTenant(prisma, titanic.tenantId);
+    await deleteTestTenant(prisma, inactiveTenant.tenantId);
+    await prisma.$disconnect();
+  });
+
+  function uniqueEmail(label: string): string {
+    return `e2e-signup-${label}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@example.test`;
+  }
+
+  function signup(body: Record<string, unknown>) {
+    return request(app.getHttpServer()).post('/auth/customer-signup').send(body);
+  }
+
+  it('a signup carrying Gold Coast\'s slug is created under Gold Coast, with a linked Customer scoped to Gold Coast', async () => {
+    const email = uniqueEmail('goldcoast');
+    const res = await signup({
+      firstName: 'Ama',
+      lastName: 'Boateng',
+      email,
+      password: 'CorrectHorse123',
+      confirmPassword: 'CorrectHorse123',
+      tenantSlug: goldCoast.slug,
+    });
+    expect(res.status).toBe(201);
+    expect(res.body.user.tenantId).toBe(goldCoast.tenantId);
+
+    const dbCustomer = await prisma.customer.findUniqueOrThrow({ where: { id: res.body.user.customerId } });
+    expect(dbCustomer.tenantId).toBe(goldCoast.tenantId);
+  });
+
+  it('a signup carrying Titanic\'s slug is created under Titanic — a different tenant than Gold Coast above', async () => {
+    const email = uniqueEmail('titanic');
+    const res = await signup({
+      firstName: 'Kwame',
+      lastName: 'Mensah',
+      email,
+      password: 'CorrectHorse123',
+      confirmPassword: 'CorrectHorse123',
+      tenantSlug: titanic.slug,
+    });
+    expect(res.status).toBe(201);
+    expect(res.body.user.tenantId).toBe(titanic.tenantId);
+    expect(res.body.user.tenantId).not.toBe(goldCoast.tenantId);
+  });
+
+  it('the SAME email can independently sign up under Gold Coast and under Titanic — two fully separate accounts, no cross-tenant collision', async () => {
+    const email = uniqueEmail('shared');
+    const resGoldCoast = await signup({
+      firstName: 'Same',
+      lastName: 'Email',
+      email,
+      password: 'CorrectHorse123',
+      confirmPassword: 'CorrectHorse123',
+      tenantSlug: goldCoast.slug,
+    });
+    expect(resGoldCoast.status).toBe(201);
+
+    const resTitanic = await signup({
+      firstName: 'Same',
+      lastName: 'Email',
+      email,
+      password: 'AnotherPassword123',
+      confirmPassword: 'AnotherPassword123',
+      tenantSlug: titanic.slug,
+    });
+    expect(resTitanic.status).toBe(201);
+    expect(resTitanic.body.user.id).not.toBe(resGoldCoast.body.user.id);
+    expect(resTitanic.body.user.tenantId).not.toBe(resGoldCoast.body.user.tenantId);
+
+    const goldCoastUser = await prisma.user.findFirst({ where: { tenantId: goldCoast.tenantId, email } });
+    const titanicUser = await prisma.user.findFirst({ where: { tenantId: titanic.tenantId, email } });
+    expect(goldCoastUser).not.toBeNull();
+    expect(titanicUser).not.toBeNull();
+    expect(goldCoastUser!.id).not.toBe(titanicUser!.id);
+  });
+
+  it('a Gold Coast signup never creates or touches any row under Titanic, and vice versa', async () => {
+    const email = uniqueEmail('cross-check');
+    const res = await signup({
+      firstName: 'Ama',
+      lastName: 'Boateng',
+      email,
+      password: 'CorrectHorse123',
+      confirmPassword: 'CorrectHorse123',
+      tenantSlug: goldCoast.slug,
+    });
+    expect(res.status).toBe(201);
+
+    const leakedIntoTitanic = await prisma.user.findFirst({ where: { tenantId: titanic.tenantId, email } });
+    expect(leakedIntoTitanic).toBeNull();
+    const leakedCustomerIntoTitanic = await prisma.customer.findFirst({ where: { tenantId: titanic.tenantId, email } });
+    expect(leakedCustomerIntoTitanic).toBeNull();
+  });
+
+  it('omitting tenantSlug still defaults to Trans Atlantic — zero change to the pre-existing default path', async () => {
+    const transAtlantic = await prisma.tenant.findFirstOrThrow({ where: { slug: 'transatlantic' } });
+    const email = uniqueEmail('default-fallback');
+    const res = await signup({
+      firstName: 'Ama',
+      lastName: 'Boateng',
+      email,
+      password: 'CorrectHorse123',
+      confirmPassword: 'CorrectHorse123',
+    });
+    expect(res.status).toBe(201);
+    expect(res.body.user.tenantId).toBe(transAtlantic.id);
+
+    await prisma.customer.deleteMany({ where: { email, tenantId: transAtlantic.id } });
+    await prisma.user.deleteMany({ where: { email, tenantId: transAtlantic.id } });
+  });
+
+  it('a slug for an INACTIVE tenant is rejected with the same generic 400 as an unrecognized slug — never a distinguishable error', async () => {
+    const email = uniqueEmail('inactive');
+    const res = await signup({
+      firstName: 'Ama',
+      lastName: 'Boateng',
+      email,
+      password: 'CorrectHorse123',
+      confirmPassword: 'CorrectHorse123',
+      tenantSlug: inactiveTenant.slug,
+    });
+    expect(res.status).toBe(400);
+
+    const created = await prisma.user.findFirst({ where: { tenantId: inactiveTenant.tenantId, email } });
+    expect(created).toBeNull();
+  });
+
+  it('an unrecognized/nonexistent slug is rejected with 400 and creates nothing anywhere', async () => {
+    const email = uniqueEmail('unknown-slug');
+    const res = await signup({
+      firstName: 'Ama',
+      lastName: 'Boateng',
+      email,
+      password: 'CorrectHorse123',
+      confirmPassword: 'CorrectHorse123',
+      tenantSlug: 'this-tenant-does-not-exist-12345',
+    });
+    expect(res.status).toBe(400);
+
+    const createdAnywhere = await prisma.user.findFirst({ where: { email } });
+    expect(createdAnywhere).toBeNull();
+  });
+
+  it('the inactive-tenant error message is identical to the unrecognized-slug error message — no slug-enumeration signal', async () => {
+    const inactiveRes = await signup({
+      firstName: 'Ama',
+      lastName: 'Boateng',
+      email: uniqueEmail('msg-inactive'),
+      password: 'CorrectHorse123',
+      confirmPassword: 'CorrectHorse123',
+      tenantSlug: inactiveTenant.slug,
+    });
+    const unknownRes = await signup({
+      firstName: 'Ama',
+      lastName: 'Boateng',
+      email: uniqueEmail('msg-unknown'),
+      password: 'CorrectHorse123',
+      confirmPassword: 'CorrectHorse123',
+      tenantSlug: 'this-tenant-does-not-exist-67890',
+    });
+    expect(inactiveRes.body.message).toEqual(unknownRes.body.message);
+  });
+
+  it('a Gold Coast account can immediately log in and reach the customer portal, scoped to Gold Coast', async () => {
+    const email = uniqueEmail('portal-check');
+    const signupRes = await signup({
+      firstName: 'Ama',
+      lastName: 'Boateng',
+      email,
+      password: 'CorrectHorse123',
+      confirmPassword: 'CorrectHorse123',
+      tenantSlug: goldCoast.slug,
+    });
+    expect(signupRes.status).toBe(201);
+
+    const loginRes = await request(app.getHttpServer()).post('/auth/login').send({ email, password: 'CorrectHorse123' });
+    expect(loginRes.status).toBe(200);
+    expect(loginRes.body.user.tenantId).toBe(goldCoast.tenantId);
+
+    const meRes = await request(app.getHttpServer()).get('/portal/me').set('Authorization', `Bearer ${loginRes.body.accessToken}`);
+    expect(meRes.status).toBe(200);
   });
 });
 

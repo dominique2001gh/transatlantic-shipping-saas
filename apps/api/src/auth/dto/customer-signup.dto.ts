@@ -49,4 +49,18 @@ export class CustomerSignupDto {
   @IsOptional()
   @IsBoolean()
   smsConsent?: boolean;
+
+  /**
+   * Multi-tenant Drop-Off: which tenant this signup is for, carried through
+   * from the tenant-specific /dropoff/{tenantSlug} link the customer
+   * actually used — see AuthService.customerSignup's own doc comment for
+   * full resolution rules and the legacy default this falls back to when
+   * omitted. A slug, never a tenantId — never trusted as proof of anything
+   * by itself; AuthService still independently looks the tenant up by this
+   * slug and requires it to be active before using it.
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  tenantSlug?: string;
 }

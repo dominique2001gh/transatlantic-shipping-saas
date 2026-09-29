@@ -1,4 +1,11 @@
-import { resolveTenantPublicSiteUrl, resolveTenantWebAppUrl, type ConfigLike, type TenantForWebAppUrl } from '../src/common/tenant/tenant-web-app-url.util';
+import {
+  isSharedAnanseLogixDomain,
+  resolveTenantDropoffUrl,
+  resolveTenantPublicSiteUrl,
+  resolveTenantWebAppUrl,
+  type ConfigLike,
+  type TenantForWebAppUrl,
+} from '../src/common/tenant/tenant-web-app-url.util';
 
 jest.setTimeout(30_000);
 
@@ -138,5 +145,74 @@ describe('resolveTenantPublicSiteUrl — a customer-facing link must never point
       fakeConfig({ LEGACY_CUSTOM_DOMAIN_TENANT_SLUG: 'transatlantic', WEB_APP_URL: 'not-a-valid-url' }),
     );
     expect(url).toBe('not-a-valid-url');
+  });
+});
+
+/**
+ * Multi-tenant Drop-Off fix (2026-09): the actual bug this closes — Gold
+ * Coast and Tatanic/Titanic (any tenant sharing ANANSELOGIX_BASE_URL) used
+ * to resolve to the exact same "/dropoff" URL as each other, so the public
+ * link could never say which tenant it was for. resolveTenantDropoffUrl
+ * must append the tenant's own slug for that shared-domain case, while
+ * leaving every dedicated-domain tenant (customDomain, or the one legacy
+ * slug) exactly as resolveTenantPublicSiteUrl already produced — zero
+ * behavior change for Trans Atlantic's own frozen /dropoff.
+ */
+describe('resolveTenantDropoffUrl / isSharedAnanseLogixDomain — every shared-domain tenant gets its own unique /dropoff link', () => {
+  function fakeConfig(values: Record<string, string>): ConfigLike {
+    return {
+      get: <T = string>(key: string, defaultValue?: T): T | undefined =>
+        (key in values ? (values[key] as unknown as T) : defaultValue),
+    };
+  }
+
+  const goldCoast: TenantForWebAppUrl = { slug: 'gold-coast', customDomain: null };
+  const titanic: TenantForWebAppUrl = { slug: 'titanic', customDomain: null };
+  const transAtlantic: TenantForWebAppUrl = { slug: 'transatlantic', customDomain: null };
+  const sharedDomainConfig = fakeConfig({
+    LEGACY_CUSTOM_DOMAIN_TENANT_SLUG: 'transatlantic',
+    WEB_APP_URL: 'https://app.talogisticssolutions.com',
+    ANANSELOGIX_BASE_URL: 'https://ananselogix.com',
+  });
+
+  it('1. THE BUG: Gold Coast and Titanic previously resolved to the identical URL — now each gets its own slug appended, and the two are different', () => {
+    const goldCoastUrl = resolveTenantDropoffUrl(goldCoast, sharedDomainConfig);
+    const titanicUrl = resolveTenantDropoffUrl(titanic, sharedDomainConfig);
+    expect(goldCoastUrl).toBe('https://ananselogix.com/dropoff/gold-coast');
+    expect(titanicUrl).toBe('https://ananselogix.com/dropoff/titanic');
+    expect(goldCoastUrl).not.toBe(titanicUrl);
+  });
+
+  it('2. Trans Atlantic (the legacy-slugged tenant) is unaffected — still bare "/dropoff" on its own dedicated domain, exactly as before this fix', () => {
+    const url = resolveTenantDropoffUrl(transAtlantic, sharedDomainConfig);
+    expect(url).toBe('https://talogisticssolutions.com/dropoff');
+  });
+
+  it('3. a tenant with its own customDomain gets bare "/dropoff" on that domain — no slug segment needed, since the domain is already unambiguous', () => {
+    const url = resolveTenantDropoffUrl(
+      { slug: 'some-future-tenant', customDomain: 'app.somefuturetenant.com' },
+      sharedDomainConfig,
+    );
+    expect(url).toBe('https://app.somefuturetenant.com/dropoff');
+  });
+
+  it('4. customDomain wins even for a tenant whose slug happens to equal the legacy slug — same precedence as resolveTenantPublicSiteUrl', () => {
+    const url = resolveTenantDropoffUrl(
+      { slug: 'transatlantic', customDomain: 'talogisticssolutions.com' },
+      sharedDomainConfig,
+    );
+    expect(url).toBe('https://talogisticssolutions.com/dropoff');
+  });
+
+  it('5. without LEGACY_CUSTOM_DOMAIN_TENANT_SLUG configured, even a tenant slugged "transatlantic" is treated as shared-domain — config-driven, never an implicit slug check', () => {
+    const url = resolveTenantDropoffUrl(transAtlantic, fakeConfig({ ANANSELOGIX_BASE_URL: 'https://ananselogix.com' }));
+    expect(url).toBe('https://ananselogix.com/dropoff/transatlantic');
+  });
+
+  it('isSharedAnanseLogixDomain: true for Gold Coast/Titanic, false for the legacy tenant and for any customDomain tenant', () => {
+    expect(isSharedAnanseLogixDomain(goldCoast, sharedDomainConfig)).toBe(true);
+    expect(isSharedAnanseLogixDomain(titanic, sharedDomainConfig)).toBe(true);
+    expect(isSharedAnanseLogixDomain(transAtlantic, sharedDomainConfig)).toBe(false);
+    expect(isSharedAnanseLogixDomain({ slug: 'gold-coast', customDomain: 'goldcoast.example.com' }, sharedDomainConfig)).toBe(false);
   });
 });
