@@ -10,7 +10,7 @@ import { Container } from '@/components/ui/Container';
 import { ApiError } from '@/lib/api';
 import { PLAN_DISPLAY_NAMES, fetchPublicPlans, formatCents } from '@/lib/ananselogix/plans';
 import { serviceTypeOptions } from '@/lib/ananselogix/site-data';
-import { createSignupCheckout, setSignupCompany, setSignupOwner, startSignup } from '@/lib/ananselogix/signup';
+import { createSignupCheckout, getSignupStatus, setSignupCompany, setSignupOwner, startSignup } from '@/lib/ananselogix/signup';
 
 type Step = 1 | 2 | 3 | 4;
 
@@ -54,16 +54,36 @@ function SignupWizard() {
   useEffect(() => {
     fetchPublicPlans().then(setPlans).catch(() => setPlans([]));
 
-    const storedToken = localStorage.getItem(TOKEN_STORAGE_KEY);
-    const storedStep = localStorage.getItem(STEP_STORAGE_KEY);
     const urlToken = searchParams.get('token');
     if (urlToken) {
       setToken(urlToken);
       setStep(4);
-    } else if (storedToken) {
-      setToken(storedToken);
-      setStep((Number(storedStep) as Step) || 2);
+      return;
     }
+
+    const storedToken = localStorage.getItem(TOKEN_STORAGE_KEY);
+    const storedStep = localStorage.getItem(STEP_STORAGE_KEY);
+    if (!storedToken) return;
+
+    // A stored token may belong to a long-dead session (expired, or from a
+    // different browser profile session entirely) — restoring it blind used
+    // to silently drop the visitor onto Step 2 with no explanation before
+    // the very next submit failed with "session expired". Validate against
+    // the same status endpoint the success page already polls before trusting it.
+    getSignupStatus(storedToken)
+      .then(({ status }) => {
+        if (status === 'DRAFT' || status === 'AWAITING_PAYMENT') {
+          setToken(storedToken);
+          setStep((Number(storedStep) as Step) || 2);
+        } else {
+          localStorage.removeItem(TOKEN_STORAGE_KEY);
+          localStorage.removeItem(STEP_STORAGE_KEY);
+        }
+      })
+      .catch(() => {
+        localStorage.removeItem(TOKEN_STORAGE_KEY);
+        localStorage.removeItem(STEP_STORAGE_KEY);
+      });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
