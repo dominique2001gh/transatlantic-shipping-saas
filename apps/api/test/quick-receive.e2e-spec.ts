@@ -337,6 +337,40 @@ describe('Quick Receive (e2e)', () => {
       const shipmentCountAfter = await prisma.shipment.count({ where: { tenantId: tenant.tenantId } });
       expect(shipmentCountAfter).toBe(shipmentCountBefore);
     });
+
+    it("404s a same-tenant destinationWarehouseId that isn't flagged isDestinationWarehouse — the Gold Coast/Mansfield production bug (2026-09-29)", async () => {
+      // tenant.warehouseId is this fixture's own origin-only warehouse
+      // (see createTestTenant) — exactly Gold Coast's real production
+      // shape (their only warehouse, Mansfield, was origin-only). An
+      // origin-only warehouse must never be accepted as a shipment's
+      // destination warehouse, atomically (no partial shipment left
+      // behind), even though it undeniably belongs to this tenant.
+      const shipmentCountBefore = await prisma.shipment.count({ where: { tenantId: tenant.tenantId } });
+      const res = await quickReceive(managerToken, basePayload({ destinationWarehouseId: tenant.warehouseId, packageCount: 1 }));
+      expect(res.status).toBe(404);
+      const shipmentCountAfter = await prisma.shipment.count({ where: { tenantId: tenant.tenantId } });
+      expect(shipmentCountAfter).toBe(shipmentCountBefore);
+    });
+
+    it('accepts a same-tenant destinationWarehouseId that is inactive-turned-active but rejects one that is currently inactive', async () => {
+      const inactiveDestination = await prisma.warehouse.create({
+        data: {
+          tenantId: tenant.tenantId,
+          name: 'Inactive Destination Warehouse',
+          code: `E2E-INACTIVE-${Date.now()}`,
+          addressLine1: '4 Test Street',
+          city: 'Accra',
+          country: 'Ghana',
+          isDestinationWarehouse: true,
+          isActive: false,
+        },
+      });
+      const res = await quickReceive(
+        managerToken,
+        basePayload({ destinationWarehouseId: inactiveDestination.id, packageCount: 1 }),
+      );
+      expect(res.status).toBe(404);
+    });
   });
 
   // -- Tenant isolation -------------------------------------------------------

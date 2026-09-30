@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
 import type { CustomerSummary, ShipmentSummary, StaffPreRegistrationLookup, WarehouseSummary } from '@transatlantic/shared';
 import { OPERATIONS_ROLES, ShipmentItemType, ShipmentMode, WeightUnit } from '@transatlantic/shared';
@@ -285,6 +286,18 @@ export default function QuickReceivePage() {
   const originGeographyLabel = selectedOriginWarehouse
     ? [selectedOriginWarehouse.city, selectedOriginWarehouse.state, selectedOriginWarehouse.country].filter(Boolean).join(', ')
     : null;
+
+  /**
+   * Root cause of the Gold Coast pickup bug (2026-09-29): this field used
+   * to list every warehouse unfiltered, so a tenant with only one
+   * warehouse (origin-only) had no way to leave this "optional" field
+   * meaningfully empty — the only selectable option WAS the origin
+   * warehouse. Filtering to isDestinationWarehouse here means an
+   * origin-only warehouse can never again be recorded as a shipment's
+   * destinationWarehouseId through this form (the backend now also
+   * independently rejects it — see ShipmentsService.createQuickReceive).
+   */
+  const destinationWarehouseOptions = warehouses?.filter((warehouse) => warehouse.isDestinationWarehouse) ?? [];
 
   /** Clears a single field's stale error as soon as the user changes it, rather than leaving it on screen until the next submit re-runs validate(). */
   function clearFieldError(field: string) {
@@ -726,7 +739,7 @@ export default function QuickReceivePage() {
               value={destinationLocation}
               onChange={(event) => setDestinationLocation(event.target.value)}
             />
-            {warehouses !== null && warehouses.length > 0 && (
+            {warehouses !== null && destinationWarehouseOptions.length > 0 && (
               <SelectInput
                 label="Destination warehouse (optional)"
                 id="destinationWarehouseId"
@@ -734,12 +747,22 @@ export default function QuickReceivePage() {
                 onChange={(event) => setDestinationWarehouseId(event.target.value)}
               >
                 <option value="">Not yet known / no destination warehouse</option>
-                {warehouses.map((warehouse) => (
+                {destinationWarehouseOptions.map((warehouse) => (
                   <option key={warehouse.id} value={warehouse.id}>
                     {warehouse.name} ({warehouse.code})
                   </option>
                 ))}
               </SelectInput>
+            )}
+            {warehouses !== null && warehouses.length > 0 && destinationWarehouseOptions.length === 0 && (
+              <p className="text-xs text-slate-500">
+                No destination warehouse is configured yet — destination country/location above stays staff-entered
+                free text until one exists.{' '}
+                <Link href="/dashboard/settings/warehouses" className="text-primary-700 underline">
+                  Configure a destination warehouse
+                </Link>
+                .
+              </p>
             )}
           </div>
           <TextArea

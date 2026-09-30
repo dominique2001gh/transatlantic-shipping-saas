@@ -103,12 +103,30 @@ describe('Customer Pickup (e2e)', () => {
   });
 
   it('Phase 2: picks up directly from ARRIVED_DESTINATION when the destination-receive scan was skipped but the shipment has a known destination warehouse', async () => {
-    const manifest = await createArrivedOceanManifest(app, tokenA, tenantA, 1, { destinationWarehouseId: tenantA.warehouseId });
+    // Root-cause fix (2026-09-29): "known" now requires the referenced
+    // warehouse to actually be flagged isDestinationWarehouse — a plain
+    // tenantA.warehouseId (origin-only, see fixtures.ts) no longer
+    // qualifies as "known" (see the Gold Coast/Mansfield regression test
+    // right below this one).
+    const destinationWarehouse = await prisma.warehouse.create({
+      data: {
+        tenantId: tenantA.tenantId,
+        name: 'Known Destination WH',
+        code: `KNOWN-${Date.now()}`,
+        addressLine1: '5 Known Rd',
+        city: 'Accra',
+        country: 'GH',
+        isDestinationWarehouse: true,
+      },
+    });
+    const manifest = await createArrivedOceanManifest(app, tokenA, tenantA, 1, {
+      destinationWarehouseId: destinationWarehouse.id,
+    });
     const dbItemBefore = await prisma.shipmentItem.findUniqueOrThrow({ where: { id: manifest.itemId } });
     expect(dbItemBefore.status).toBe('ARRIVED_DESTINATION'); // never individually destination-received
-    expect(dbItemBefore.currentWarehouseId).toBe(tenantA.warehouseId); // set by arrive(), not by a receive scan
+    expect(dbItemBefore.currentWarehouseId).toBe(destinationWarehouse.id); // set by arrive(), not by a receive scan
 
-    const res = await pickup(app, tokenA, manifest.itemId, tenantA.warehouseId, { recipientName: 'Someone' });
+    const res = await pickup(app, tokenA, manifest.itemId, destinationWarehouse.id, { recipientName: 'Someone' });
     expect(res.status).toBe(201);
     expect(res.body.status).toBe('PICKED_UP');
 
@@ -116,7 +134,7 @@ describe('Customer Pickup (e2e)', () => {
     expect(dbShipment.status).toBe('COMPLETED'); // final handoff still closes the shipment out normally
   });
 
-  it("Phase 2: still rejects pickup from ARRIVED_DESTINATION when the shipment's destination warehouse isn't known (safe fallback, never guesses a location)", async () => {
+  it("Phase 2: still rejects pickup from ARRIVED_DESTINATION when the shipment's destination warehouse isn't known (safe fallback, never guesses from a tenant-wide flagged warehouse)", async () => {
     const otherWarehouse = await prisma.warehouse.create({
       data: {
         tenantId: tenantA.tenantId,
@@ -133,6 +151,23 @@ describe('Customer Pickup (e2e)', () => {
     expect(dbItemBefore.currentWarehouseId).not.toBe(otherWarehouse.id); // never set to a warehouse we can't confirm
 
     const res = await pickup(app, tokenA, manifest.itemId, otherWarehouse.id, { recipientName: 'Someone' });
+    expect(res.status).toBe(409);
+
+    const dbItem = await prisma.shipmentItem.findUniqueOrThrow({ where: { id: manifest.itemId } });
+    expect(dbItem.status).toBe('ARRIVED_DESTINATION'); // untouched
+  });
+
+  it("Phase 2: rejects pickup when the shipment's destinationWarehouseId points at an origin-only warehouse — the Gold Coast/Mansfield production bug (2026-09-29)", async () => {
+    // Reproduces the exact production scenario reported live: a Gold
+    // Coast shipment picked up successfully with Mansfield (an
+    // origin-only warehouse, the only warehouse that tenant had at
+    // intake) still selected in Pickup/Delivery. An origin-only warehouse
+    // must never be accepted as a shipment's destination warehouse, no
+    // matter how it got recorded.
+    const manifest = await createArrivedOceanManifest(app, tokenA, tenantA, 1, {
+      destinationWarehouseId: tenantA.warehouseId,
+    });
+    const res = await pickup(app, tokenA, manifest.itemId, tenantA.warehouseId, { recipientName: 'Someone' });
     expect(res.status).toBe(409);
 
     const dbItem = await prisma.shipmentItem.findUniqueOrThrow({ where: { id: manifest.itemId } });

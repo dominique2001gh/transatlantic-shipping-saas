@@ -1,11 +1,12 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { EntitlementFeature } from '@prisma/client';
 import type { AuthenticatedUser } from '@transatlantic/shared';
-import { OPERATIONS_ROLES, ShipmentItemStatus } from '@transatlantic/shared';
+import { MANAGER_UP_ROLES, OPERATIONS_ROLES, ShipmentItemStatus } from '@transatlantic/shared';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { RequireEntitlement } from '../common/decorators/require-entitlement.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { requireTenantId } from '../common/tenant/tenant.util';
+import { CreateWarehouseDto } from './dto/create-warehouse.dto';
 import { DeliverItemDto } from './dto/deliver-item.dto';
 import { DestinationReceiveItemDto } from './dto/destination-receive-item.dto';
 import { DispatchItemDto } from './dto/dispatch-item.dto';
@@ -13,6 +14,7 @@ import { PickupItemDto } from './dto/pickup-item.dto';
 import { ProcessItemDto } from './dto/process-item.dto';
 import { ReceiveItemDto } from './dto/receive-item.dto';
 import { ReturnItemDto } from './dto/return-item.dto';
+import { UpdateWarehouseDto } from './dto/update-warehouse.dto';
 import { WarehouseService } from './warehouse.service';
 
 const VALID_ITEM_STATUSES = new Set<string>(Object.values(ShipmentItemStatus));
@@ -38,6 +40,36 @@ export class WarehouseController {
   @Get('locations')
   listLocations(@CurrentUser() user: AuthenticatedUser) {
     return this.warehouseService.listLocations(requireTenantId(user.tenantId));
+  }
+
+  /**
+   * Warehouse Location Management. Method-level @Roles() below overrides
+   * the class-level @Roles(...OPERATIONS_ROLES) (RolesGuard prefers the
+   * handler's own metadata over the class's — see RolesGuard), restricting
+   * create/manage of locations to OWNER/MANAGER while STAFF/FINANCE keep
+   * their existing read-only access to every other route in this
+   * controller unchanged.
+   */
+  @Get('manage')
+  @Roles(...MANAGER_UP_ROLES)
+  listForManagement(@CurrentUser() user: AuthenticatedUser) {
+    return this.warehouseService.listForManagement(requireTenantId(user.tenantId));
+  }
+
+  @Post('manage')
+  @Roles(...MANAGER_UP_ROLES)
+  createWarehouse(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateWarehouseDto) {
+    return this.warehouseService.createWarehouse(requireTenantId(user.tenantId), dto);
+  }
+
+  @Patch('manage/:id')
+  @Roles(...MANAGER_UP_ROLES)
+  updateWarehouse(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: UpdateWarehouseDto,
+  ) {
+    return this.warehouseService.updateWarehouse(requireTenantId(user.tenantId), id, dto);
   }
 
   @Get('scan')

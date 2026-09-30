@@ -262,6 +262,70 @@ export interface WarehouseSummary {
   isDestinationWarehouse: boolean;
 }
 
+/**
+ * Warehouse Location Management: the full-detail shape for Settings ->
+ * Warehouse Locations — deliberately a separate type from WarehouseSummary
+ * (the lean shape every operational mode's dropdown already uses), so
+ * widening this one for the management UI can never change what those
+ * existing consumers receive. Every tenant's own Warehouse rows, active or
+ * not — see WarehouseService.listForManagement's own doc comment for why
+ * this is the one list that must include inactive warehouses too (an
+ * owner/manager needs to see and reactivate one, not just the active set
+ * every operational mode already filters to).
+ */
+export interface WarehouseManagementSummary {
+  id: string;
+  name: string;
+  code: string;
+  addressLine1: string;
+  addressLine2: string | null;
+  city: string;
+  state: string | null;
+  country: string;
+  postalCode: string | null;
+  phone: string | null;
+  isOriginWarehouse: boolean;
+  isDestinationWarehouse: boolean;
+  isActive: boolean;
+}
+
+/**
+ * Warehouse Location Management: request body for POST /warehouse/manage —
+ * see CreateWarehouseDto's own doc comment for validation. A warehouse may
+ * be Origin, Destination, or both (both flags are independent booleans on
+ * the same row, exactly like every existing tenant's own warehouses
+ * already use them) — never hard-coded to one or the other.
+ */
+export interface CreateWarehouseRequest {
+  name: string;
+  code: string;
+  addressLine1: string;
+  addressLine2?: string;
+  city: string;
+  state?: string;
+  country: string;
+  postalCode?: string;
+  phone?: string;
+  isOriginWarehouse?: boolean;
+  isDestinationWarehouse?: boolean;
+}
+
+/** Warehouse Location Management: request body for PATCH /warehouse/manage/:id — every field optional, only what's sent is changed. */
+export interface UpdateWarehouseRequest {
+  name?: string;
+  code?: string;
+  addressLine1?: string;
+  addressLine2?: string;
+  city?: string;
+  state?: string;
+  country?: string;
+  postalCode?: string;
+  phone?: string;
+  isOriginWarehouse?: boolean;
+  isDestinationWarehouse?: boolean;
+  isActive?: boolean;
+}
+
 /** One inspection/processing record (Milestone 3C) — append-only history behind a ShipmentItem. */
 export interface ItemInspectionSummary {
   id: string;

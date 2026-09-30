@@ -1,6 +1,8 @@
 'use client';
 
+import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { MANAGER_UP_ROLES } from '@transatlantic/shared';
 import type { WarehouseActivityEntry, WarehouseItemDetail, WarehouseSummary } from '@transatlantic/shared';
 import { AskAiLink } from '@/components/warehouse/AskAiLink';
 import { DestinationReceiveWorkspace } from '@/components/warehouse/DestinationReceiveWorkspace';
@@ -12,7 +14,9 @@ import { ReceiveWorkspace } from '@/components/warehouse/ReceiveWorkspace';
 import { RecentActivityList } from '@/components/warehouse/RecentActivityList';
 import { WarehouseInventoryTable } from '@/components/warehouse/WarehouseInventoryTable';
 import { Card } from '@/components/ui/Card';
+import { LinkButton } from '@/components/ui/Button';
 import { ApiError } from '@/lib/api';
+import { getStoredUser } from '@/lib/auth';
 import { getInventory, getRecentActivity, listWarehouseLocations } from '@/lib/warehouse';
 
 /** Which side of the network a mode operates on — determines the warehouse it should default to. */
@@ -24,7 +28,43 @@ function sideForMode(mode: WarehouseMode): WarehouseSide {
   return mode === 'DESTINATION_RECEIVE' || mode === 'PICKUP_DELIVERY' ? 'DESTINATION' : 'ORIGIN';
 }
 
+/**
+ * Shown by Destination Receive / Pickup / Delivery instead of a workspace
+ * when this tenant has zero warehouses flagged isDestinationWarehouse —
+ * deliberately never falls back to offering an origin warehouse (that was
+ * the Gold Coast/Mansfield production bug). OWNER/MANAGER get a direct
+ * link to actually fix it; STAFF/FINANCE (who can reach this page but not
+ * /dashboard/settings/warehouses) get the same explanation without a link
+ * they can't use.
+ */
+function NoDestinationWarehouseMessage({ canManageWarehouses }: { canManageWarehouses: boolean }) {
+  return (
+    <p className="text-sm text-slate-500">
+      No destination warehouse is configured for this tenant yet.{' '}
+      {canManageWarehouses ? (
+        <>
+          Add one and flag it as a destination warehouse under{' '}
+          <Link href="/dashboard/settings/warehouses" className="text-primary-700 underline">
+            Manage Warehouses
+          </Link>{' '}
+          before using this mode.
+        </>
+      ) : (
+        'Ask an owner or manager to configure one under Settings before using this mode.'
+      )}
+    </p>
+  );
+}
+
 export default function WarehousePage() {
+  // Settings (where /dashboard/settings/warehouses is also linked from) is
+  // an OWNER-only nav item (see nav.ts) — MANAGER can use the warehouse
+  // management page but would otherwise have no way to discover it. This
+  // link gives MANAGER (and OWNER) that path without loosening the
+  // unrelated OWNER-only Settings nav gate.
+  const currentUser = getStoredUser();
+  const canManageWarehouses = !!currentUser && MANAGER_UP_ROLES.includes(currentUser.role);
+
   const [mode, setMode] = useState<WarehouseMode>('RECEIVE');
   /**
    * `null` = not yet fetched (show "Loading…"); `[]` = fetched, but this
@@ -33,6 +73,17 @@ export default function WarehousePage() {
    * warehouses was previously indistinguishable from one still loading).
    */
   const [warehouses, setWarehouses] = useState<WarehouseSummary[] | null>(null);
+  /**
+   * Warehouse Location Management follow-up (2026-09-29): Destination
+   * Receive and Pickup/Delivery must only ever offer a warehouse actually
+   * flagged isDestinationWarehouse — never every warehouse the tenant has.
+   * An unfiltered list here is exactly what let an origin-only warehouse
+   * (Gold Coast's Mansfield) be selected for a destination handoff in
+   * production; the backend now independently rejects that too (see
+   * WarehouseService.resolveEligibleDestinationWarehouseId), but this list
+   * should never offer the wrong choice in the first place.
+   */
+  const destinationWarehouses = warehouses?.filter((warehouse) => warehouse.isDestinationWarehouse) ?? null;
   const [selectedWarehouseId, setSelectedWarehouseId] = useState('');
   const [inventory, setInventory] = useState<WarehouseItemDetail[] | null>(null);
   const [inventorySearch, setInventorySearch] = useState('');
@@ -63,6 +114,16 @@ export default function WarehousePage() {
    * isDestinationWarehouse flags already on each tenant's own Warehouse
    * rows, so it holds for any tenant with at least one warehouse flagged
    * on each side.
+   *
+   * The DESTINATION side's `?? warehouses[0]` fallback was removed
+   * (2026-09-29): falling back to "any warehouse" when none is flagged
+   * isDestinationWarehouse is exactly how an origin-only warehouse
+   * (Mansfield, for Gold Coast) ended up pre-selected for Destination
+   * Receive/Pickup/Delivery. When no destination warehouse exists yet,
+   * this now leaves selectedWarehouseId empty — the section below shows
+   * an explicit "configure a destination warehouse" message instead of
+   * silently offering the wrong one. The ORIGIN side keeps its own
+   * `?? warehouses[0]` fallback unchanged; that side was never the bug.
    */
   const lastDefaultedSideRef = useRef<WarehouseSide | null>(null);
   useEffect(() => {
@@ -70,11 +131,19 @@ export default function WarehousePage() {
     const side = sideForMode(mode);
     if (lastDefaultedSideRef.current === side) return;
     lastDefaultedSideRef.current = side;
-    const preferred =
-      warehouses.find((warehouse) => (side === 'DESTINATION' ? warehouse.isDestinationWarehouse : warehouse.isOriginWarehouse)) ??
-      warehouses[0];
+    if (side === 'DESTINATION') {
+      // No `?? warehouses[0]` fallback here on purpose — see doc comment
+      // above. An empty destinationWarehouses list clears the selection
+      // entirely rather than leaving a stale origin-warehouse id selected
+      // (which would otherwise keep filtering the inventory/activity
+      // panels below by the wrong warehouse while this mode shows its own
+      // "configure a destination warehouse" message instead of a workspace).
+      setSelectedWarehouseId((destinationWarehouses ?? [])[0]?.id ?? '');
+      return;
+    }
+    const preferred = warehouses.find((warehouse) => warehouse.isOriginWarehouse) ?? warehouses[0];
     if (preferred) setSelectedWarehouseId(preferred.id);
-  }, [mode, warehouses]);
+  }, [mode, warehouses, destinationWarehouses]);
 
   const reload = useCallback(() => {
     getInventory({ warehouseId: selectedWarehouseId || undefined, search: inventorySearch || undefined })
@@ -91,9 +160,16 @@ export default function WarehousePage() {
 
   return (
     <div className="flex flex-col gap-8">
-      <div>
-        <h1 className="text-2xl font-semibold text-slate-900">Warehouse</h1>
-        <p className="mt-1 text-sm text-slate-500">Choose an operation mode, then scan items to process them.</p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold text-slate-900">Warehouse</h1>
+          <p className="mt-1 text-sm text-slate-500">Choose an operation mode, then scan items to process them.</p>
+        </div>
+        {canManageWarehouses && (
+          <LinkButton href="/dashboard/settings/warehouses" variant="secondary" size="sm">
+            Manage Warehouses
+          </LinkButton>
+        )}
       </div>
 
       {error && <p className="text-sm text-red-600">{error}</p>}
@@ -203,20 +279,17 @@ export default function WarehousePage() {
             <AskAiLink question="How do I receive items at the destination warehouse and reconcile against a container's manifest?" />
           </p>
           <Card className="mt-3">
-            {warehouses === null ? (
+            {destinationWarehouses === null ? (
               <p className="text-sm text-slate-500">Loading warehouses…</p>
-            ) : warehouses.length > 0 ? (
+            ) : destinationWarehouses.length > 0 ? (
               <DestinationReceiveWorkspace
-                warehouses={warehouses}
+                warehouses={destinationWarehouses}
                 selectedWarehouseId={selectedWarehouseId}
                 onWarehouseChange={setSelectedWarehouseId}
                 onReceived={reload}
               />
             ) : (
-              <p className="text-sm text-slate-500">
-                No warehouses are configured for this tenant yet. Contact support to set one up before using
-                Warehouse operations.
-              </p>
+              <NoDestinationWarehouseMessage canManageWarehouses={canManageWarehouses} />
             )}
           </Card>
         </section>
@@ -231,20 +304,17 @@ export default function WarehousePage() {
             already out for delivery can be confirmed delivered or returned after a failed attempt.
           </p>
           <Card className="mt-3">
-            {warehouses === null ? (
+            {destinationWarehouses === null ? (
               <p className="text-sm text-slate-500">Loading warehouses…</p>
-            ) : warehouses.length > 0 ? (
+            ) : destinationWarehouses.length > 0 ? (
               <PickupWorkspace
-                warehouses={warehouses}
+                warehouses={destinationWarehouses}
                 selectedWarehouseId={selectedWarehouseId}
                 onWarehouseChange={setSelectedWarehouseId}
                 onPickedUp={reload}
               />
             ) : (
-              <p className="text-sm text-slate-500">
-                No warehouses are configured for this tenant yet. Contact support to set one up before using
-                Warehouse operations.
-              </p>
+              <NoDestinationWarehouseMessage canManageWarehouses={canManageWarehouses} />
             )}
           </Card>
         </section>

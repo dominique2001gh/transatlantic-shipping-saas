@@ -1,9 +1,12 @@
 import type {
+  CreateWarehouseRequest,
   DimensionUnit,
   ItemProcessingResult,
   ShipmentItemCondition,
+  UpdateWarehouseRequest,
   WarehouseActivityEntry,
   WarehouseItemDetail,
+  WarehouseManagementSummary,
   WarehouseSummary,
   WeightUnit,
 } from '@transatlantic/shared';
@@ -195,4 +198,26 @@ export function getRecentActivity(params?: {
   if (params?.limit) query.set('limit', String(params.limit));
   const qs = query.toString() ? `?${query.toString()}` : '';
   return apiFetch<WarehouseActivityEntry[]>(`/warehouse/activity${qs}`, { token: authToken() });
+}
+
+// Warehouse Location Management (OWNER/MANAGER only — see WarehouseController.@Roles overrides)
+
+export function listWarehousesForManagement(): Promise<WarehouseManagementSummary[]> {
+  return apiFetch<WarehouseManagementSummary[]>('/warehouse/manage', { token: authToken() });
+}
+
+export function createWarehouse(input: CreateWarehouseRequest): Promise<WarehouseManagementSummary> {
+  return apiFetch<WarehouseManagementSummary>('/warehouse/manage', {
+    method: 'POST',
+    body: JSON.stringify(input),
+    token: authToken(),
+  });
+}
+
+export function updateWarehouse(id: string, input: UpdateWarehouseRequest): Promise<WarehouseManagementSummary> {
+  return apiFetch<WarehouseManagementSummary>(`/warehouse/manage/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+    token: authToken(),
+  });
 }

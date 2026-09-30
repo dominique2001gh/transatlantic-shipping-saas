@@ -159,7 +159,24 @@ describe('Final-mile customer notifications: READY_FOR_PICKUP / OUT_FOR_DELIVERY
   });
 
   it('6. Phase 2: COMPLETED still fires via a direct pickup from ARRIVED_DESTINATION when the destination-receive scan is skipped (READY_FOR_PICKUP deliberately does not fire first)', async () => {
-    const manifest = await createArrivedOceanManifest(app, tokenA, tenantA, 1, { destinationWarehouseId: tenantA.warehouseId });
+    // 2026-09-29: destinationWarehouseId must be an actual
+    // isDestinationWarehouse:true warehouse — tenantA.warehouseId
+    // (origin-only, see fixtures.ts) no longer qualifies (see
+    // WarehouseService.resolveEligibleDestinationWarehouseId).
+    const destinationWarehouse = await prisma.warehouse.create({
+      data: {
+        tenantId: tenantA.tenantId,
+        name: 'Known Destination WH',
+        code: `KNOWN-${Date.now()}`,
+        addressLine1: '5 Known Rd',
+        city: 'Accra',
+        country: 'GH',
+        isDestinationWarehouse: true,
+      },
+    });
+    const manifest = await createArrivedOceanManifest(app, tokenA, tenantA, 1, {
+      destinationWarehouseId: destinationWarehouse.id,
+    });
 
     // No destinationReceiveOnce call at all.
     const readyEvent = await prisma.notificationEvent.findFirst({
@@ -167,7 +184,7 @@ describe('Final-mile customer notifications: READY_FOR_PICKUP / OUT_FOR_DELIVERY
     });
     expect(readyEvent).toBeNull(); // accepted trade-off — see this file's own top comment
 
-    const pickupRes = await pickup(app, tokenA, manifest.itemId, tenantA.warehouseId, { recipientName: 'Test Recipient' });
+    const pickupRes = await pickup(app, tokenA, manifest.itemId, destinationWarehouse.id, { recipientName: 'Test Recipient' });
     expect(pickupRes.status).toBe(201);
 
     const completedEvent = await prisma.notificationEvent.findFirst({

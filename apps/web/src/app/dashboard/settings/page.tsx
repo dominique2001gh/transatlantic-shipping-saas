@@ -104,6 +104,19 @@ export default function SettingsPage() {
       </section>
 
       <section>
+        <h2 className="text-lg font-semibold text-slate-900">Warehouse Locations</h2>
+        <p className="mt-1 text-sm text-slate-500">Add and manage your origin and destination warehouses.</p>
+        <Card className="mt-3 max-w-2xl">
+          <div className="flex items-center justify-between gap-4">
+            <p className="text-sm text-slate-600">Configure which of your warehouses are origin, destination, or both.</p>
+            <LinkButton href="/dashboard/settings/warehouses" variant="secondary">
+              Manage
+            </LinkButton>
+          </div>
+        </Card>
+      </section>
+
+      <section>
         <h2 className="text-lg font-semibold text-slate-900">Website content</h2>
         <p className="mt-1 text-sm text-slate-500">
           Public website content for your company (used by a future branded site).

@@ -123,8 +123,26 @@ describe('Delivery/Driver Dispatch (e2e)', () => {
     });
 
     it('Phase 2: dispatches directly from ARRIVED_DESTINATION when the destination-receive scan was skipped but the destination warehouse is known', async () => {
-      const manifest = await createArrivedOceanManifest(app, tokenA, tenantA, 1, { destinationWarehouseId: tenantA.warehouseId });
-      const res = await dispatch(app, tokenA, manifest.itemId, tenantA.warehouseId, {
+      // Root-cause fix (2026-09-29): "known" now requires the referenced
+      // warehouse to actually be flagged isDestinationWarehouse — a plain
+      // tenantA.warehouseId (origin-only, see fixtures.ts) no longer
+      // qualifies as "known" (see the Gold Coast/Mansfield regression test
+      // right below this one).
+      const destinationWarehouse = await prisma.warehouse.create({
+        data: {
+          tenantId: tenantA.tenantId,
+          name: 'Known Destination WH',
+          code: `KNOWN-${Date.now()}`,
+          addressLine1: '5 Known Rd',
+          city: 'Accra',
+          country: 'GH',
+          isDestinationWarehouse: true,
+        },
+      });
+      const manifest = await createArrivedOceanManifest(app, tokenA, tenantA, 1, {
+        destinationWarehouseId: destinationWarehouse.id,
+      });
+      const res = await dispatch(app, tokenA, manifest.itemId, destinationWarehouse.id, {
         recipientName: 'Someone',
         courierName: 'DHL Ghana',
       });
@@ -132,7 +150,7 @@ describe('Delivery/Driver Dispatch (e2e)', () => {
       expect(res.body.status).toBe('OUT_FOR_DELIVERY');
     });
 
-    it("Phase 2: still rejects dispatch from ARRIVED_DESTINATION when the shipment's destination warehouse isn't known (safe fallback)", async () => {
+    it("Phase 2: still rejects dispatch from ARRIVED_DESTINATION when the shipment's destination warehouse isn't known (safe fallback, never guesses from a tenant-wide flagged warehouse)", async () => {
       const otherWarehouse = await prisma.warehouse.create({
         data: {
           tenantId: tenantA.tenantId,
@@ -146,6 +164,22 @@ describe('Delivery/Driver Dispatch (e2e)', () => {
       });
       const manifest = await createArrivedOceanManifest(app, tokenA, tenantA, 1); // no destinationWarehouseId set
       const res = await dispatch(app, tokenA, manifest.itemId, otherWarehouse.id, {
+        recipientName: 'Someone',
+        courierName: 'DHL Ghana',
+      });
+      expect(res.status).toBe(409);
+    });
+
+    it("Phase 2: rejects dispatch when the shipment's destinationWarehouseId points at an origin-only warehouse — the Gold Coast/Mansfield production bug (2026-09-29)", async () => {
+      // Reproduces the exact production scenario: a shipment's
+      // destinationWarehouseId was recorded as the tenant's own
+      // origin-only warehouse (the only warehouse that existed at intake
+      // time). An origin-only warehouse must never be accepted as a
+      // destination, no matter how it got recorded on the shipment.
+      const manifest = await createArrivedOceanManifest(app, tokenA, tenantA, 1, {
+        destinationWarehouseId: tenantA.warehouseId,
+      });
+      const res = await dispatch(app, tokenA, manifest.itemId, tenantA.warehouseId, {
         recipientName: 'Someone',
         courierName: 'DHL Ghana',
       });

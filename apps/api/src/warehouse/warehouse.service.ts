@@ -1,9 +1,14 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import type { Prisma } from '@prisma/client';
 // Prisma's generated enums (aliased) — used only when comparing values
-// that came directly out of a Prisma query result.
+// that came directly out of a Prisma query result. `Prisma` itself (the
+// namespace, imported as a value here — not `import type` — since
+// createWarehouse/updateWarehouse below need Prisma.PrismaClientKnownRequestError
+// as a real runtime class for the tenant-scoped-unique-code conflict check,
+// the same pattern AuthService.customerSignup already uses) still supplies
+// every type this file previously used it for (Prisma.XxxWhereInput, etc.).
 import {
   HandoffType,
+  Prisma,
   ShipmentItemStatus as DbShipmentItemStatus,
   ShipmentStatus as DbShipmentStatus,
   TrackingEventSource,
@@ -22,6 +27,7 @@ import {
 } from '@transatlantic/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { ShipmentsService } from '../shipments/shipments.service';
+import { CreateWarehouseDto } from './dto/create-warehouse.dto';
 import { DeliverItemDto } from './dto/deliver-item.dto';
 import { DestinationReceiveItemDto } from './dto/destination-receive-item.dto';
 import { DispatchItemDto } from './dto/dispatch-item.dto';
@@ -29,6 +35,7 @@ import { PickupItemDto } from './dto/pickup-item.dto';
 import { ProcessItemDto } from './dto/process-item.dto';
 import { ReceiveItemDto } from './dto/receive-item.dto';
 import { ReturnItemDto } from './dto/return-item.dto';
+import { UpdateWarehouseDto } from './dto/update-warehouse.dto';
 
 const ACTOR_SELECT = { id: true, firstName: true, lastName: true } as const;
 const WAREHOUSE_SELECT = { id: true, name: true, code: true } as const;
@@ -208,6 +215,65 @@ export class WarehouseService {
       where: { tenantId, isActive: true },
       orderBy: { name: 'asc' },
     });
+  }
+
+  /**
+   * Warehouse Location Management: unlike listLocations (which the
+   * operational scan/dropdown screens use and deliberately filters to
+   * isActive only), this includes inactive warehouses too — an
+   * OWNER/MANAGER managing their tenant's locations needs to see and
+   * reactivate a warehouse they previously deactivated, not just the
+   * currently-usable ones.
+   */
+  listForManagement(tenantId: string) {
+    return this.prisma.warehouse.findMany({
+      where: { tenantId },
+      orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
+    });
+  }
+
+  async createWarehouse(tenantId: string, dto: CreateWarehouseDto) {
+    try {
+      return await this.prisma.warehouse.create({
+        data: {
+          tenantId,
+          name: dto.name,
+          code: dto.code,
+          addressLine1: dto.addressLine1,
+          addressLine2: dto.addressLine2,
+          city: dto.city,
+          state: dto.state,
+          country: dto.country,
+          postalCode: dto.postalCode,
+          phone: dto.phone,
+          isOriginWarehouse: dto.isOriginWarehouse ?? false,
+          isDestinationWarehouse: dto.isDestinationWarehouse ?? false,
+        },
+      });
+    } catch (err) {
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+        throw new ConflictException('A warehouse with this code already exists.');
+      }
+      throw err;
+    }
+  }
+
+  async updateWarehouse(tenantId: string, warehouseId: string, dto: UpdateWarehouseDto) {
+    const existing = await this.prisma.warehouse.findFirst({ where: { id: warehouseId, tenantId } });
+    if (!existing) {
+      throw new NotFoundException('Warehouse not found');
+    }
+    try {
+      return await this.prisma.warehouse.update({
+        where: { id: warehouseId },
+        data: { ...dto },
+      });
+    } catch (err) {
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+        throw new ConflictException('A warehouse with this code already exists.');
+      }
+      throw err;
+    }
   }
 
   /**
@@ -648,18 +714,26 @@ export class WarehouseService {
    * stale origin id) or, worse, wrongly allow one from an arbitrary
    * warehouse if it were ever mutated to "fix" this. Instead, eligibility
    * is computed fresh, every time, from data that actually describes
-   * *intended* destination, in priority order:
-   *   1. The shipment's own declared destinationWarehouseId, when staff
-   *      set one (same source destinationReceiveItem's soft warning and
-   *      ManifestsService.arrive's currentWarehouseId write already use).
-   *   2. Failing that, the tenant's own Warehouse.isDestinationWarehouse
-   *      flag (set once at onboarding — see OnboardingService) — but only
-   *      when it identifies exactly one warehouse. Two or more flagged
-   *      destination warehouses is a genuine ambiguity this must not
-   *      guess through; zero is "not configured." Either way this
-   *      resolves to null, and the caller keeps rejecting the pickup/
-   *      dispatch (fail closed, matching the existing "never guess a
-   *      location" posture already used elsewhere in this service).
+   * *intended* destination:
+   *
+   *   The shipment's own declared destinationWarehouseId, when staff set
+   *   one — but ONLY when it still resolves to this tenant's own active,
+   *   isDestinationWarehouse:true warehouse. A shipment whose recorded
+   *   destinationWarehouseId points at an origin-only (or inactive, or
+   *   deleted) warehouse is treated exactly the same as one with no
+   *   destinationWarehouseId at all: not known, fail closed. This is a
+   *   deliberate regression fix (2026-09-29) — an earlier version of this
+   *   method trusted shipmentDestinationWarehouseId unconditionally,
+   *   which let an origin-only warehouse recorded as "destination" at
+   *   intake (nothing upstream validated it at the time) silently pass
+   *   every pickup/dispatch check ever after. There is also, deliberately,
+   *   no tenant-wide "exactly one destination-flagged warehouse" guess
+   *   fallback here anymore: an earlier version of this method guessed the
+   *   destination from the tenant's own Warehouse.isDestinationWarehouse
+   *   flag when the shipment's own field was unset. That guess is exactly
+   *   what this method exists to avoid — a genuinely unknown destination
+   *   must always fail closed and require staff to Complete Destination
+   *   Receive or set a real destination warehouse, never be inferred.
    *
    * This never writes anything — it is a pure read used only to decide
    * whether dto.warehouseId is the right place to hand cargo over. It
@@ -677,14 +751,14 @@ export class WarehouseService {
     tenantId: string,
     shipmentDestinationWarehouseId: string | null,
   ): Promise<string | null> {
-    if (shipmentDestinationWarehouseId) {
-      return shipmentDestinationWarehouseId;
+    if (!shipmentDestinationWarehouseId) {
+      return null;
     }
-    const flaggedDestinationWarehouses = await this.prisma.warehouse.findMany({
-      where: { tenantId, isDestinationWarehouse: true, isActive: true },
+    const warehouse = await this.prisma.warehouse.findFirst({
+      where: { id: shipmentDestinationWarehouseId, tenantId, isActive: true, isDestinationWarehouse: true },
       select: { id: true },
     });
-    return flaggedDestinationWarehouses.length === 1 ? flaggedDestinationWarehouses[0].id : null;
+    return warehouse?.id ?? null;
   }
 
   /**

@@ -276,11 +276,19 @@ export class ShipmentsService {
 
     let destinationWarehouseId: string | undefined;
     if (dto.destinationWarehouseId) {
+      // Same "never accepted as a destination unless actually flagged one"
+      // rule WarehouseService.resolveEligibleDestinationWarehouseId
+      // enforces at pickup/dispatch time — enforced here too so a bad
+      // value (e.g. an origin-only warehouse, the only one that existed
+      // for the tenant yet) can never even be recorded on the shipment in
+      // the first place, not just rejected later at handoff.
       const destinationWarehouse = await this.prisma.warehouse.findFirst({
-        where: { id: dto.destinationWarehouseId, tenantId },
+        where: { id: dto.destinationWarehouseId, tenantId, isActive: true, isDestinationWarehouse: true },
       });
       if (!destinationWarehouse) {
-        throw new NotFoundException('Destination warehouse not found');
+        throw new NotFoundException(
+          'Destination warehouse not found. It must be an active warehouse flagged as a destination warehouse for this organization.',
+        );
       }
       destinationWarehouseId = destinationWarehouse.id;
     }
