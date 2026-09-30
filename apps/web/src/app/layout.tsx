@@ -9,6 +9,19 @@ import './globals.css';
 const inter = Inter({ subsets: ['latin'], variable: '--font-sans', display: 'swap' });
 const manrope = Manrope({ subsets: ['latin'], variable: '--font-display', display: 'swap' });
 
+/**
+ * Deliberately still static/Trans-Atlantic-only, unchanged from before the
+ * multi-tenant branding fix — a hostname-aware version of this used to
+ * live here, but making the ROOT layout depend on headers() forces every
+ * single route in the app (dashboard, platform, portal, everything) to
+ * become dynamic, not just the tenant-facing public ones that actually
+ * needed it. The hostname-aware default now lives one level down, in
+ * (public)/layout.tsx (see that file's own doc comment) — the same route
+ * group already made dynamic by that layout's own header/footer fix, so
+ * this scopes the cost to exactly the routes that need it. Every page
+ * outside (public) (dashboard/platform/portal/ananselogix) is completely
+ * unaffected by any of this and keeps whatever prerendering it already had.
+ */
 export const metadata: Metadata = {
   title: {
     default: `${siteConfig.companyName} · ${siteConfig.tagline}`,

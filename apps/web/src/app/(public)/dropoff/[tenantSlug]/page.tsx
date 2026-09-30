@@ -1,103 +1,68 @@
-'use client';
-
-import { useParams, useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
-import { UserRole } from '@transatlantic/shared';
-import { PageHero } from '@/components/marketing/PageHero';
-import { LinkButton } from '@/components/ui/Button';
-import { Container } from '@/components/ui/Container';
-import { getStoredToken, getStoredUser } from '@/lib/auth';
+import type { Metadata } from 'next';
+import { platformConfig } from '@/lib/platform-config';
 import { fetchPublicSiteConfig } from '@/lib/public-site-config';
+import { TenantDropoffPageClient } from './TenantDropoffPageClient';
 
 /**
- * Multi-tenant Drop-Off: the tenant-scoped counterpart to
- * apps/web/src/app/(public)/dropoff/page.tsx (deliberately left untouched —
- * that route stays Trans Atlantic's own frozen, already-accepted /dropoff,
- * reached from its own dedicated domain where "/dropoff" alone is already
- * unambiguous). This route exists for every tenant that shares
- * ANANSELOGIX_BASE_URL (ananselogix.com) instead — see
- * resolveTenantDropoffUrl's own doc comment for why those tenants need
- * "/dropoff/{tenantSlug}" instead of bare "/dropoff", and
- * AuthService.customerSignup's own doc comment for how `tenantSlug` is
- * consumed once Sign In/Create Account is followed from here.
+ * Multi-tenant Drop-Off: thin Server Component wrapper around
+ * TenantDropoffPageClient.tsx (see that file's own doc comment for why
+ * the interactive page itself is a separate client component, and for
+ * everything about this route's behavior/history). This file's only job
+ * is `generateMetadata` — a page-level export only a Server Component can
+ * provide — so the browser tab title and Open Graph/Twitter preview cards
+ * show this specific tenant's own name (Gold Coast, Titanic, or any
+ * future tenant), never Trans Atlantic's (the root layout's own default —
+ * see that file's own doc comment for the sibling fix to the same
+ * underlying gap) and never a hardcoded tenant name: `params.tenantSlug`
+ * drives a real lookup against GET /public/site-config/:slug every time.
  *
- * Deliberately a near-duplicate of the sibling page rather than a shared
- * extracted component: the sibling is frozen/already-accepted production
- * behavior for Trans Atlantic, and this route's only job is to carry
- * `tenantSlug` through — keeping them independent means a future change to
- * one can never accidentally alter the other's behavior.
- *
- * Branding: the surrounding (public) layout already swaps in generic
- * AnanseLogix chrome (never Trans Atlantic's) on ananselogix.com — see
- * that layout's own doc comment. This page additionally fetches the
- * specific tenant's own name via the already-live, unauthenticated
- * GET /public/site-config/:slug (fetchPublicSiteConfig) and shows it in
- * the kicker once loaded, so Gold Coast sees "Gold Coast" and Titanic
- * sees its own name — no hardcoding, works for any future tenant with a
- * PUBLIC_WEBSITE entitlement. A 404 (no config yet) is silently ignored;
- * the kicker just stays generic, never an error shown to the customer.
+ * A slug with no public site configured (fetchPublicSiteConfig 404s, or
+ * the network call itself fails) falls back to the generic AnanseLogix
+ * platform title, never Trans Atlantic's and never a crash — this route
+ * must always render something reasonable for the customer even when
+ * per-tenant branding data doesn't exist yet.
  */
-export default function TenantDropoffPage() {
-  const router = useRouter();
-  const params = useParams<{ tenantSlug: string }>();
-  const tenantSlug = params.tenantSlug;
-  const [checkedSession, setCheckedSession] = useState(false);
-  /** Null until the fetch resolves — the kicker/title stay at their generic default the whole time this is null, never a flash of the wrong name. See fetchPublicSiteConfig's own doc comment: a 404 (no PUBLIC_WEBSITE entitlement, or no config saved yet) is expected and normal, not an error — this page must never fail or show anything alarming because of it. */
-  const [tenantName, setTenantName] = useState<string | null>(null);
+export async function generateMetadata({ params }: { params: Promise<{ tenantSlug: string }> }): Promise<Metadata> {
+  const { tenantSlug } = await params;
+  // `title: { absolute: ... }`, not a plain string: a plain string title is
+  // template-composable, so the enclosing (public) layout's own
+  // `%s · AnanseLogix` template would still append onto it (e.g. "Prepare
+  // Your Drop-Off — AnanseLogix · AnanseLogix") — this page already builds
+  // its own complete, final title, so it must opt out of that chain.
+  const fallback: Metadata = {
+    title: { absolute: `Prepare Your Drop-Off — ${platformConfig.name}` },
+    description: `Prepare your shipment drop-off online before you arrive at the warehouse.`,
+    openGraph: {
+      type: 'website',
+      siteName: platformConfig.name,
+      title: `Prepare Your Drop-Off — ${platformConfig.name}`,
+    },
+  };
 
-  useEffect(() => {
-    const user = getStoredUser();
-    if (user && getStoredToken() && user.role === UserRole.CUSTOMER) {
-      router.replace('/portal/pre-register');
-      return;
-    }
-    setCheckedSession(true);
-  }, [router]);
-
-  useEffect(() => {
-    fetchPublicSiteConfig(tenantSlug)
-      .then((config) => setTenantName(config.companyName))
-      .catch(() => {
-        /* no public branding for this tenant yet — keep the generic kicker/title below */
-      });
-  }, [tenantSlug]);
-
-  if (!checkedSession) {
-    return null;
+  try {
+    const config = await fetchPublicSiteConfig(tenantSlug);
+    return {
+      title: { absolute: `Prepare Your Drop-Off — ${config.companyName}` },
+      description: `Prepare your shipment drop-off with ${config.companyName} online before you arrive at the warehouse.`,
+      openGraph: {
+        type: 'website',
+        siteName: config.companyName,
+        title: `Prepare Your Drop-Off — ${config.companyName}`,
+        description: `Prepare your shipment drop-off with ${config.companyName} online before you arrive at the warehouse.`,
+      },
+      twitter: {
+        card: 'summary',
+        title: `Prepare Your Drop-Off — ${config.companyName}`,
+      },
+    };
+  } catch {
+    // No public site configured for this slug yet (404) or the lookup
+    // failed — fall back to the generic platform title. Never Trans
+    // Atlantic's, and never an error surfaced to the visitor.
+    return fallback;
   }
+}
 
-  // `tenant` is only meaningful to /register (see AuthService.customerSignup)
-  // — /login already resolves an existing account across tenants by email
-  // alone (see AuthService.login's own doc comment on Stage 2C), so Sign In
-  // deliberately carries `next` only, not a `tenant` param it wouldn't use.
-  const nextParam = `next=${encodeURIComponent('/portal/pre-register')}`;
-  const signInQuery = `?${nextParam}`;
-  const createAccountQuery = `?${nextParam}&tenant=${encodeURIComponent(tenantSlug)}`;
-
-  return (
-    <>
-      <PageHero
-        kicker={tenantName ? `${tenantName} — Customer Drop-Off` : 'Customer Drop-Off'}
-        title="Prepare Your Drop-Off"
-        description="Save time at the warehouse by entering your shipment information before you arrive. When you're finished, we'll give you a QR code to show our staff when you drop off your packages."
-      />
-      <section className="py-20 lg:py-24">
-        <Container className="max-w-xl">
-          <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-card sm:p-10">
-            <p className="text-sm text-slate-600">
-              Sign in to your existing account, or create a new one — either way takes less than a minute.
-            </p>
-            <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-center">
-              <LinkButton href={`/login${signInQuery}`} size="lg">
-                Sign In
-              </LinkButton>
-              <LinkButton href={`/register${createAccountQuery}`} variant="secondary" size="lg">
-                Create Account
-              </LinkButton>
-            </div>
-          </div>
-        </Container>
-      </section>
-    </>
-  );
+export default function TenantDropoffPage() {
+  return <TenantDropoffPageClient />;
 }
