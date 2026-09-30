@@ -6,6 +6,7 @@ import type { AuthenticatedUser, CustomerEntryPointResponse, JwtPayload, LoginRe
 import * as bcrypt from 'bcrypt';
 import { generateCustomerNumber } from '../common/numbering/numbering.util';
 import { generateToken, hashToken } from '../common/token/token.util';
+import { isSharedAnanseLogixDomain } from '../common/tenant/tenant-web-app-url.util';
 import { SMS_CONSENT_DISCLOSURE_VERSION } from '../notifications/sms-consent.constants';
 import { passwordResetEmail } from '../notifications/templates/platform-emails';
 import { resolvePlatformEmailSender } from '../notifications/providers/platform-email-sender.util';
@@ -18,11 +19,14 @@ import { CustomerSignupDto } from './dto/customer-signup.dto';
 const PASSWORD_RESET_TTL_MINUTES = 30;
 
 /**
- * Customer Self-Service Pre-Registration, Stage 2: the one tenant with a
- * real, working customer-portal entry point today — same hardcoded slug
- * already used by resolveCustomerEntryPoint below. See customerSignup's
- * own doc comment for why this is intentionally not a client-supplied
- * value.
+ * customerSignup's own default-tenant fallback when no `tenantSlug` is
+ * supplied (its own doc comment covers why this is intentionally not a
+ * client-supplied value). resolveCustomerEntryPoint below no longer uses
+ * this constant — it now reads the config-driven
+ * LEGACY_CUSTOM_DOMAIN_TENANT_SLUG via isSharedAnanseLogixDomain instead,
+ * the same check every other tenant-domain resolver in this codebase
+ * already uses, so there's only ever one place that knows the legacy
+ * slug's *source of truth* (env var, not a second hardcoded literal).
  */
 const TRANS_ATLANTIC_TENANT_SLUG = 'transatlantic';
 
@@ -269,41 +273,64 @@ export class AuthService {
   /**
    * The central AnanseLogix login (/ananselogix/login) is for tenant
    * staff and platform admins, not shipping customers — a CUSTOMER who
-   * authenticates there must not land in /portal from that entry point
-   * (see that page's own doc comment). This resolves where their
-   * tenant's *own* branded customer login lives instead, so the
-   * frontend can redirect there or fall back to a generic message.
+   * authenticates there must not silently land in /portal *as if this
+   * were their tenant's own dedicated login page* (see that page's own
+   * doc comment). This resolves whether their tenant has a real,
+   * separate destination to hand off to, or whether — like every other
+   * tenant sharing this platform's own ananselogix.com — they should
+   * simply be signed in right here, the same as any other role.
    *
    * `user` is always sourced from a verified JWT (never a client-
    * supplied tenant ID), so this can only ever answer for the tenant
    * the caller actually authenticated into.
    *
-   * Trans Atlantic (tenant #1) is the only tenant with a real, working
-   * local entry point today — its login page is the hardcoded
-   * apps/web/src/lib/site-config.ts-branded /login, not anything driven
-   * by Tenant table data. Every other tenant's `customDomain` is, per
-   * its own schema comment, "reserved for a future real domain cutover
-   * — deliberately unused by any routing/DNS/deployment logic today,"
-   * so there is no real, live URL to send them to yet; those tenants
-   * get `available: false` and the frontend shows a generic message
-   * instead of a link to a page that doesn't actually exist. Once
-   * per-tenant domains are wired up, this is the one place that swaps
-   * from the `slug === 'transatlantic'` special case to reading
-   * `tenant.customDomain`.
+   * Multi-tenant customer login fix (2026-09): previously hardcoded to
+   * `slug === 'transatlantic'`, with every other tenant getting
+   * `available: false` and a dead-end "sign in elsewhere" message —
+   * written when `/portal` had no real, working multi-tenant home to
+   * send anyone else to. That's no longer true: `/portal` (see
+   * portal/layout.tsx's own useTenant()-driven branding) already
+   * correctly resolves any tenant's own customer portal from the JWT
+   * alone, with zero hostname or slug dependency. So the real question
+   * this function answers is only "does this tenant have a *separate*
+   * destination outside the shared platform" — exactly the same
+   * isSharedAnanseLogixDomain check resolveTenantDropoffUrl and friends
+   * already use, never a second hardcoded slug to keep in sync:
+   *
+   *   - `tenant.customDomain` set → that tenant's own real domain (not
+   *     yet populated for any tenant today — the same forward-looking
+   *     extension point tenant-web-app-url.util.ts already documents).
+   *   - the one legacy-grandfathered tenant (config-driven via
+   *     LEGACY_CUSTOM_DOMAIN_TENANT_SLUG, same as everywhere else this
+   *     session touched) → its own hardcoded /login, byte-for-byte
+   *     unchanged from before this fix.
+   *   - every other tenant (Gold Coast, Titanic, any future tenant with
+   *     no customDomain yet) → `available: true, url: null` — "no
+   *     redirect, sign them in here" — a state this function never used
+   *     to be able to express. The frontend (ananselogix/login's own
+   *     CUSTOMER branch) treats this exactly like every other role:
+   *     store the session, go to /portal.
    */
   async resolveCustomerEntryPoint(user: AuthenticatedUser): Promise<CustomerEntryPointResponse> {
     if (!user.tenantId) return { available: false, url: null };
 
     const tenant = await this.prisma.tenant.findUnique({
       where: { id: user.tenantId },
-      select: { slug: true },
+      select: { slug: true, customDomain: true, isActive: true },
     });
-    if (!tenant) return { available: false, url: null };
+    if (!tenant || !tenant.isActive) return { available: false, url: null };
 
-    if (tenant.slug === 'transatlantic') {
-      return { available: true, url: '/login' };
+    if (isSharedAnanseLogixDomain(tenant, this.configService)) {
+      return { available: true, url: null };
     }
-    return { available: false, url: null };
+
+    if (tenant.customDomain) {
+      return { available: true, url: `https://${tenant.customDomain}/login` };
+    }
+    // The legacy-grandfathered tenant — isSharedAnanseLogixDomain already
+    // confirmed customDomain is unset and the slug matches, so this is
+    // always Trans Atlantic today. Unchanged from before this fix.
+    return { available: true, url: '/login' };
   }
 
   /**

@@ -77,12 +77,21 @@ export interface LoginResponseDto {
 /**
  * Used only by the central AnanseLogix login (/ananselogix/login) to
  * decide what to do with a CUSTOMER-role account: that page is for
- * tenant staff/platform admins, not shipping customers, so a CUSTOMER
- * who authenticates there gets redirected to their own tenant's
- * branded customer login instead of /portal — see AuthService's
- * resolveCustomerEntryPoint for how `url` is decided. `url` is either a
- * same-app relative path or (once real per-tenant domains exist) an
- * absolute URL; never a raw tenant ID or other internal identifier.
+ * tenant staff/platform admins, not shipping customers — see
+ * AuthService.resolveCustomerEntryPoint for the full precedence.
+ *
+ * Three states, not two:
+ *   - `available: false` — no active tenant resolved for this account
+ *     (should be rare/never in practice for a successfully-authenticated
+ *     customer; a safe fallback, not the normal multi-tenant case).
+ *   - `available: true, url: null` — this tenant shares the platform's
+ *     own ananselogix.com (Gold Coast, Titanic, any future tenant with
+ *     no separate domain yet) — sign them in right here, same as every
+ *     other role; no redirect needed.
+ *   - `available: true, url: <path or absolute URL>` — this tenant has
+ *     its own separate destination (Trans Atlantic's own /login today;
+ *     a future tenant's own customDomain once one exists) — hand off
+ *     there instead. Never a raw tenant ID or other internal identifier.
  */
 export interface CustomerEntryPointResponse {
   available: boolean;

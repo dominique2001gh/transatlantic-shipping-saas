@@ -30,25 +30,35 @@ import { resolvePostLoginRoute } from '@/lib/post-login';
  * reject, and there is no reason to introduce that shape here when the
  * backend already resolves it securely from the credentials themselves.
  *
- * This page is for logistics-company operators and platform admins, not
- * shipping customers — end customers belong on their own shipping
- * company's branded website/customer portal (Trans Atlantic's is /login
- * -> /portal), and should never need to know AnanseLogix exists. So a
- * CUSTOMER-role account is deliberately handled differently from every
- * other role here: it is still authenticated (same /auth/login call, same
- * uniform "Invalid email or password" on failure — this page never
- * reveals whether an email exists before a password has been verified),
- * but the resulting session is never stored and the browser is never
- * routed to /portal from this page. Instead resolveCustomerEntryPoint
- * looks up (server-side, from the verified JWT's tenantId — never a
- * value this page could tamper with) whether that customer's own tenant
- * has a real branded login to send them to; if so we hand them off there,
- * and if not we show a generic message rather than a broken link. Either
- * way, no tenant ID or other internal identifier is ever displayed.
+ * This page is for logistics-company operators and platform admins — but
+ * on ananselogix.com it is also, unavoidably, the *only* login form any
+ * CUSTOMER can reach at all (middleware.ts rewrites every /login request
+ * on this hostname here, for every role; Trans Atlantic's own generic
+ * /login is architecturally unreachable on this domain). So a
+ * CUSTOMER-role account is still handled via its own branch here — same
+ * /auth/login call, same uniform "Invalid email or password" on failure
+ * (this page never reveals whether an email exists before a password has
+ * been verified) — but what happens after depends on
+ * resolveCustomerEntryPoint (server-side, from the verified JWT's
+ * tenantId — never a value this page could tamper with):
  *
- * Every other role keeps using resolvePostLoginRoute — the same rule
- * (onboarding-incomplete owners/admins -> /onboarding, everyone else ->
- * their role's home route, including PLATFORM_ADMIN -> /platform) as
+ *   - their tenant shares this platform's own ananselogix.com (Gold
+ *     Coast, Titanic, any future tenant with no separate domain yet) →
+ *     `available: true, url: null` — sign them in exactly like every
+ *     other role below (storeSession + /portal); /portal already
+ *     resolves their own tenant dynamically from the JWT (see
+ *     useTenant.ts), so no redirect is needed or correct here.
+ *   - their tenant has a real separate destination (Trans Atlantic's own
+ *     /login today; a future tenant's own customDomain once one exists)
+ *     → hand off there instead, session never stored here.
+ *   - no active tenant resolved at all → the generic "sign in elsewhere"
+ *     fallback message, not a broken link.
+ *
+ * No tenant ID or other internal identifier is ever displayed either way.
+ *
+ * Every non-CUSTOMER role keeps using resolvePostLoginRoute — the same
+ * rule (onboarding-incomplete owners/admins -> /onboarding, everyone else
+ * -> their role's home route, including PLATFORM_ADMIN -> /platform) as
  * /login, so which login page a staff member or platform admin started
  * from never changes where they end up.
  */
@@ -74,12 +84,23 @@ export default function AnanseLogixLoginPage() {
       if (response.user.role === UserRole.CUSTOMER) {
         const entryPoint = await resolveCustomerEntryPoint(response.accessToken);
         if (entryPoint?.available && entryPoint.url) {
+          // Tenant has its own separate destination (Trans Atlantic's own
+          // /login today, or a future tenant's own customDomain) — hand
+          // off there; this page's own session is never stored.
           setCustomerNotice({ redirectUrl: entryPoint.url });
           if (entryPoint.url.startsWith('http')) {
             window.location.href = entryPoint.url;
           } else {
             router.push(entryPoint.url);
           }
+        } else if (entryPoint?.available) {
+          // Shares this platform's own ananselogix.com (Gold Coast,
+          // Titanic, any future tenant with no separate domain) — sign
+          // them in exactly like every other role. /portal resolves their
+          // own tenant dynamically from the JWT (useTenant.ts); no
+          // redirect needed or correct here.
+          storeSession(response.accessToken, response.user);
+          router.push('/portal');
         } else {
           setCustomerNotice({ redirectUrl: null });
         }
