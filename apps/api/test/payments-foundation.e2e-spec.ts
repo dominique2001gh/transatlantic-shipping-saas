@@ -3,7 +3,8 @@ import { InvoiceStatus, PrismaClient, ShipmentItemType, ShipmentMode, UserRole }
 import * as bcrypt from 'bcrypt';
 import request from 'supertest';
 import { createTestTenant, createUserInTenant, deleteTestTenant, TestTenantFixture } from './utils/fixtures';
-import { createTestApp } from './utils/test-app';
+import { createTestApp } from './utils/test-app';
+import { completeStaffLogin } from './utils/mfa-login';
 
 /**
  * Stage 3B: end-to-end proof of manual payment recording's authorization
@@ -461,11 +462,7 @@ describe('Payment foundation: RBAC, isolation, balance/status derivation, money 
 // ---------------------------------------------------------------------------
 
 async function login(app: INestApplication, email: string, password: string): Promise<string> {
-  const res = await request(app.getHttpServer()).post('/auth/login').send({ email, password });
-  if (res.status !== 200) {
-    throw new Error(`Login failed for ${email}: ${res.status} ${JSON.stringify(res.body)}`);
-  }
-  return res.body.accessToken as string;
+  return completeStaffLogin(app, email, password);
 }
 
 function validPaymentPayload(amount: number) {

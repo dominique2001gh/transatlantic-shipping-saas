@@ -10,6 +10,7 @@ import {
   TestTenantFixture,
 } from './utils/fixtures';
 import { createTestApp } from './utils/test-app';
+import { completeStaffLogin } from './utils/mfa-login';
 
 jest.setTimeout(30_000);
 
@@ -437,13 +438,8 @@ describe('Customer Portal: profile, notification preferences, password (e2e)', (
         .send({ currentPassword: tenantA.user.password, newPassword });
       expect(res.status).toBe(200);
 
-      const newLogin = await request(app.getHttpServer())
-        .post('/auth/login')
-        .send({ email: tenantA.user.email, password: newPassword });
-      expect(newLogin.status).toBe(200);
-
       tenantA.user.password = newPassword;
-      staffTokenA = newLogin.body.accessToken;
+      staffTokenA = await completeStaffLogin(app, tenantA.user.email, newPassword);
     });
 
     it("changing customer A2's password never affects customer A1's credentials", async () => {
@@ -470,11 +466,7 @@ describe('Customer Portal: profile, notification preferences, password (e2e)', (
 // ---------------------------------------------------------------------------
 
 async function login(app: INestApplication, email: string, password: string): Promise<string> {
-  const res = await request(app.getHttpServer()).post('/auth/login').send({ email, password });
-  if (res.status !== 200) {
-    throw new Error(`Login failed for ${email}: ${res.status} ${JSON.stringify(res.body)}`);
-  }
-  return res.body.accessToken as string;
+  return completeStaffLogin(app, email, password);
 }
 
 async function createShipmentForCustomerId(

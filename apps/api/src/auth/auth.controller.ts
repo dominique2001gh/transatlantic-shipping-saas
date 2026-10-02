@@ -1,6 +1,6 @@
 import { BadRequestException, Body, Controller, Get, HttpCode, HttpStatus, Param, Post, UseGuards } from '@nestjs/common';
 import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
-import type { AcceptInvitePreview, AuthenticatedUser, CustomerEntryPointResponse, LoginResponseDto } from '@transatlantic/shared';
+import type { AcceptInvitePreview, AuthenticatedUser, CustomerEntryPointResponse, LoginResult } from '@transatlantic/shared';
 import { AnyAuthenticatedRole } from '../common/decorators/any-authenticated-role.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Public } from '../common/decorators/public.decorator';
@@ -22,7 +22,7 @@ export class AuthController {
   @Public()
   @HttpCode(HttpStatus.OK)
   @Post('login')
-  login(@Body() dto: LoginDto): Promise<LoginResponseDto> {
+  login(@Body() dto: LoginDto): Promise<LoginResult> {
     return this.authService.login(dto.email, dto.password);
   }
 

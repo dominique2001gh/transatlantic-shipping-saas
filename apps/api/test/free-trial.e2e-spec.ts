@@ -5,6 +5,7 @@ import request from 'supertest';
 import Stripe from 'stripe';
 import { TEST_PASSWORD } from './utils/fixtures';
 import { createTestApp } from './utils/test-app';
+import { completeStaffLogin } from './utils/mfa-login';
 
 jest.setTimeout(60_000);
 
@@ -143,9 +144,18 @@ describe('AnanseLogix Free Trial (e2e)', () => {
     });
 
     it('the new owner can log in and use the app normally — TRIALING is never treated as suspended', async () => {
+      // Platform-wide staff MFA (2026-10): a brand-new tenant OWNER
+      // inherits the mandatory-MFA requirement automatically, with zero
+      // signup-flow code aware MFA exists — exactly requirement 12's
+      // "future tenant owner" case. First login must be an enrollment
+      // prompt, not a direct session.
       const loginRes = await request(app.getHttpServer()).post('/auth/login').send({ email: ownerEmail, password: TEST_PASSWORD });
       expect(loginRes.status).toBe(200);
-      ownerToken = loginRes.body.accessToken;
+      expect(loginRes.body.accessToken).toBeUndefined();
+      expect(loginRes.body.mfaRequired).toBe(true);
+      expect(loginRes.body.mfaEnrolled).toBe(false);
+
+      ownerToken = await completeStaffLogin(app, ownerEmail, TEST_PASSWORD);
 
       const staffRes = await request(app.getHttpServer()).get('/users/staff').set('Authorization', `Bearer ${ownerToken}`);
       expect(staffRes.status).toBe(200);
@@ -199,8 +209,7 @@ describe('AnanseLogix Free Trial (e2e)', () => {
       // like the existing PAST_DUE-past-grace-period mechanism.
       await prisma.tenantSubscription.update({ where: { tenantId }, data: { trialEndsAt: new Date(Date.now() - 60_000) } });
 
-      const loginRes = await request(app.getHttpServer()).post('/auth/login').send({ email: ownerEmail, password: TEST_PASSWORD });
-      ownerToken = loginRes.body.accessToken;
+      ownerToken = await completeStaffLogin(app, ownerEmail, TEST_PASSWORD);
     });
 
     it('blocks a normal guarded route once trialEndsAt has passed, and persists the SUSPENDED status', async () => {

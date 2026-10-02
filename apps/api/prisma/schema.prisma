@@ -744,10 +744,30 @@ model User {
   /// see JwtStrategy's own doc comment. A null value here means "never
   /// reset" and is never treated as later than any token's `iat`.
   passwordChangedAt DateTime?
+  /// Platform-wide staff MFA (2026-10): whether this account has an
+  /// active TOTP factor. Required (not optional) for every OWNER/MANAGER/
+  /// STAFF/FINANCE account — see JwtStrategy's own doc comment for how a
+  /// `false` value here forces every login through enrollment instead of
+  /// a normal session, platform-wide, with zero per-tenant configuration.
+  /// Always `false` for CUSTOMER/PLATFORM_ADMIN today (MFA is out of
+  /// scope for both — see MfaService's own doc comment) even though
+  /// nothing stops either from enrolling at the schema level; the staff-
+  /// only enforcement lives in code (STAFF_ROLES check), not here.
+  mfaEnabled   Boolean   @default(false)
+  /// AES-256-GCM-encrypted TOTP secret (base32, RFC 4648) — see
+  /// mfa-crypto.util.ts. Never stored in plaintext, never selected into
+  /// any API response. Null until the first successful enrollment; reset
+  /// (never reused) on every factor replacement.
+  mfaSecret    String?
+  /// Set on first successful enrollment verification; untouched by a
+  /// later factor replacement (that's a new secret, not a new enrollment)
+  /// — purely informational (e.g. "MFA enabled since ...").
+  mfaEnrolledAt DateTime?
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
   tenant   Tenant?   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  mfaRecoveryCodes MfaRecoveryCode[]
   customer Customer? @relation("CustomerUser")
 
   notifications                 Notification[]
@@ -809,6 +829,28 @@ model AccountToken {
 
   @@index([userId, purpose])
   @@map("account_tokens")
+}
+
+/// Platform-wide staff MFA (2026-10): one-time recovery codes issued when
+/// a factor is enrolled or replaced, for the "lost the authenticator
+/// device" case — same `codeHash`-only, never-store-the-raw-value pattern
+/// AccountToken already establishes for the identical reason. Shown to
+/// the user exactly once (the enroll/replace response body); unrecoverable
+/// after that, by design — a database read/leak alone can never produce a
+/// usable code. Replacing a factor deletes every prior row for that user
+/// (via MfaService) rather than leaving old codes live alongside new
+/// ones.
+model MfaRecoveryCode {
+  id        String    @id @default(cuid())
+  userId    String
+  codeHash  String    @unique
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("mfa_recovery_codes")
 }
 
 /// A customer (shipper) belonging to a tenant. May optionally have a

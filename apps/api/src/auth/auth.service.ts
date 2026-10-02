@@ -2,12 +2,14 @@ import { BadRequestException, ConflictException, Inject, Injectable, Logger, Una
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { AccountTokenPurpose, Prisma, UserRole } from '@prisma/client';
-import type { AuthenticatedUser, CustomerEntryPointResponse, JwtPayload, LoginResponseDto } from '@transatlantic/shared';
+import type { AuthenticatedUser, CustomerEntryPointResponse, JwtPayload, LoginResponseDto, LoginResult } from '@transatlantic/shared';
+import { STAFF_ROLES } from '@transatlantic/shared';
 import * as bcrypt from 'bcrypt';
 import { generateCustomerNumber } from '../common/numbering/numbering.util';
 import { generateToken, hashToken } from '../common/token/token.util';
-import { isSharedAnanseLogixDomain } from '../common/tenant/tenant-web-app-url.util';
+import { isSharedAnanseLogixDomain, resolveTenantWebAppUrl } from '../common/tenant/tenant-web-app-url.util';
 import { SMS_CONSENT_DISCLOSURE_VERSION } from '../notifications/sms-consent.constants';
+import { MfaStageTokenService } from './mfa/mfa-stage-token.service';
 import { passwordResetEmail } from '../notifications/templates/platform-emails';
 import { resolvePlatformEmailSender } from '../notifications/providers/platform-email-sender.util';
 import { EMAIL_PROVIDER } from '../notifications/providers/provider.types';
@@ -38,10 +40,24 @@ export class AuthService {
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
+    private readonly mfaStageTokenService: MfaStageTokenService,
     @Inject(EMAIL_PROVIDER) private readonly emailProvider: EmailProvider,
   ) {}
 
-  async login(email: string, password: string): Promise<LoginResponseDto> {
+  /**
+   * Platform-wide staff MFA (2026-10): a successful password match for a
+   * STAFF_ROLES account (OWNER/MANAGER/STAFF/FINANCE — every present and
+   * future tenant, no per-tenant configuration) no longer returns a
+   * LoginResponseDto directly. It returns an MfaRequiredLoginResponse
+   * instead — a short-lived `mfaToken` the client must exchange via
+   * POST /auth/mfa/setup (not yet enrolled) or POST /auth/mfa/challenge
+   * (already enrolled) before ever receiving a real access token. This is
+   * the single choke point that makes MFA automatic for every tenant:
+   * nothing here reads tenantId, a tenant's own settings, or any
+   * allow-list — only `role`. CUSTOMER and PLATFORM_ADMIN are unaffected
+   * and keep today's exact one-step login.
+   */
+  async login(email: string, password: string): Promise<LoginResult> {
     const normalizedEmail = email.toLowerCase().trim();
 
     // email is unique per tenant, not globally (Stage 2C: the same person
@@ -73,6 +89,15 @@ export class AuthService {
         }
       }
 
+      if ((STAFF_ROLES as string[]).includes(user.role)) {
+        const stage = user.mfaEnabled ? 'mfa_challenge' : 'mfa_setup';
+        return {
+          mfaRequired: true,
+          mfaEnrolled: user.mfaEnabled,
+          mfaToken: await this.mfaStageTokenService.issue(user.id, stage),
+        };
+      }
+
       return this.buildLoginResponse(user);
     }
 
@@ -86,7 +111,15 @@ export class AuthService {
     throw new UnauthorizedException('Invalid email or password');
   }
 
-  private async buildLoginResponse(user: {
+  /**
+   * Issues a real access token. Public (not private) because MfaService
+   * calls this directly once a STAFF_ROLES caller's MFA step succeeds —
+   * see that file's own doc comment. The only two ways to ever reach this
+   * method for a STAFF_ROLES user are: this class's own `login` for a
+   * role MFA doesn't apply to, or MfaService after a verified code —
+   * never directly from a password-only check.
+   */
+  async buildLoginResponse(user: {
     id: string;
     email: string;
     firstName: string;
@@ -116,6 +149,11 @@ export class AuthService {
       role: authenticatedUser.role,
       tenantId: user.tenantId,
       customerId: authenticatedUser.customerId,
+      // Platform-wide staff MFA (2026-10): always true — reaching this
+      // method at all already proves either MFA isn't required for this
+      // role, or it was just satisfied. See JwtStrategy's own doc comment
+      // for the per-request check this claim feeds.
+      mfa: true,
     };
 
     return {
@@ -407,6 +445,7 @@ export class AuthService {
     const normalizedEmail = email.toLowerCase().trim();
     const users = await this.prisma.user.findMany({
       where: { email: normalizedEmail, isActive: true },
+      include: { tenant: { select: { slug: true, customDomain: true } } },
     });
 
     for (const user of users) {
@@ -421,7 +460,20 @@ export class AuthService {
           },
         });
 
-        const webAppUrl = this.configService.get<string>('WEB_APP_URL', 'http://localhost:3000');
+        // Multi-tenant hostname fix (2026-10): reset links must resolve
+        // to the SAME tenant-aware host staff-invitation links already
+        // use (resolveTenantWebAppUrl) — not the global WEB_APP_URL,
+        // which only ever means Trans Atlantic's own legacy domain (see
+        // that util's own doc comment for the full precedence rules).
+        // Using WEB_APP_URL unconditionally here would have sent every
+        // other tenant's (and every future tenant's) reset link to Trans
+        // Atlantic's hostname. A PLATFORM_ADMIN (tenantId null, no tenant
+        // row at all) falls through to the platform's own hostname —
+        // resolveTenantWebAppUrl's own legacy-slug branch can never match
+        // a null tenant, so this is safe without a special case here.
+        const webAppUrl = user.tenant
+          ? resolveTenantWebAppUrl(user.tenant, this.configService)
+          : this.configService.get<string>('ANANSELOGIX_BASE_URL', 'http://localhost:3000')!;
         const resetEmail = passwordResetEmail({
           firstName: user.firstName,
           resetUrl: `${webAppUrl.replace(/\/$/, '')}/reset-password?token=${rawToken}`,

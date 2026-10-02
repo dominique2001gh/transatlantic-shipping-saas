@@ -2,7 +2,8 @@ import { INestApplication } from '@nestjs/common';
 import { PrismaClient, UserRole } from '@prisma/client';
 import request from 'supertest';
 import { createTestTenant, createUserInTenant, deleteTestTenant, TestTenantFixture } from './utils/fixtures';
-import { createTestApp } from './utils/test-app';
+import { createTestApp } from './utils/test-app';
+import { completeStaffLogin } from './utils/mfa-login';
 
 jest.setTimeout(30_000);
 
@@ -287,9 +288,5 @@ describe('Staff administration: role changes, activate/deactivate, last-owner lo
 // ---------------------------------------------------------------------------
 
 async function login(app: INestApplication, email: string, password: string): Promise<string> {
-  const res = await request(app.getHttpServer()).post('/auth/login').send({ email, password });
-  if (res.status !== 200) {
-    throw new Error(`Login failed for ${email}: ${res.status} ${JSON.stringify(res.body)}`);
-  }
-  return res.body.accessToken as string;
+  return completeStaffLogin(app, email, password);
 }

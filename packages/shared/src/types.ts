@@ -50,6 +50,17 @@ export interface JwtPayload {
   tenantId: string | null;
   /** Set when role === CUSTOMER, links the user to their Customer record. */
   customerId?: string | null;
+  /**
+   * Platform-wide staff MFA (2026-10): `true` on every token issued by
+   * AuthService.buildLoginResponse — by construction, that method is only
+   * ever reached after a STAFF_ROLES caller's MFA step (enrollment or
+   * challenge) has already succeeded, or for a role MFA doesn't apply to
+   * (CUSTOMER/PLATFORM_ADMIN). JwtStrategy re-checks this claim against
+   * the role on every request (see its own doc comment) — an older token
+   * issued before this field existed has `mfa` undefined, which a
+   * STAFF_ROLES check treats as "not satisfied," forcing a fresh login.
+   */
+  mfa?: boolean;
   iat?: number;
   exp?: number;
 }
@@ -72,6 +83,41 @@ export interface LoginRequestDto {
 export interface LoginResponseDto {
   accessToken: string;
   user: AuthenticatedUser;
+}
+
+/**
+ * Platform-wide staff MFA (2026-10): what POST /auth/login returns instead
+ * of LoginResponseDto when the authenticating account's role requires MFA
+ * (every STAFF_ROLES account — see constants.ts). `mfaToken` is a
+ * short-lived, single-purpose token (NOT an access token — see
+ * MfaStageTokenService) the client must immediately exchange via either
+ * POST /auth/mfa/setup(+/verify) (when `mfaEnrolled` is false) or POST
+ * /auth/mfa/challenge (when true). CUSTOMER and PLATFORM_ADMIN logins are
+ * never affected and keep returning LoginResponseDto directly, unchanged.
+ */
+export interface MfaRequiredLoginResponse {
+  mfaRequired: true;
+  mfaEnrolled: boolean;
+  mfaToken: string;
+}
+
+export type LoginResult = LoginResponseDto | MfaRequiredLoginResponse;
+
+/** POST /auth/mfa/setup response — the client renders `otpauthUri` as a QR code (e.g. via qrcode.react) and shows `secret` for manual entry. The secret is never persisted as plaintext server-side beyond this one response — see mfa-crypto.util.ts. */
+export interface MfaSetupResponse {
+  secret: string;
+  otpauthUri: string;
+}
+
+/** POST /auth/mfa/setup/verify and /users/me/mfa/replace/verify response — `recoveryCodes` are shown exactly once; the server never returns them again after this call. */
+export interface MfaEnrollmentCompleteResponse extends LoginResponseDto {
+  recoveryCodes: string[];
+}
+
+/** GET /users/me/mfa/status response. */
+export interface MfaStatusResponse {
+  enabled: boolean;
+  enrolledAt: string | null;
 }
 
 /**

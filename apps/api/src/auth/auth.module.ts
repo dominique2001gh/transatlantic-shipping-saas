@@ -7,6 +7,7 @@ import { NotificationProvidersModule } from '../notifications/providers/notifica
 import { StaffInvitationsModule } from '../staff-invitations/staff-invitations.module';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
+import { MfaStageTokenModule } from './mfa/mfa-stage-token.module';
 import { JwtStrategy } from './strategies/jwt.strategy';
 
 @Module({
@@ -33,6 +34,7 @@ import { JwtStrategy } from './strategies/jwt.strategy';
     // delegate to StaffInvitationsService (a leaf module — no circular
     // dependency).
     StaffInvitationsModule,
+    MfaStageTokenModule,
   ],
   controllers: [AuthController],
   providers: [AuthService, JwtStrategy],

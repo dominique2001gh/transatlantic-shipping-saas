@@ -5,6 +5,7 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { AiAgentModule } from './ai-agent/ai-agent.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { AuthModule } from './auth/auth.module';
+import { MfaModule } from './auth/mfa/mfa.module';
 import { ContainersModule } from './containers/containers.module';
 import { CustomerPortalModule } from './customer-portal/customer-portal.module';
 import { CustomersModule } from './customers/customers.module';
@@ -48,6 +49,7 @@ import { WebhooksModule } from './webhooks/webhooks.module';
     ScheduleModule.forRoot(),
     PrismaModule,
     AuthModule,
+    MfaModule,
     UsersModule,
     TenantsModule,
     CustomersModule,

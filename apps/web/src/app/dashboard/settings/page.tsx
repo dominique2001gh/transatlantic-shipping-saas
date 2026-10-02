@@ -4,7 +4,6 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { TextArea, TextInput } from '@/components/forms/FormField';
 import { Button, LinkButton } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
-import { PasswordSection } from '@/components/account/PasswordSection';
 import { ApiError } from '@/lib/api';
 import { getTenantSiteConfig, updateTenantSiteConfig } from '@/lib/tenant-site-config';
 import { serviceTypeOptions } from '@/lib/ananselogix/site-data';
@@ -84,11 +83,10 @@ export default function SettingsPage() {
       <div>
         <h1 className="text-2xl font-semibold text-slate-900">Settings</h1>
         <p className="mt-1 text-sm text-slate-500">
-          Manage your account and your company&apos;s public website content.
+          Manage your company&apos;s payments and public website content. Looking for your own password or
+          two-factor authentication? See My Account.
         </p>
       </div>
-
-      <PasswordSection />
 
       <section>
         <h2 className="text-lg font-semibold text-slate-900">Payments</h2>

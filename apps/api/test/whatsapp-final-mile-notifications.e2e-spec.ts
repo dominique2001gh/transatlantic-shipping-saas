@@ -4,7 +4,8 @@ import { PrismaClient, ShipmentItemType, ShipmentMode, UserRole } from '@prisma/
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { WHATSAPP_PROVIDER } from '../src/notifications/providers/provider.types';
-import { createTestTenant, deleteTestTenant, TestTenantFixture } from './utils/fixtures';
+import { createTestTenant, deleteTestTenant, TestTenantFixture } from './utils/fixtures';
+import { completeStaffLogin } from './utils/mfa-login';
 
 jest.setTimeout(30_000);
 
@@ -222,11 +223,7 @@ describe('WhatsApp final-mile notifications (e2e)', () => {
 // ---------------------------------------------------------------------------
 
 async function login(app: INestApplication, email: string, password: string): Promise<string> {
-  const res = await request(app.getHttpServer()).post('/auth/login').send({ email, password });
-  if (res.status !== 200) {
-    throw new Error(`Login failed for ${email}: ${res.status} ${JSON.stringify(res.body)}`);
-  }
-  return res.body.accessToken as string;
+  return completeStaffLogin(app, email, password);
 }
 
 async function createCustomer(app: INestApplication, token: string, label: string): Promise<{ id: string }> {

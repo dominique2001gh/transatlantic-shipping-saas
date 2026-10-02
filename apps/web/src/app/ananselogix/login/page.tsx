@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState, type FormEvent } from 'react';
-import type { LoginResponseDto } from '@transatlantic/shared';
+import type { LoginResult } from '@transatlantic/shared';
 import { UserRole } from '@transatlantic/shared';
 import { AnanseLogixAuthShell } from '@/components/ananselogix/AnanseLogixAuthShell';
 import { TextInput } from '@/components/forms/FormField';
@@ -11,6 +11,7 @@ import { Button, LinkButton } from '@/components/ui/Button';
 import { apiFetch, ApiError } from '@/lib/api';
 import { storeSession } from '@/lib/auth';
 import { resolveCustomerEntryPoint } from '@/lib/customer-entry-point';
+import { storePendingMfa } from '@/lib/mfa';
 import { resolvePostLoginRoute } from '@/lib/post-login';
 
 /**
@@ -76,10 +77,20 @@ export default function AnanseLogixLoginPage() {
     setCustomerNotice(null);
     setLoading(true);
     try {
-      const response = await apiFetch<LoginResponseDto>('/auth/login', {
+      const response = await apiFetch<LoginResult>('/auth/login', {
         method: 'POST',
         body: JSON.stringify({ email, password }),
       });
+
+      if ('mfaRequired' in response) {
+        // Platform-wide staff MFA: CUSTOMER never reaches this branch
+        // (see AuthService.login), so every account landing here is a
+        // staff/platform role that must complete MFA before a session
+        // exists.
+        storePendingMfa({ mfaToken: response.mfaToken, mfaEnrolled: response.mfaEnrolled, nextPath: null });
+        router.push('/mfa');
+        return;
+      }
 
       if (response.user.role === UserRole.CUSTOMER) {
         const entryPoint = await resolveCustomerEntryPoint(response.accessToken);

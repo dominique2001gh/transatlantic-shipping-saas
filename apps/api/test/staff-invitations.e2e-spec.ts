@@ -7,6 +7,7 @@ import { AppModule } from '../src/app.module';
 import { hashToken } from '../src/common/token/token.util';
 import { EMAIL_PROVIDER } from '../src/notifications/providers/provider.types';
 import { createTestTenant, createUserInTenant, deleteTestTenant, TestTenantFixture } from './utils/fixtures';
+import { completeStaffLogin } from './utils/mfa-login';
 
 jest.setTimeout(30_000);
 
@@ -397,9 +398,11 @@ describe('Staff Invitations: invite/accept/resend (e2e)', () => {
       expect(user!.role).toBe(UserRole.FINANCE);
       expect(user!.isActive).toBe(true);
 
-      // The employee can sign in with the password *they* chose.
-      const loginRes = await request(app.getHttpServer()).post('/auth/login').send({ email, password: employeePassword });
-      expect(loginRes.status).toBe(200);
+      // The employee can sign in with the password *they* chose, all the
+      // way to a real session (completing their own first-time MFA
+      // enrollment along the way — mandatory for every staff role).
+      const employeeToken = await completeStaffLogin(app, email, employeePassword);
+      expect(employeeToken).toBeTruthy();
 
       // The invitation itself never carried a password field anywhere in its lifecycle.
       const invitation = await prisma.tenantInvitation.findFirst({ where: { email, tenantId: tenantA.tenantId } });
@@ -628,16 +631,13 @@ describe('Staff Invitations: invite/accept/resend (e2e)', () => {
   });
 
   it('leaves existing login/RBAC for pre-existing roles fully intact', async () => {
-    const res = await request(app.getHttpServer()).post('/auth/login').send({ email: tenantA.user.email, password: tenantA.user.password });
-    expect(res.status).toBe(200);
-    expect(res.body.user.tenantId).toBe(tenantA.tenantId);
+    const token = await completeStaffLogin(app, tenantA.user.email, tenantA.user.password);
+    const me = await request(app.getHttpServer()).get('/users/me').set('Authorization', `Bearer ${token}`);
+    expect(me.status).toBe(200);
+    expect(me.body.tenantId).toBe(tenantA.tenantId);
   });
 });
 
 async function login(app: INestApplication, email: string, password: string): Promise<string> {
-  const res = await request(app.getHttpServer()).post('/auth/login').send({ email, password });
-  if (res.status !== 200) {
-    throw new Error(`Login failed for ${email}: ${res.status} ${JSON.stringify(res.body)}`);
-  }
-  return res.body.accessToken as string;
+  return completeStaffLogin(app, email, password);
 }

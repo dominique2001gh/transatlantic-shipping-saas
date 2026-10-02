@@ -2,7 +2,8 @@ import { INestApplication } from '@nestjs/common';
 import { PrismaClient, ShipmentItemType, ShipmentMode, UserRole } from '@prisma/client';
 import request from 'supertest';
 import { createTestTenant, createUserInTenant, deleteTestTenant, TestTenantFixture } from './utils/fixtures';
-import { createTestApp } from './utils/test-app';
+import { createTestApp } from './utils/test-app';
+import { completeStaffLogin } from './utils/mfa-login';
 
 /**
  * End-to-end regression suite for Stage 2A: the public/customer tracking
@@ -215,11 +216,7 @@ describe('Public Tracking (e2e)', () => {
 // ---------------------------------------------------------------------------
 
 async function login(app: INestApplication, email: string, password: string): Promise<string> {
-  const res = await request(app.getHttpServer()).post('/auth/login').send({ email, password });
-  if (res.status !== 200) {
-    throw new Error(`Login failed for ${email}: ${res.status} ${JSON.stringify(res.body)}`);
-  }
-  return res.body.accessToken as string;
+  return completeStaffLogin(app, email, password);
 }
 
 function lookup(app: INestApplication, query: { tenantSlug: string; trackingNumber: string; lastName: string }) {

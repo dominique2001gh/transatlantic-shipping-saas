@@ -30,6 +30,12 @@ export const dashboardNavItems: NavItem[] = [
   { label: 'AI Assistant', href: '/dashboard/ai-agent' },
   { label: 'Staff', href: '/dashboard/staff', roles: STAFF_ROLES },
   { label: 'Settings', href: '/dashboard/settings', roles: ONBOARDING_ROLES },
+  // Platform-wide staff MFA (2026-10): every dashboard role's own
+  // password/MFA management — deliberately NOT roles-restricted
+  // (undefined = every DASHBOARD_ROLES member sees it), and deliberately
+  // separate from the OWNER-only company Settings above. See
+  // dashboard/account/page.tsx's own doc comment.
+  { label: 'My Account', href: '/dashboard/account' },
 ];
 
 export const portalNavItems: NavItem[] = [

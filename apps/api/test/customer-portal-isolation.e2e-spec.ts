@@ -10,7 +10,8 @@ import {
   TestPortalCustomerFixture,
   TestTenantFixture,
 } from './utils/fixtures';
-import { createTestApp } from './utils/test-app';
+import { createTestApp } from './utils/test-app';
+import { completeStaffLogin } from './utils/mfa-login';
 
 /**
  * End-to-end proof of Stage 2C's authorization boundary: every
@@ -309,11 +310,7 @@ describe('Customer Portal authorization & isolation (e2e)', () => {
 // ---------------------------------------------------------------------------
 
 async function login(app: INestApplication, email: string, password: string): Promise<string> {
-  const res = await request(app.getHttpServer()).post('/auth/login').send({ email, password });
-  if (res.status !== 200) {
-    throw new Error(`Login failed for ${email}: ${res.status} ${JSON.stringify(res.body)}`);
-  }
-  return res.body.accessToken as string;
+  return completeStaffLogin(app, email, password);
 }
 
 async function createShipmentForCustomerId(

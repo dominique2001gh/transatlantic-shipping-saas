@@ -3,6 +3,7 @@ import { PrismaClient, ShipmentItemType, ShipmentMode } from '@prisma/client';
 import request from 'supertest';
 import { createTestTenant, deleteTestTenant, TestTenantFixture, TEST_PASSWORD } from './utils/fixtures';
 import { createTestApp } from './utils/test-app';
+import { completeStaffLogin } from './utils/mfa-login';
 
 /**
  * End-to-end regression suite for the warehouse receiving workflow
@@ -61,13 +62,22 @@ describe('Warehouse receiving workflow + tenant isolation (e2e)', () => {
   // -- Authentication -----------------------------------------------------
 
   describe('authentication', () => {
-    it('logs in a valid staff user and returns an access token', async () => {
-      const res = await request(app.getHttpServer())
+    it('logs in a valid staff user and returns an access token (after satisfying mandatory MFA)', async () => {
+      // tenantA.user is already MFA-enrolled from beforeAll's own `login`
+      // call — a correct password alone is deliberately NOT enough here.
+      const firstFactor = await request(app.getHttpServer())
         .post('/auth/login')
         .send({ email: tenantA.user.email, password: TEST_PASSWORD });
-      expect(res.status).toBe(200);
-      expect(typeof res.body.accessToken).toBe('string');
-      expect(res.body.user.tenantId).toBe(tenantA.tenantId);
+      expect(firstFactor.status).toBe(200);
+      expect(firstFactor.body.accessToken).toBeUndefined();
+      expect(firstFactor.body.mfaRequired).toBe(true);
+      expect(firstFactor.body.mfaEnrolled).toBe(true);
+
+      const accessToken = await login(app, tenantA.user.email, TEST_PASSWORD);
+      expect(typeof accessToken).toBe('string');
+
+      const me = await request(app.getHttpServer()).get('/users/me').set('Authorization', `Bearer ${accessToken}`);
+      expect(me.body.tenantId).toBe(tenantA.tenantId);
     });
 
     it('rejects an invalid password', async () => {
@@ -248,11 +258,7 @@ describe('Warehouse receiving workflow + tenant isolation (e2e)', () => {
 // ---------------------------------------------------------------------------
 
 async function login(app: INestApplication, email: string, password: string): Promise<string> {
-  const res = await request(app.getHttpServer()).post('/auth/login').send({ email, password });
-  if (res.status !== 200) {
-    throw new Error(`Login failed for ${email}: ${res.status} ${JSON.stringify(res.body)}`);
-  }
-  return res.body.accessToken as string;
+  return completeStaffLogin(app, email, password);
 }
 
 async function createSingleItemShipment(

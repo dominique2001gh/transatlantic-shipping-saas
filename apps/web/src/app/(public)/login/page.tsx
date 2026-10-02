@@ -3,13 +3,14 @@
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useState, type FormEvent } from 'react';
-import type { LoginResponseDto } from '@transatlantic/shared';
+import type { LoginResult } from '@transatlantic/shared';
 import { UserRole } from '@transatlantic/shared';
 import { AuthShell } from '@/components/marketing/AuthShell';
 import { TextInput } from '@/components/forms/FormField';
 import { Button } from '@/components/ui/Button';
 import { apiFetch, ApiError } from '@/lib/api';
 import { storeSession } from '@/lib/auth';
+import { storePendingMfa } from '@/lib/mfa';
 import { resolvePostLoginRoute, resolveSafeNextPath } from '@/lib/post-login';
 
 /**
@@ -61,10 +62,22 @@ export default function LoginPage() {
     setError(null);
     setLoading(true);
     try {
-      const response = await apiFetch<LoginResponseDto>('/auth/login', {
+      const response = await apiFetch<LoginResult>('/auth/login', {
         method: 'POST',
         body: JSON.stringify({ email, password }),
       });
+
+      if ('mfaRequired' in response) {
+        // Platform-wide staff MFA: this account's role always requires a
+        // second factor — never store a session yet, hand off to /mfa
+        // instead. `nextPath` only ever matters for a CUSTOMER (see
+        // below), who never reaches this branch, but is carried along
+        // regardless for consistency.
+        storePendingMfa({ mfaToken: response.mfaToken, mfaEnrolled: response.mfaEnrolled, nextPath });
+        router.push('/mfa');
+        return;
+      }
+
       storeSession(response.accessToken, response.user);
       // A `next` override only ever applies to the customer it was built
       // for — staff/platform-admin accounts always land on their normal

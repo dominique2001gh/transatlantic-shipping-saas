@@ -7,6 +7,7 @@ import { AppModule } from '../src/app.module';
 import { hashToken } from '../src/common/token/token.util';
 import { EMAIL_PROVIDER } from '../src/notifications/providers/provider.types';
 import { createTestTenant, deleteTestTenant, TestTenantFixture } from './utils/fixtures';
+import { completeStaffLogin } from './utils/mfa-login';
 
 jest.setTimeout(30_000);
 
@@ -113,12 +114,11 @@ describe('Password recovery: forgot/reset password (e2e)', () => {
       .send({ email: tenantA.user.email, password: tenantA.user.password });
     expect(oldLogin.status).toBe(401);
 
-    // New password works.
-    const newLogin = await request(app.getHttpServer())
-      .post('/auth/login')
-      .send({ email: tenantA.user.email, password: newPassword });
-    expect(newLogin.status).toBe(200);
-    expect(newLogin.body.accessToken).toBeTruthy();
+    // New password works end to end (this account's first-ever login, so
+    // this also completes its one-time MFA enrollment — see
+    // completeStaffLogin's own doc comment).
+    const accessToken = await completeStaffLogin(app, tenantA.user.email, newPassword);
+    expect(accessToken).toBeTruthy();
 
     // Restore for any later test in this file that assumes the original password.
     tenantA.user.password = newPassword;
@@ -169,11 +169,10 @@ describe('Password recovery: forgot/reset password (e2e)', () => {
 
   it('invalidates already-issued JWTs on password reset, without affecting other users', async () => {
     // A fresh session for tenantA, taken out *before* the reset below.
-    const preResetLogin = await request(app.getHttpServer())
-      .post('/auth/login')
-      .send({ email: tenantA.user.email, password: tenantA.user.password });
-    expect(preResetLogin.status).toBe(200);
-    const staleToken = preResetLogin.body.accessToken as string;
+    // tenantA is already MFA-enrolled by this point (the previous test
+    // completed its first enrollment), so this is a normal challenge, not
+    // another enrollment.
+    const staleToken = await completeStaffLogin(app, tenantA.user.email, tenantA.user.password);
 
     // Sanity: the token works right now.
     const beforeReset = await request(app.getHttpServer()).get('/users/me').set('Authorization', `Bearer ${staleToken}`);
@@ -202,15 +201,53 @@ describe('Password recovery: forgot/reset password (e2e)', () => {
     expect(afterReset.status).toBe(401);
 
     // ...but tenant B's own session, untouched by tenant A's reset, keeps working (cross-tenant isolation).
-    const tenantBToken = await request(app.getHttpServer())
-      .post('/auth/login')
-      .send({ email: tenantB.user.email, password: tenantB.user.password });
-    expect(tenantBToken.status).toBe(200);
+    const tenantBToken = await completeStaffLogin(app, tenantB.user.email, tenantB.user.password);
     const tenantBMe = await request(app.getHttpServer())
       .get('/users/me')
-      .set('Authorization', `Bearer ${tenantBToken.body.accessToken}`);
+      .set('Authorization', `Bearer ${tenantBToken}`);
     expect(tenantBMe.status).toBe(200);
     expect(tenantBMe.body.tenantId).toBe(tenantB.tenantId);
+  });
+
+  /**
+   * Platform-wide staff MFA (2026-10): the critical guarantee requirement
+   * 7/J calls for — a password reset must never become a way to skip the
+   * second factor. tenantA is already MFA-enrolled by this point (two
+   * tests above).
+   */
+  it('a password reset does not bypass MFA — the account still must complete a challenge afterward', async () => {
+    await request(app.getHttpServer()).post('/auth/forgot-password').send({ email: tenantA.user.email }).expect(200);
+    const token = extractToken(sent[0]);
+    const newPassword = 'ResetNeverBypassesMfa1!';
+    await request(app.getHttpServer())
+      .post('/auth/reset-password')
+      .send({ token, password: newPassword, confirmPassword: newPassword })
+      .expect(200);
+    tenantA.user.password = newPassword;
+
+    // The password is correct and accepted, but this must NOT be a full
+    // session — it must be the same mfaRequired/mfaEnrolled:true challenge
+    // shape every other login for this already-enrolled account gets.
+    const loginRes = await request(app.getHttpServer())
+      .post('/auth/login')
+      .send({ email: tenantA.user.email, password: newPassword });
+    expect(loginRes.status).toBe(200);
+    expect(loginRes.body.accessToken).toBeUndefined();
+    expect(loginRes.body.mfaRequired).toBe(true);
+    expect(loginRes.body.mfaEnrolled).toBe(true);
+    expect(loginRes.body.mfaToken).toBeTruthy();
+
+    // A wrong MFA code on that token is rejected...
+    const badChallenge = await request(app.getHttpServer())
+      .post('/auth/mfa/challenge')
+      .set('Authorization', `Bearer ${loginRes.body.mfaToken}`)
+      .send({ code: '000000' });
+    expect(badChallenge.status).toBe(401);
+
+    // ...but completing the real challenge (same factor as before the
+    // reset — reset never touched mfaSecret/mfaEnabled) succeeds.
+    const accessToken = await completeStaffLogin(app, tenantA.user.email, newPassword);
+    expect(accessToken).toBeTruthy();
   });
 
   it('preserves tenant isolation: two accounts sharing an email each get their own token, resetting one never touches the other', async () => {
@@ -245,11 +282,10 @@ describe('Password recovery: forgot/reset password (e2e)', () => {
   });
 
   it('leaves existing seeded/production-style login behavior fully intact for an account that never requested a reset', async () => {
-    const res = await request(app.getHttpServer())
-      .post('/auth/login')
-      .send({ email: tenantB.user.email, password: tenantB.user.password });
-    expect(res.status).toBe(200);
-    expect(res.body.user.tenantId).toBe(tenantB.tenantId);
+    const accessToken = await completeStaffLogin(app, tenantB.user.email, tenantB.user.password);
+    const me = await request(app.getHttpServer()).get('/users/me').set('Authorization', `Bearer ${accessToken}`);
+    expect(me.status).toBe(200);
+    expect(me.body.tenantId).toBe(tenantB.tenantId);
   });
 });
 
