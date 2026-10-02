@@ -125,3 +125,20 @@ export function passwordResetEmail(params: { firstName: string; resetUrl: string
     ].join('\n'),
   };
 }
+
+/** Email-based staff MFA (2026-10): the one-time sign-in code sent on every staff login — see MfaService.requestOtp. */
+export function mfaOtpEmail(params: { firstName: string; code: string; expiresInMinutes: number }): PlatformEmail {
+  return {
+    subject: `Your AnanseLogix sign-in code: ${params.code}`,
+    body: [
+      `Hi ${params.firstName},`,
+      '',
+      `Your sign-in verification code is: ${params.code}`,
+      `This code expires in ${params.expiresInMinutes} minutes and can only be used once.`,
+      '',
+      `If you didn't try to sign in, you can safely ignore this email — your account is still secure.`,
+      '',
+      '— The AnanseLogix Team',
+    ].join('\n'),
+  };
+}

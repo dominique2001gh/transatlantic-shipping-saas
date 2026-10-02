@@ -22,7 +22,7 @@ export class MfaStageGuard implements CanActivate {
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    const requiredStage = this.reflector.getAllAndOverride<'mfa_setup' | 'mfa_challenge' | undefined>(MFA_STAGE_KEY, [
+    const requiredStage = this.reflector.getAllAndOverride<'mfa_challenge' | undefined>(MFA_STAGE_KEY, [
       context.getHandler(),
       context.getClass(),
     ]);

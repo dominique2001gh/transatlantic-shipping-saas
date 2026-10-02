@@ -83,11 +83,11 @@ export default function AnanseLogixLoginPage() {
       });
 
       if ('mfaRequired' in response) {
-        // Platform-wide staff MFA: CUSTOMER never reaches this branch
+        // Email-based staff MFA: CUSTOMER never reaches this branch
         // (see AuthService.login), so every account landing here is a
         // staff/platform role that must complete MFA before a session
         // exists.
-        storePendingMfa({ mfaToken: response.mfaToken, mfaEnrolled: response.mfaEnrolled, nextPath: null });
+        storePendingMfa({ mfaToken: response.mfaToken, nextPath: null });
         router.push('/mfa');
         return;
       }

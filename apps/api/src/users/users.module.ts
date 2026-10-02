@@ -1,8 +1,7 @@
 import { Module } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module';
-import { MfaModule } from '../auth/mfa/mfa.module';
 import { StaffInvitationsModule } from '../staff-invitations/staff-invitations.module';
-import { PlatformUsersController, UsersController } from './users.controller';
+import { UsersController } from './users.controller';
 import { UsersService } from './users.service';
 
 /**
@@ -18,8 +17,8 @@ import { UsersService } from './users.service';
  * expose the permanent invite/list/resend staff-management endpoints.
  */
 @Module({
-  imports: [AuthModule, MfaModule, StaffInvitationsModule],
-  controllers: [UsersController, PlatformUsersController],
+  imports: [AuthModule, StaffInvitationsModule],
+  controllers: [UsersController],
   providers: [UsersService],
   exports: [UsersService],
 })

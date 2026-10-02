@@ -45,17 +45,20 @@ export class AuthService {
   ) {}
 
   /**
-   * Platform-wide staff MFA (2026-10): a successful password match for a
+   * Email-based staff MFA (2026-10): a successful password match for a
    * STAFF_ROLES account (OWNER/MANAGER/STAFF/FINANCE — every present and
    * future tenant, no per-tenant configuration) no longer returns a
    * LoginResponseDto directly. It returns an MfaRequiredLoginResponse
-   * instead — a short-lived `mfaToken` the client must exchange via
-   * POST /auth/mfa/setup (not yet enrolled) or POST /auth/mfa/challenge
-   * (already enrolled) before ever receiving a real access token. This is
-   * the single choke point that makes MFA automatic for every tenant:
-   * nothing here reads tenantId, a tenant's own settings, or any
-   * allow-list — only `role`. CUSTOMER and PLATFORM_ADMIN are unaffected
-   * and keep today's exact one-step login.
+   * instead — a short-lived `mfaToken` the client must exchange with
+   * POST /auth/mfa/send (emails a 6-digit code) and then POST
+   * /auth/mfa/challenge (verifies it) before ever receiving a real access
+   * token. This is the single choke point that makes MFA automatic for
+   * every tenant: nothing here reads tenantId, a tenant's own settings,
+   * or any allow-list — only `role`. There is no separate "enrollment"
+   * state (unlike the superseded TOTP design) — every login for a
+   * STAFF_ROLES account goes through the same email-code step, including
+   * the very first one. CUSTOMER and PLATFORM_ADMIN are unaffected and
+   * keep today's exact one-step login.
    */
   async login(email: string, password: string): Promise<LoginResult> {
     const normalizedEmail = email.toLowerCase().trim();
@@ -90,11 +93,9 @@ export class AuthService {
       }
 
       if ((STAFF_ROLES as string[]).includes(user.role)) {
-        const stage = user.mfaEnabled ? 'mfa_challenge' : 'mfa_setup';
         return {
           mfaRequired: true,
-          mfaEnrolled: user.mfaEnabled,
-          mfaToken: await this.mfaStageTokenService.issue(user.id, stage),
+          mfaToken: await this.mfaStageTokenService.issue(user.id, 'mfa_challenge'),
         };
       }
 

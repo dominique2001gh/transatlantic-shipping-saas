@@ -68,12 +68,12 @@ export default function LoginPage() {
       });
 
       if ('mfaRequired' in response) {
-        // Platform-wide staff MFA: this account's role always requires a
+        // Email-based staff MFA: this account's role always requires a
         // second factor — never store a session yet, hand off to /mfa
         // instead. `nextPath` only ever matters for a CUSTOMER (see
         // below), who never reaches this branch, but is carried along
         // regardless for consistency.
-        storePendingMfa({ mfaToken: response.mfaToken, mfaEnrolled: response.mfaEnrolled, nextPath });
+        storePendingMfa({ mfaToken: response.mfaToken, nextPath });
         router.push('/mfa');
         return;
       }

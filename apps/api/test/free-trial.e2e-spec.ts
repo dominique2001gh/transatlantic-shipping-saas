@@ -144,16 +144,16 @@ describe('AnanseLogix Free Trial (e2e)', () => {
     });
 
     it('the new owner can log in and use the app normally — TRIALING is never treated as suspended', async () => {
-      // Platform-wide staff MFA (2026-10): a brand-new tenant OWNER
+      // Email-based staff MFA (2026-10): a brand-new tenant OWNER
       // inherits the mandatory-MFA requirement automatically, with zero
       // signup-flow code aware MFA exists — exactly requirement 12's
-      // "future tenant owner" case. First login must be an enrollment
-      // prompt, not a direct session.
+      // "future tenant owner" case. First login must be an email-code
+      // challenge, not a direct session.
       const loginRes = await request(app.getHttpServer()).post('/auth/login').send({ email: ownerEmail, password: TEST_PASSWORD });
       expect(loginRes.status).toBe(200);
       expect(loginRes.body.accessToken).toBeUndefined();
       expect(loginRes.body.mfaRequired).toBe(true);
-      expect(loginRes.body.mfaEnrolled).toBe(false);
+      expect(loginRes.body.mfaToken).toBeTruthy();
 
       ownerToken = await completeStaffLogin(app, ownerEmail, TEST_PASSWORD);
 

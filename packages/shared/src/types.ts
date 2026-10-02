@@ -86,39 +86,24 @@ export interface LoginResponseDto {
 }
 
 /**
- * Platform-wide staff MFA (2026-10): what POST /auth/login returns instead
+ * Email-based staff MFA (2026-10): what POST /auth/login returns instead
  * of LoginResponseDto when the authenticating account's role requires MFA
  * (every STAFF_ROLES account — see constants.ts). `mfaToken` is a
  * short-lived, single-purpose token (NOT an access token — see
- * MfaStageTokenService) the client must immediately exchange via either
- * POST /auth/mfa/setup(+/verify) (when `mfaEnrolled` is false) or POST
- * /auth/mfa/challenge (when true). CUSTOMER and PLATFORM_ADMIN logins are
- * never affected and keep returning LoginResponseDto directly, unchanged.
+ * MfaStageTokenService) the client must immediately exchange: POST
+ * /auth/mfa/send to email a 6-digit code, then POST /auth/mfa/challenge
+ * with that code to receive a real LoginResponseDto. There is no
+ * separate "enrolled vs not" state — every STAFF_ROLES login, including
+ * the very first one, goes through the same two calls. CUSTOMER and
+ * PLATFORM_ADMIN logins are never affected and keep returning
+ * LoginResponseDto directly, unchanged.
  */
 export interface MfaRequiredLoginResponse {
   mfaRequired: true;
-  mfaEnrolled: boolean;
   mfaToken: string;
 }
 
 export type LoginResult = LoginResponseDto | MfaRequiredLoginResponse;
-
-/** POST /auth/mfa/setup response — the client renders `otpauthUri` as a QR code (e.g. via qrcode.react) and shows `secret` for manual entry. The secret is never persisted as plaintext server-side beyond this one response — see mfa-crypto.util.ts. */
-export interface MfaSetupResponse {
-  secret: string;
-  otpauthUri: string;
-}
-
-/** POST /auth/mfa/setup/verify and /users/me/mfa/replace/verify response — `recoveryCodes` are shown exactly once; the server never returns them again after this call. */
-export interface MfaEnrollmentCompleteResponse extends LoginResponseDto {
-  recoveryCodes: string[];
-}
-
-/** GET /users/me/mfa/status response. */
-export interface MfaStatusResponse {
-  enabled: boolean;
-  enrolledAt: string | null;
-}
 
 /**
  * Used only by the central AnanseLogix login (/ananselogix/login) to

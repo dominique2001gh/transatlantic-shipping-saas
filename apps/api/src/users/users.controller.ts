@@ -1,10 +1,7 @@
-import { Body, Controller, ForbiddenException, Get, HttpCode, HttpStatus, Param, Patch, Post } from '@nestjs/common';
-import type { AuthenticatedUser, MfaSetupResponse, MfaStatusResponse } from '@transatlantic/shared';
-import { STAFF_ADMIN_ROLES, STAFF_ROLES, UserRole } from '@transatlantic/shared';
+import { Body, Controller, ForbiddenException, Get, Param, Patch, Post } from '@nestjs/common';
+import type { AuthenticatedUser } from '@transatlantic/shared';
+import { STAFF_ADMIN_ROLES, STAFF_ROLES } from '@transatlantic/shared';
 import { AuthService } from '../auth/auth.service';
-import { MfaService } from '../auth/mfa/mfa.service';
-import { ReplaceFactorStartDto } from '../auth/mfa/dto/replace-factor-start.dto';
-import { ReplaceFactorVerifyDto } from '../auth/mfa/dto/replace-factor-verify.dto';
 import { AnyAuthenticatedRole } from '../common/decorators/any-authenticated-role.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -30,7 +27,6 @@ export class UsersController {
   constructor(
     private readonly usersService: UsersService,
     private readonly authService: AuthService,
-    private readonly mfaService: MfaService,
     private readonly staffInvitationsService: StaffInvitationsService,
   ) {}
 
@@ -53,37 +49,6 @@ export class UsersController {
   async changePassword(@CurrentUser() user: AuthenticatedUser, @Body() dto: ChangePasswordDto): Promise<{ success: true }> {
     await this.authService.changePassword(user.id, dto.currentPassword, dto.newPassword);
     return { success: true };
-  }
-
-  /**
-   * Platform-wide staff MFA (2026-10): self-service factor management for
-   * an already-enrolled, already-authenticated staff account — distinct
-   * from MfaController's pre-session setup/challenge routes (reached via
-   * a stage token before a real session exists). Scoped to STAFF_ROLES,
-   * not @AnyAuthenticatedRole() — MFA has no meaning for a CUSTOMER
-   * account under the current policy, so this surface is staff-only, the
-   * same boundary CustomerPortalController's own doc comment establishes
-   * in the other direction.
-   */
-  @Get('me/mfa/status')
-  @Roles(...STAFF_ROLES)
-  mfaStatus(@CurrentUser() user: AuthenticatedUser): Promise<MfaStatusResponse> {
-    return this.mfaService.status(user.id);
-  }
-
-  /** Factor replacement, step 1 — requires the caller's current password; see MfaService.beginFactorReplace. */
-  @Post('me/mfa/replace')
-  @Roles(...STAFF_ROLES)
-  replaceFactor(@CurrentUser() user: AuthenticatedUser, @Body() dto: ReplaceFactorStartDto): Promise<MfaSetupResponse & { replaceToken: string }> {
-    return this.mfaService.beginFactorReplace(user.id, dto.currentPassword);
-  }
-
-  /** Factor replacement, step 2 — only now does the new factor become active; see MfaService.completeFactorReplace. */
-  @Post('me/mfa/replace/verify')
-  @HttpCode(HttpStatus.OK)
-  @Roles(...STAFF_ROLES)
-  replaceFactorVerify(@CurrentUser() user: AuthenticatedUser, @Body() dto: ReplaceFactorVerifyDto): Promise<{ recoveryCodes: string[] }> {
-    return this.mfaService.completeFactorReplace(user.id, dto.replaceToken, dto.code);
   }
 
   /**
@@ -147,32 +112,5 @@ export class UsersController {
   @Roles(...STAFF_ADMIN_ROLES)
   updateStatus(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Body() dto: UpdateStaffStatusDto) {
     return this.usersService.setActiveStatus(requireTenantId(user.tenantId), id, dto.isActive);
-  }
-}
-
-/**
- * Platform-wide staff MFA (2026-10): the one, sole, break-glass path to
- * clear a user's MFA enrollment when they've lost both their device and
- * every recovery code — PLATFORM_ADMIN only, never a tenant-level role,
- * not even OWNER over their own MANAGER/STAFF/FINANCE (see MfaService.
- * adminResetForRecovery's own doc comment for why: "ordinary staff cannot
- * reset another user's MFA" applies to a tenant owner too, not just
- * regular staff). Every call is written to PlatformAuditLog — see that
- * same method. A separate controller (not a method on UsersController)
- * specifically so its @Roles(PLATFORM_ADMIN) is the controller's only
- * role, impossible to accidentally widen by editing the wrong class-level
- * decorator later; RolesGuard's own PLATFORM_ADMIN-tenantId-null
- * hardening additionally guarantees only a real platform admin account
- * (never a tenant role whose token was somehow mis-tagged) can reach it.
- */
-@Controller('platform/users')
-export class PlatformUsersController {
-  constructor(private readonly mfaService: MfaService) {}
-
-  @Post(':userId/mfa/reset-for-recovery')
-  @Roles(UserRole.PLATFORM_ADMIN)
-  async resetMfaForRecovery(@CurrentUser() admin: AuthenticatedUser, @Param('userId') userId: string): Promise<{ success: true }> {
-    await this.mfaService.adminResetForRecovery(admin.id, userId);
-    return { success: true };
   }
 }

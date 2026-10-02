@@ -2,7 +2,7 @@ import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 
-export type MfaStage = 'mfa_setup' | 'mfa_challenge';
+export type MfaStage = 'mfa_challenge';
 
 export interface MfaStageTokenPayload {
   sub: string;

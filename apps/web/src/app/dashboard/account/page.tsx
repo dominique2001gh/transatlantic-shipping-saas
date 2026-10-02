@@ -54,7 +54,7 @@ export default function AccountPage() {
 
       <PasswordSection />
 
-      <MfaSection />
+      <MfaSection email={user.email} />
     </div>
   );
 }

@@ -6,8 +6,9 @@ import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { hashToken } from '../src/common/token/token.util';
 import { EMAIL_PROVIDER } from '../src/notifications/providers/provider.types';
+import { lastOtpCodeByUserId } from '../src/auth/mfa/mfa-otp-test-hook';
 import { createTestTenant, deleteTestTenant, TestTenantFixture } from './utils/fixtures';
-import { completeStaffLogin } from './utils/mfa-login';
+import { completeStaffLogin, decodeMfaTokenSub } from './utils/mfa-login';
 
 jest.setTimeout(30_000);
 
@@ -188,7 +189,10 @@ describe('Password recovery: forgot/reset password (e2e)', () => {
     await new Promise((resolve) => setTimeout(resolve, 1100));
 
     await request(app.getHttpServer()).post('/auth/forgot-password').send({ email: tenantA.user.email }).expect(200);
-    const token = extractToken(sent[0]);
+    // sent[0] is the email-MFA code completeStaffLogin just triggered
+    // above, in this same test — the reset email is whatever was sent
+    // most recently.
+    const token = extractToken(sent[sent.length - 1]);
     const newPassword = 'InvalidatesOldSessions321!';
     await request(app.getHttpServer())
       .post('/auth/reset-password')
@@ -210,12 +214,11 @@ describe('Password recovery: forgot/reset password (e2e)', () => {
   });
 
   /**
-   * Platform-wide staff MFA (2026-10): the critical guarantee requirement
+   * Email-based staff MFA (2026-10): the critical guarantee requirement
    * 7/J calls for — a password reset must never become a way to skip the
-   * second factor. tenantA is already MFA-enrolled by this point (two
-   * tests above).
+   * second factor.
    */
-  it('a password reset does not bypass MFA — the account still must complete a challenge afterward', async () => {
+  it('a password reset does not bypass MFA — the account still must complete an email challenge afterward', async () => {
     await request(app.getHttpServer()).post('/auth/forgot-password').send({ email: tenantA.user.email }).expect(200);
     const token = extractToken(sent[0]);
     const newPassword = 'ResetNeverBypassesMfa1!';
@@ -226,16 +229,21 @@ describe('Password recovery: forgot/reset password (e2e)', () => {
     tenantA.user.password = newPassword;
 
     // The password is correct and accepted, but this must NOT be a full
-    // session — it must be the same mfaRequired/mfaEnrolled:true challenge
-    // shape every other login for this already-enrolled account gets.
+    // session — it must be the same mfaRequired challenge shape every
+    // other login for this account gets.
     const loginRes = await request(app.getHttpServer())
       .post('/auth/login')
       .send({ email: tenantA.user.email, password: newPassword });
     expect(loginRes.status).toBe(200);
     expect(loginRes.body.accessToken).toBeUndefined();
     expect(loginRes.body.mfaRequired).toBe(true);
-    expect(loginRes.body.mfaEnrolled).toBe(true);
     expect(loginRes.body.mfaToken).toBeTruthy();
+
+    await request(app.getHttpServer())
+      .post('/auth/mfa/send')
+      .set('Authorization', `Bearer ${loginRes.body.mfaToken}`)
+      .send()
+      .expect(200);
 
     // A wrong MFA code on that token is rejected...
     const badChallenge = await request(app.getHttpServer())
@@ -244,10 +252,16 @@ describe('Password recovery: forgot/reset password (e2e)', () => {
       .send({ code: '000000' });
     expect(badChallenge.status).toBe(401);
 
-    // ...but completing the real challenge (same factor as before the
-    // reset — reset never touched mfaSecret/mfaEnabled) succeeds.
-    const accessToken = await completeStaffLogin(app, tenantA.user.email, newPassword);
-    expect(accessToken).toBeTruthy();
+    // ...but completing the real challenge with the code that was just
+    // emailed (reset never touched any MFA state) succeeds.
+    const userId = decodeMfaTokenSub(loginRes.body.mfaToken);
+    const code = lastOtpCodeByUserId.get(userId);
+    const goodChallenge = await request(app.getHttpServer())
+      .post('/auth/mfa/challenge')
+      .set('Authorization', `Bearer ${loginRes.body.mfaToken}`)
+      .send({ code });
+    expect(goodChallenge.status).toBe(200);
+    expect(goodChallenge.body.accessToken).toBeTruthy();
   });
 
   it('preserves tenant isolation: two accounts sharing an email each get their own token, resetting one never touches the other', async () => {

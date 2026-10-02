@@ -63,15 +63,16 @@ describe('Warehouse receiving workflow + tenant isolation (e2e)', () => {
 
   describe('authentication', () => {
     it('logs in a valid staff user and returns an access token (after satisfying mandatory MFA)', async () => {
-      // tenantA.user is already MFA-enrolled from beforeAll's own `login`
-      // call — a correct password alone is deliberately NOT enough here.
+      // A correct password alone is deliberately NOT enough here — every
+      // staff login, including this one, must also complete the emailed
+      // code challenge.
       const firstFactor = await request(app.getHttpServer())
         .post('/auth/login')
         .send({ email: tenantA.user.email, password: TEST_PASSWORD });
       expect(firstFactor.status).toBe(200);
       expect(firstFactor.body.accessToken).toBeUndefined();
       expect(firstFactor.body.mfaRequired).toBe(true);
-      expect(firstFactor.body.mfaEnrolled).toBe(true);
+      expect(firstFactor.body.mfaToken).toBeTruthy();
 
       const accessToken = await login(app, tenantA.user.email, TEST_PASSWORD);
       expect(typeof accessToken).toBe('string');

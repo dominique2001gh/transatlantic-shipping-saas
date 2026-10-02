@@ -744,30 +744,27 @@ model User {
   /// see JwtStrategy's own doc comment. A null value here means "never
   /// reset" and is never treated as later than any token's `iat`.
   passwordChangedAt DateTime?
-  /// Platform-wide staff MFA (2026-10): whether this account has an
-  /// active TOTP factor. Required (not optional) for every OWNER/MANAGER/
-  /// STAFF/FINANCE account — see JwtStrategy's own doc comment for how a
-  /// `false` value here forces every login through enrollment instead of
-  /// a normal session, platform-wide, with zero per-tenant configuration.
-  /// Always `false` for CUSTOMER/PLATFORM_ADMIN today (MFA is out of
-  /// scope for both — see MfaService's own doc comment) even though
-  /// nothing stops either from enrolling at the schema level; the staff-
-  /// only enforcement lives in code (STAFF_ROLES check), not here.
+  /// Platform-wide staff MFA (2026-10), TOTP design — SUPERSEDED the same
+  /// month by email-OTP MFA (see MfaEmailOtp below) before this design
+  /// ever shipped any running code to production; only its additive
+  /// schema reached production (manually recorded as applied — see that
+  /// migration's own history). Left in place, unused by any code path,
+  /// rather than written as a destructive drop migration against a
+  /// column that was never actually load-bearing in a live deployment —
+  /// same "don't destructively clean up a dormant structure" reasoning
+  /// applied to Twilio/SMS. Do not read or write these three fields or
+  /// MfaRecoveryCode from new code.
   mfaEnabled   Boolean   @default(false)
-  /// AES-256-GCM-encrypted TOTP secret (base32, RFC 4648) — see
-  /// mfa-crypto.util.ts. Never stored in plaintext, never selected into
-  /// any API response. Null until the first successful enrollment; reset
-  /// (never reused) on every factor replacement.
+  /// Superseded — see mfaEnabled's own comment just above.
   mfaSecret    String?
-  /// Set on first successful enrollment verification; untouched by a
-  /// later factor replacement (that's a new secret, not a new enrollment)
-  /// — purely informational (e.g. "MFA enabled since ...").
+  /// Superseded — see mfaEnabled's own comment just above.
   mfaEnrolledAt DateTime?
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
   tenant   Tenant?   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   mfaRecoveryCodes MfaRecoveryCode[]
+  mfaEmailOtps MfaEmailOtp[]
   customer Customer? @relation("CustomerUser")
 
   notifications                 Notification[]
@@ -851,6 +848,34 @@ model MfaRecoveryCode {
 
   @@index([userId])
   @@map("mfa_recovery_codes")
+}
+
+/// Email-based staff MFA (2026-10, replaces the TOTP design above before
+/// it ever shipped running code): a single-use, short-lived login
+/// verification code, emailed to the account's own registered address —
+/// the only MFA factor Ananse Logix uses. `codeHash` only (SHA-256 of the
+/// 6-digit code), same never-store-the-raw-value reasoning as
+/// AccountToken/MfaRecoveryCode. Deliberately its own model rather than a
+/// new AccountTokenPurpose: AccountToken.tokenHash is `@unique` globally,
+/// which is safe for a 256-bit random token but would eventually collide
+/// across unrelated users/requests for a 6-digit code (only 1,000,000
+/// possible values) — lookups here are scoped to `userId` instead, never
+/// global. `attempts` enforces a per-code brute-force ceiling (see
+/// MfaService.verifyOtp); a code that hits the ceiling is consumed
+/// (never usable again) rather than left live for further guesses.
+model MfaEmailOtp {
+  id         String    @id @default(cuid())
+  userId     String
+  codeHash   String
+  expiresAt  DateTime
+  attempts   Int       @default(0)
+  consumedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("mfa_email_otps")
 }
 
 /// A customer (shipper) belonging to a tenant. May optionally have a
