@@ -1,6 +1,6 @@
 import { BadRequestException, Body, Controller, Get, HttpCode, HttpStatus, Param, Post, UseGuards } from '@nestjs/common';
 import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
-import type { AcceptInvitePreview, AuthenticatedUser, CustomerEntryPointResponse, LoginResult } from '@transatlantic/shared';
+import type { AcceptInvitePreview, AuthenticatedUser, CustomerEntryPointResponse, LoginResponseDto, LoginResult } from '@transatlantic/shared';
 import { AnyAuthenticatedRole } from '../common/decorators/any-authenticated-role.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Public } from '../common/decorators/public.decorator';

@@ -5,7 +5,8 @@ import Stripe from 'stripe';
 import { randomUUID } from 'crypto';
 import { createTestTenant, createUserInTenant, deleteTestTenant, TestTenantFixture } from './utils/fixtures';
 import { createTestApp } from './utils/test-app';
-import { isCardPaymentsActiveV2, TenantPaymentsStripeService } from '../src/tenant-payments/tenant-payments-stripe.service';
+import { isCardPaymentsActiveV2, TenantPaymentsStripeService } from '../src/tenant-payments/tenant-payments-stripe.service';
+import { completeStaffLogin } from './utils/mfa-login';
 
 jest.setTimeout(30_000);
 
@@ -316,9 +317,5 @@ describe('Tenant Payments Phase 2: onboarding RBAC, isolation, and account statu
 });
 
 async function login(app: INestApplication, email: string, password: string): Promise<string> {
-  const res = await request(app.getHttpServer()).post('/auth/login').send({ email, password });
-  if (res.status !== 200) {
-    throw new Error(`Login failed for ${email}: ${res.status} ${JSON.stringify(res.body)}`);
-  }
-  return res.body.accessToken as string;
+  return completeStaffLogin(app, email, password);
 }
