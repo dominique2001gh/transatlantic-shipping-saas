@@ -66,20 +66,21 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     }
 
     /**
-     * Platform-wide staff MFA (2026-10): the single backend enforcement
+     * Email-based staff MFA (2026-10): the single backend enforcement
      * point for every protected route, for every tenant, present and
      * future — no per-route guard, no per-tenant setting. `payload.mfa`
      * is only ever `true` on a token AuthService.buildLoginResponse
      * issued (see that method's own doc comment), which for a
-     * STAFF_ROLES role only ever happens after a successful MFA
-     * enrollment or challenge. Any other token presented for a
+     * STAFF_ROLES role only ever happens after a successful emailed-code
+     * challenge (MfaService.verifyOtp). Any other token presented for a
      * STAFF_ROLES user — one issued before this feature existed, or any
      * attempt to reuse a password-only state — is rejected exactly like
      * an expired/deactivated session: a 401 that forces the client back
-     * through POST /auth/login, which (per User.mfaEnabled) routes them
-     * into either enrollment or a fresh challenge. This check is keyed
-     * purely on `role`, never on `tenantId`, so it applies identically to
-     * Trans Atlantic, Tatanic, and any tenant created after this shipped.
+     * through POST /auth/login, which always routes a STAFF_ROLES account
+     * into the email-code step; there is no separate enrollment state to
+     * route around. This check is keyed purely on `role`, never on
+     * `tenantId`, so it applies identically to Trans Atlantic, Tatanic,
+     * and any tenant created after this shipped.
      */
     if ((STAFF_ROLES as string[]).includes(user.role) && payload.mfa !== true) {
       throw new UnauthorizedException('Session has not completed MFA — please log in again');
