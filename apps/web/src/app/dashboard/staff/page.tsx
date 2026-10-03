@@ -71,6 +71,19 @@ export default function StaffPage() {
   async function handleInvite(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
+    // Production bug (2026-10): `event.currentTarget` is only valid
+    // synchronously, for the duration of this handler's dispatch — same
+    // as the native DOM Event it mirrors. Captured here, before the
+    // `await` below, so the later `formElement.reset()` call has a real
+    // element to call it on. Reading `event.currentTarget` itself AFTER
+    // that `await` (the previous code did exactly this) is always `null`
+    // by then, so `.reset()` threw a TypeError — caught by the same
+    // catch block below, which then overwrote the success message this
+    // function had *just* set with the generic failure fallback. The
+    // invitation (and its email) had already fully succeeded by that
+    // point; only this post-success cleanup step was ever broken.
+    const formElement = event.currentTarget;
+
     // Synchronous, immediate guard — see inviteInFlightRef's own doc
     // comment. Must be the very first thing this function does, before
     // any state update or await, so a second near-simultaneous call can
@@ -95,7 +108,7 @@ export default function StaffPage() {
       // can never leave a stale message of the opposite kind on screen.
       setInviteSuccess(`Invitation sent to ${email}.`);
       setInviteError(null);
-      event.currentTarget.reset();
+      formElement.reset();
       refresh();
     } catch (err) {
       setInviteError(err instanceof ApiError ? err.message : 'Failed to send invitation.');
