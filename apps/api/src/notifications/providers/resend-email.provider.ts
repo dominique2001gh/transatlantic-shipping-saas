@@ -78,6 +78,22 @@ export class ResendEmailProvider implements EmailProvider {
     try {
       const res = await fetch('https://api.resend.com/emails', {
         method: 'POST',
+        // Production bug (2026-10): every caller of this method (staff
+        // invitations, password reset, MFA codes) awaits `send()` before
+        // responding to the client's own request — an unbounded, slow
+        // Resend API call can therefore make that client-facing request
+        // run long enough to hit a timeout somewhere between the browser
+        // and this server (e.g. an edge/proxy timeout), which surfaces to
+        // the caller's frontend as a raw network error, not an HTTP
+        // response — indistinguishable from a real failure even though
+        // this send (and whatever DB write preceded it) already
+        // succeeded. Bounding this call is what keeps every one of those
+        // request handlers fast and predictable regardless of Resend's
+        // real-world latency; a timeout here is caught by the try/catch
+        // below exactly like any other send failure (see this file's own
+        // "never throws" contract), so every existing caller's
+        // already-tolerant error handling is all that's needed downstream.
+        signal: AbortSignal.timeout(8_000),
         headers: {
           Authorization: `Bearer ${this.apiKey}`,
           'Content-Type': 'application/json',
