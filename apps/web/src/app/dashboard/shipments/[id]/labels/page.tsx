@@ -44,6 +44,10 @@ export default function ShipmentLabelsPage() {
           <p className="mt-1 text-sm text-slate-500">
             {items.length} label{items.length === 1 ? '' : 's'} · encodes the internal item code for scanning
           </p>
+          {/* Chrome's own print dialog, not this page, draws the date/URL/page-number header+footer and offers the paper-size picker — neither is something this page's CSS/JS can set for the user. */}
+          <p className="mt-1 text-xs text-slate-400">
+            For best results, select 4x6 paper and turn off &ldquo;Headers and footers&rdquo; in the browser print settings.
+          </p>
         </div>
         <Button onClick={() => window.print()} disabled={items.length === 0}>
           {onlyItemId ? 'Print Label' : 'Print All Labels'}

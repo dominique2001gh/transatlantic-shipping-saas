@@ -94,9 +94,11 @@ body {
 
 /* Warehouse label legibility fix (2026-10): the receiver's name is the
    single most prominent thing on the label — staff need to match a
-   physical package to a person at a glance. Deliberately the largest,
-   boldest text in this component, larger than the company name, sender
-   name, and receiver phone. */
+   physical package to a person at a glance. Prominent through size, not
+   heavy weight (tenant feedback after the first physical print round —
+   was 1.5rem/800, now 1.25rem/600) — still clearly the largest text on
+   the label, larger than the company name, tracking number, item/
+   package details, destination, receiver phone, and sender name. */
 .item-label__receiver {
   width: 100%;
 }
@@ -110,8 +112,8 @@ body {
 }
 
 .item-label__receiver-name {
-  font-size: 1.5rem;
-  font-weight: 800;
+  font-size: 1.25rem;
+  font-weight: 600;
   line-height: 1.15;
   color: #0f172a;
   overflow-wrap: break-word;
@@ -166,11 +168,86 @@ body {
   color: #64748b;
 }
 
+/* Label print-layout fix (2026-10): the KNOWN-GOOD print baseline —
+   physically confirmed (4x6 paper, Chrome print-dialog Margins set to
+   "Default" — a "Custom" margins setting was the real cause of an
+   earlier right-position/clipping problem, nothing in this CSS —
+   ~195% Chrome print scale, headers and footers off): complete border,
+   all content, barcode, and QR all visible on exactly one page per
+   item, nothing clipped, nothing overflowing onto a second page.
+   Everything after this point (an explicit `@page size`, a widened/
+   enlarged label meant to make 100% scaling work automatically, and an
+   asymmetric margin-left/right centering nudge) was experimentation
+   that either regressed the result or was never physically confirmed —
+   all of it has been reverted. Do not change `.item-label`'s width,
+   padding, or margin, or add an `@page size`, without a physical test
+   confirming the result first; this printer workflow intentionally
+   still requires manually selecting ~195% print scale and Default
+   Chrome margins.
+   `break-inside: avoid` alone wasn't reliable here — Chromium's print
+   engine doesn't consistently honor it on a `display: flex` box with
+   this many children, so `.label-sheet`/`.item-label` are switched to
+   plain block flow for print only (the screen preview keeps its
+   flex/gap layout untouched, see the base rules above) and inter-element
+   spacing is done with margins instead of `gap`, which block layout
+   doesn't support. Padding/spacing is trimmed (not the fonts or
+   barcode/QR pixel sizes, which are unaffected by this) specifically to
+   keep a single label comfortably inside one page even after Chrome's
+   own header/footer text — a browser print-dialog setting, not
+   something this page's CSS can control — eats into the usable area; see
+   the labels page's own printing note for how to turn that off. */
+@page {
+  margin: 0.25in;
+}
+
 @media print {
+  .label-sheet {
+    display: block;
+  }
+
   .item-label {
+    width: 3.5in;
+    margin: 0 auto;
+    padding: 0.15in;
+    display: block;
+    gap: 0;
     border: 1px solid #000;
     break-inside: avoid;
     page-break-inside: avoid;
+    /* Root cause of the earlier right-position issue turned out to be a
+       Chrome print-dialog "Custom" margins setting, not this layout —
+       resolved by using "Default" margins (see this block's own doc
+       comment above). This is a separate, much smaller cosmetic nudge
+       requested after that fix: the whole box, still centered by the
+       `margin: 0 auto` above, shifted left by a small fixed physical
+       distance. Does not change width/height/padding or how children
+       are positioned within the box — translate moves the already-laid-
+       out box (and everything inside it) as one unit, after layout has
+       already happened. */
+    transform: translateX(-0.05in);
+    break-after: page;
+    page-break-after: always;
+  }
+
+  .item-label:last-child {
+    break-after: auto;
+    page-break-after: auto;
+  }
+
+  .item-label > * {
+    margin-top: 0.06in;
+  }
+
+  .item-label > *:first-child {
+    margin-top: 0;
+  }
+
+  .item-label__receiver-name {
+    margin-top: 0.02in;
+  }
+
+  .item-label__qr {
+    margin-top: 0.02in;
   }
 }
 
