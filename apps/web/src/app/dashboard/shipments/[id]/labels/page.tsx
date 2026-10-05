@@ -67,6 +67,9 @@ export default function ShipmentLabelsPage() {
                 destinationCountry: shipment.destinationCountry,
                 destinationLocation: shipment.destinationLocation,
                 companyName: tenantName ?? 'Shipping Company',
+                recipientName: shipment.recipientName,
+                recipientPhone: shipment.recipientPhone,
+                senderName: shipment.customer ? `${shipment.customer.firstName} ${shipment.customer.lastName}` : null,
               }}
             />
           ))}

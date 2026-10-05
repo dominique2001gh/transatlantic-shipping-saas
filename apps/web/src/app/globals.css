@@ -92,6 +92,31 @@ body {
   font-size: 0.95rem;
 }
 
+/* Warehouse label legibility fix (2026-10): the receiver's name is the
+   single most prominent thing on the label — staff need to match a
+   physical package to a person at a glance. Deliberately the largest,
+   boldest text in this component, larger than the company name, sender
+   name, and receiver phone. */
+.item-label__receiver {
+  width: 100%;
+}
+
+.item-label__receiver-tag {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #64748b;
+}
+
+.item-label__receiver-name {
+  font-size: 1.5rem;
+  font-weight: 800;
+  line-height: 1.15;
+  color: #0f172a;
+  overflow-wrap: break-word;
+}
+
 .item-label__tracking {
   font-family: ui-monospace, SFMono-Regular, monospace;
   font-size: 0.85rem;
@@ -125,6 +150,20 @@ body {
   font-size: 0.8rem;
   font-weight: 600;
   letter-spacing: 0.03em;
+}
+
+/* Warehouse label legibility fix (2026-10): receiver phone and sender
+   name both sit near the bottom, deliberately smaller than the receiver
+   name above — see .item-label__receiver-name's own comment. Each is
+   only rendered when the underlying data exists (see ItemLabel.tsx). */
+.item-label__receiver-phone {
+  font-size: 0.75rem;
+  color: #334155;
+}
+
+.item-label__sender {
+  font-size: 0.7rem;
+  color: #64748b;
 }
 
 @media print {
