@@ -73,6 +73,17 @@ export interface AuthenticatedUser {
   role: UserRole;
   tenantId: string | null;
   customerId?: string | null;
+  /**
+   * RBAC permissions (2026-10): the fine-grained capability keys this
+   * specific tenant-staff account currently holds (see
+   * packages/shared/src/permissions.ts). Always re-read from the DB on
+   * every request by JwtStrategy.validate — never cached in the JWT
+   * itself — so a permission change takes effect on the user's very next
+   * API call. Meaningless/always empty for CUSTOMER and PLATFORM_ADMIN;
+   * for OWNER it's populated for display purposes only — PermissionsGuard
+   * never actually consults it for an OWNER caller, who always passes.
+   */
+  permissions: string[];
 }
 
 export interface LoginRequestDto {
@@ -1628,6 +1639,8 @@ export interface StaffMemberSummary {
   isActive: boolean;
   lastLoginAt: string | null;
   createdAt: string;
+  /** RBAC permissions (2026-10): see User.permissions' own schema doc comment. Meaningful for every role except OWNER (never limited by it — see PermissionsGuard). */
+  permissions: string[];
 }
 
 export interface TenantInvitationSummary {
@@ -1639,6 +1652,8 @@ export interface TenantInvitationSummary {
   status: TenantInvitationStatus;
   expiresAt: string;
   createdAt: string;
+  /** RBAC permissions (2026-10): what will be applied to the User row created when this invitation is accepted. */
+  permissions: string[];
 }
 
 export interface CreateTenantInvitationRequest {
@@ -1646,6 +1661,13 @@ export interface CreateTenantInvitationRequest {
   lastName: string;
   email: string;
   role: UserRole;
+  /** RBAC permissions (2026-10): optional — omitted/empty means "no optional permissions," a legitimate state, not a bug. See InviteStaffDto's own doc comment. */
+  permissions?: string[];
+}
+
+/** PATCH /users/:id/permissions request body. */
+export interface UpdateStaffPermissionsRequest {
+  permissions: string[];
 }
 
 /** GET /auth/accept-invite/:token — lets the acceptance page show who/where before rendering the password form, or a clear invalid/expired message if not. */

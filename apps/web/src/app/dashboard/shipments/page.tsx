@@ -6,19 +6,38 @@ import type { ShipmentSummary } from '@transatlantic/shared';
 import { StatusBadge } from '@/components/dashboard/StatusBadge';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
-import { ApiError } from '@/lib/api';
+import { ApiError, isForbidden } from '@/lib/api';
 import { humanizeEnumValue } from '@/lib/format';
 import { listShipments } from '@/lib/shipments';
 
 export default function ShipmentsPage() {
   const [shipments, setShipments] = useState<ShipmentSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [forbidden, setForbidden] = useState(false);
 
   useEffect(() => {
     listShipments()
       .then(setShipments)
-      .catch((err) => setError(err instanceof ApiError ? err.message : 'Failed to load shipments.'));
+      .catch((err) => {
+        if (isForbidden(err)) {
+          setForbidden(true);
+          setError("You don't have permission to view shipments.");
+          return;
+        }
+        setError(err instanceof ApiError ? err.message : 'Failed to load shipments.');
+      });
   }, []);
+
+  if (forbidden) {
+    return (
+      <div>
+        <h1 className="text-2xl font-semibold text-slate-900">Shipments</h1>
+        <Card className="mt-6">
+          <p className="text-sm text-red-600">{error}</p>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div>

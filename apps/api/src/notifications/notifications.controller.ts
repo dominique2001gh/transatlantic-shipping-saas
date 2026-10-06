@@ -4,6 +4,7 @@ import { NOTIFICATION_MANAGE_ROLES } from '@transatlantic/shared';
 import { EntitlementFeature, NotificationChannel } from '@prisma/client';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { RequireEntitlement } from '../common/decorators/require-entitlement.decorator';
+import { RequirePermission } from '../common/decorators/require-permission.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { requireTenantId } from '../common/tenant/tenant.util';
 import { NotificationsService } from './notifications.service';
@@ -19,6 +20,7 @@ export class NotificationsController {
 
   @Get()
   @Roles(...VIEW_ROLES)
+  @RequirePermission('messages.manage')
   findAll(
     @CurrentUser() user: AuthenticatedUser,
     @Query('customerId') customerId?: string,

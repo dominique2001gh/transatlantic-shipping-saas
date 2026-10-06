@@ -4,6 +4,7 @@ import type { AuthenticatedUser } from '@transatlantic/shared';
 import { ContainerStatus, MANAGER_UP_ROLES, OPERATIONS_ROLES } from '@transatlantic/shared';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { RequireEntitlement } from '../common/decorators/require-entitlement.decorator';
+import { RequirePermission } from '../common/decorators/require-permission.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { requireTenantId } from '../common/tenant/tenant.util';
 import { ContainersService } from './containers.service';
@@ -33,6 +34,7 @@ export class ContainersController {
 
   @Get()
   @Roles(...OPERATIONS_ROLES)
+  @RequirePermission('containers.view')
   findAll(
     @CurrentUser() user: AuthenticatedUser,
     @Query('status') status?: string,
@@ -44,18 +46,21 @@ export class ContainersController {
 
   @Get(':id')
   @Roles(...OPERATIONS_ROLES)
+  @RequirePermission('containers.view')
   findOne(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
     return this.containersService.findById(requireTenantId(user.tenantId), id);
   }
 
   @Post()
   @Roles(...OPERATIONS_ROLES)
+  @RequirePermission('containers.manage')
   create(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateContainerDto) {
     return this.containersService.create(requireTenantId(user.tenantId), dto);
   }
 
   @Post(':id/items/:itemId')
   @Roles(...OPERATIONS_ROLES)
+  @RequirePermission('containers.manage')
   loadItem(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id') containerId: string,
@@ -67,6 +72,7 @@ export class ContainersController {
 
   @Delete(':id/items/:itemId')
   @Roles(...OPERATIONS_ROLES)
+  @RequirePermission('containers.manage')
   unloadItem(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id') containerId: string,
@@ -84,12 +90,14 @@ export class ContainersController {
 
   @Post(':id/open')
   @Roles(...OPERATIONS_ROLES)
+  @RequirePermission('containers.manage')
   openForUnloading(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
     return this.containersService.openForUnloading(requireTenantId(user.tenantId), id);
   }
 
   @Post(':id/close')
   @Roles(...OPERATIONS_ROLES)
+  @RequirePermission('containers.manage')
   closeUnloading(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
     return this.containersService.closeUnloading(requireTenantId(user.tenantId), id);
   }

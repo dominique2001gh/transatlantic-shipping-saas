@@ -1,36 +1,61 @@
 'use client';
 
-import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { STAFF_ROLES, UserRole } from '@transatlantic/shared';
-import type { StaffMemberSummary, TenantInvitationSummary } from '@transatlantic/shared';
+import { Fragment, useEffect, useRef, useState, type FormEvent } from 'react';
+import { PERMISSION_KEYS, PERMISSION_PRESET_OPTIONS, STAFF_ROLES, UserRole, hasPermission } from '@transatlantic/shared';
+import type { PermissionKey, StaffMemberSummary, TenantInvitationSummary } from '@transatlantic/shared';
 import { SelectInput, TextInput } from '@/components/forms/FormField';
+import { PermissionsPicker } from '@/components/staff/PermissionsPicker';
+import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { ApiError } from '@/lib/api';
 import { getStoredUser } from '@/lib/auth';
-import { inviteStaff, listInvitations, listStaff, resendInvitation, updateStaffRole, updateStaffStatus } from '@/lib/staff';
+import {
+  inviteStaff,
+  listInvitations,
+  listStaff,
+  resendInvitation,
+  updateStaffPermissions,
+  updateStaffRole,
+  updateStaffStatus,
+} from '@/lib/staff';
 
-/**
- * RBAC V1: OWNER may invite/edit-role/deactivate/reactivate/promote —
- * MANAGER's "staff oversight" is explicitly view-only (can see this page
- * and the team roster, but none of the administration controls below).
- * Any other role reaching this page (STAFF_ROLES covers all 4 dashboard
- * roles) also gets view-only, matching prior behavior for non-owner staff.
- */
 const INVITABLE_ROLES = STAFF_ROLES;
 
+/** Permissions the current user does NOT themselves hold — a non-owner can never grant authority they don't have (see UsersService.updatePermissions/StaffInvitationsService.invite). OWNER has no such restriction. */
+function unauthorizedKeysFor(user: ReturnType<typeof getStoredUser>): ReadonlySet<string> {
+  if (!user || user.role === UserRole.OWNER) return new Set();
+  return new Set(PERMISSION_KEYS.filter((key) => !user.permissions.includes(key)));
+}
+
+/** Plain-language one-line summary of a permission set for the collapsed table row — exact preset match, empty, or a custom count. Never shows a raw permission key. */
+function summarizePermissions(permissions: string[]): string {
+  if (permissions.length === 0) return 'No extra access';
+  const exactPreset = PERMISSION_PRESET_OPTIONS.find(
+    (option) => option.key !== 'CUSTOM' && option.permissions.length === permissions.length && option.permissions.every((k) => permissions.includes(k)),
+  );
+  if (exactPreset) return exactPreset.label;
+  return `Custom access (${permissions.length})`;
+}
+
 /**
- * Staff Invitations stage: the permanent, anytime staff-management
- * surface — GET /users/staff finally gets a real frontend consumer here,
- * alongside the new invite/list-invitations/resend endpoints. Only OWNER
- * can invite/resend/edit-role/deactivate (enforced by the API's own
- * @Roles() guard; this page's own role check is UX only, same caveat
- * every other role-gated NavItem/page in this app already documents —
- * see lib/nav.ts's own comment).
+ * RBAC permissions (Phase D): the Staff page is no longer OWNER-only —
+ * invite/role-change/status-change/permission-change are each gated by
+ * their own permission (staff.invite / staff.manage / staff.permissions),
+ * with OWNER always passing (see hasPermission's own doc comment), the
+ * same shape UsersController/PermissionsGuard already enforce server-
+ * side. This page's own checks are UX only — every action still goes
+ * through the real API, which re-enforces all of this (owner protection,
+ * self-escalation prevention, tenant scoping) regardless of what this
+ * page shows or hides.
  */
 export default function StaffPage() {
   const currentUser = getStoredUser();
-  const canManageStaff = currentUser?.role === UserRole.OWNER;
+  const callerIsOwner = currentUser?.role === UserRole.OWNER;
+  const canInvite = hasPermission(currentUser, 'staff.invite');
+  const canManageRoleStatus = hasPermission(currentUser, 'staff.manage');
+  const canManagePermissions = hasPermission(currentUser, 'staff.permissions');
+  const unauthorizedKeys = unauthorizedKeysFor(currentUser);
 
   const [staff, setStaff] = useState<StaffMemberSummary[] | null>(null);
   const [invitations, setInvitations] = useState<TenantInvitationSummary[] | null>(null);
@@ -41,25 +66,29 @@ export default function StaffPage() {
   const [resendingId, setResendingId] = useState<string | null>(null);
   const [rowError, setRowError] = useState<Record<string, string>>({});
   const [busyRowId, setBusyRowId] = useState<string | null>(null);
-  // Guards handleInvite against a duplicate submission (double-click,
-  // double Enter, or a second click landing before React re-renders the
-  // button as disabled={submitting}) — a plain ref, not state, because
-  // React state updates are asynchronous/batched and two calls that both
-  // start within the same tick would both still read the old `submitting`
-  // value as false. A ref is set/read synchronously, so the second call
-  // sees the first one's guard immediately, before either has awaited
-  // anything. See the code review this fixes: two overlapping invite
-  // submissions could otherwise both reach the API — one succeeding, the
-  // other rejected by the backend's own duplicate-pending-invitation
-  // check — and whichever settled second would silently leave its own
-  // (contradictory) message on screen alongside the first's.
+
+  // Invite form: role and permissions are controlled (a preset choice
+  // updates both at once); name/email stay plain uncontrolled fields read
+  // via FormData, same as before.
+  const [inviteRole, setInviteRole] = useState<UserRole>(UserRole.STAFF);
+  const [invitePermissions, setInvitePermissions] = useState<PermissionKey[]>([]);
+
+  // Which staff row's permission editor is open, and its in-progress draft.
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState<PermissionKey[]>([]);
+  const [editSaving, setEditSaving] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+
+  // See staff-invite-form-reset.test.ts: guards against a double-submit
+  // racing past the `submitting` state before React re-renders the
+  // disabled button.
   const inviteInFlightRef = useRef(false);
 
   function refresh() {
     listStaff()
       .then(setStaff)
       .catch((err) => setError(err instanceof ApiError ? err.message : 'Failed to load staff.'));
-    if (canManageStaff) {
+    if (canInvite) {
       listInvitations()
         .then(setInvitations)
         .catch((err) => setError(err instanceof ApiError ? err.message : 'Failed to load invitations.'));
@@ -71,23 +100,10 @@ export default function StaffPage() {
   async function handleInvite(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    // Production bug (2026-10): `event.currentTarget` is only valid
-    // synchronously, for the duration of this handler's dispatch — same
-    // as the native DOM Event it mirrors. Captured here, before the
-    // `await` below, so the later `formElement.reset()` call has a real
-    // element to call it on. Reading `event.currentTarget` itself AFTER
-    // that `await` (the previous code did exactly this) is always `null`
-    // by then, so `.reset()` threw a TypeError — caught by the same
-    // catch block below, which then overwrote the success message this
-    // function had *just* set with the generic failure fallback. The
-    // invitation (and its email) had already fully succeeded by that
-    // point; only this post-success cleanup step was ever broken.
+    // See this file's own prior fix: `currentTarget` is only valid
+    // synchronously, so it's captured here, before the `await` below.
     const formElement = event.currentTarget;
 
-    // Synchronous, immediate guard — see inviteInFlightRef's own doc
-    // comment. Must be the very first thing this function does, before
-    // any state update or await, so a second near-simultaneous call can
-    // never slip through.
     if (inviteInFlightRef.current) return;
     inviteInFlightRef.current = true;
 
@@ -97,18 +113,24 @@ export default function StaffPage() {
     const firstName = String(form.get('firstName') ?? '');
     const lastName = String(form.get('lastName') ?? '');
     const email = String(form.get('email') ?? '');
-    const role = String(form.get('role') ?? '') as UserRole;
 
     setSubmitting(true);
     try {
-      await inviteStaff({ firstName, lastName, email, role });
-      // Success and error are mutually exclusive by construction — each
-      // branch explicitly clears the other, not just its own message, so
-      // a slow-to-settle earlier attempt (or any future code path here)
-      // can never leave a stale message of the opposite kind on screen.
+      await inviteStaff({
+        firstName,
+        lastName,
+        email,
+        role: inviteRole,
+        // Owners are structurally full-access already — never send a
+        // permission array for one (see PermissionsPicker's own doc
+        // comment on why no OWNER preset exists).
+        permissions: inviteRole === UserRole.OWNER ? undefined : invitePermissions,
+      });
       setInviteSuccess(`Invitation sent to ${email}.`);
       setInviteError(null);
       formElement.reset();
+      setInviteRole(UserRole.STAFF);
+      setInvitePermissions([]);
       refresh();
     } catch (err) {
       setInviteError(err instanceof ApiError ? err.message : 'Failed to send invitation.');
@@ -158,6 +180,26 @@ export default function StaffPage() {
     }
   }
 
+  function openPermissionsEditor(member: StaffMemberSummary) {
+    setEditingId(member.id);
+    setEditDraft(member.permissions as PermissionKey[]);
+    setEditError(null);
+  }
+
+  async function savePermissions(memberId: string) {
+    setEditSaving(true);
+    setEditError(null);
+    try {
+      await updateStaffPermissions(memberId, editDraft);
+      setEditingId(null);
+      refresh();
+    } catch (err) {
+      setEditError(err instanceof ApiError ? err.message : 'Failed to update permissions.');
+    } finally {
+      setEditSaving(false);
+    }
+  }
+
   return (
     <div>
       <div>
@@ -167,38 +209,71 @@ export default function StaffPage() {
         </p>
       </div>
 
-      {canManageStaff && (
+      {canInvite && (
         <Card className="mt-6 p-6">
           <h2 className="text-sm font-semibold text-slate-900">Invite an employee</h2>
-          <form onSubmit={handleInvite} className="mt-4 flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-end">
-            <div className="w-full sm:w-40">
-              <TextInput label="First name" id="firstName" name="firstName" required />
+          <form onSubmit={handleInvite} className="mt-4 flex flex-col gap-4">
+            <div className="flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-end">
+              <div className="w-full sm:w-40">
+                <TextInput label="First name" id="firstName" name="firstName" required />
+              </div>
+              <div className="w-full sm:w-40">
+                <TextInput label="Last name" id="lastName" name="lastName" required />
+              </div>
+              <div className="flex-1 sm:min-w-[14rem]">
+                <TextInput label="Email" id="email" name="email" type="email" required />
+              </div>
+              <div className="w-48">
+                <SelectInput
+                  label="Role"
+                  id="role"
+                  value={inviteRole}
+                  onChange={(e) => setInviteRole(e.target.value as UserRole)}
+                >
+                  {INVITABLE_ROLES.map((role) => (
+                    <option key={role} value={role}>
+                      {role.replaceAll('_', ' ')}
+                    </option>
+                  ))}
+                </SelectInput>
+              </div>
             </div>
-            <div className="w-full sm:w-40">
-              <TextInput label="Last name" id="lastName" name="lastName" required />
+
+            <div className="border-t border-slate-200 pt-4">
+              <h3 className="text-sm font-semibold text-slate-900">Access &amp; permissions</h3>
+              {inviteRole === UserRole.OWNER ? (
+                <p className="mt-1 text-sm text-slate-500">
+                  Owners automatically have full access to everything in Ananse Logix — there&apos;s nothing to configure here.
+                </p>
+              ) : (
+                <>
+                  <p className="mt-1 text-sm text-slate-500">
+                    Choose what this staff member is allowed to view or manage. You can change these permissions later.
+                  </p>
+                  <div className="mt-3">
+                    <PermissionsPicker
+                      value={invitePermissions}
+                      onChange={setInvitePermissions}
+                      onPresetSelect={setInviteRole}
+                      disabledKeys={callerIsOwner ? undefined : unauthorizedKeys}
+                    />
+                  </div>
+                </>
+              )}
             </div>
-            <div className="flex-1 sm:min-w-[14rem]">
-              <TextInput label="Email" id="email" name="email" type="email" required />
+
+            <div>
+              <Button type="submit" disabled={submitting}>
+                {submitting ? 'Sending…' : 'Send Invite'}
+              </Button>
             </div>
-            <div className="w-48">
-              <SelectInput label="Role" id="role" name="role" defaultValue={UserRole.STAFF}>
-                {INVITABLE_ROLES.map((role) => (
-                  <option key={role} value={role}>
-                    {role.replaceAll('_', ' ')}
-                  </option>
-                ))}
-              </SelectInput>
-            </div>
-            <Button type="submit" disabled={submitting}>
-              {submitting ? 'Sending…' : 'Send Invite'}
-            </Button>
           </form>
           {inviteError && <p className="mt-3 text-sm text-red-600">{inviteError}</p>}
           {inviteSuccess && <p className="mt-3 text-sm text-emerald-600">{inviteSuccess}</p>}
         </Card>
       )}
 
-      {canManageStaff && invitations && invitations.length > 0 && (
+      {canInvite && invitations && invitations.length > 0 && (
         <Card className="mt-6 overflow-x-auto p-0">
           <div className="border-b border-slate-200 px-4 py-3 text-sm font-semibold text-slate-900">Pending &amp; recent invitations</div>
           <table className="w-full text-left text-sm">
@@ -207,6 +282,7 @@ export default function StaffPage() {
                 <th className="px-4 py-3 font-medium">Name</th>
                 <th className="px-4 py-3 font-medium">Email</th>
                 <th className="px-4 py-3 font-medium">Role</th>
+                <th className="px-4 py-3 font-medium">Access</th>
                 <th className="px-4 py-3 font-medium">Status</th>
                 <th className="px-4 py-3 font-medium">Expires</th>
                 <th className="px-4 py-3" />
@@ -220,6 +296,9 @@ export default function StaffPage() {
                   </td>
                   <td className="px-4 py-3 text-slate-500">{inv.email}</td>
                   <td className="px-4 py-3 text-slate-500">{inv.role.replaceAll('_', ' ')}</td>
+                  <td className="px-4 py-3 text-slate-500">
+                    {inv.role === UserRole.OWNER ? 'Full access' : summarizePermissions(inv.permissions)}
+                  </td>
                   <td className="px-4 py-3 text-slate-500">{inv.status}</td>
                   <td className="px-4 py-3 text-slate-500">{new Date(inv.expiresAt).toLocaleDateString()}</td>
                   <td className="px-4 py-3">
@@ -253,53 +332,110 @@ export default function StaffPage() {
                 <th className="px-4 py-3 font-medium">Name</th>
                 <th className="px-4 py-3 font-medium">Email</th>
                 <th className="px-4 py-3 font-medium">Role</th>
+                <th className="px-4 py-3 font-medium">Access</th>
                 <th className="px-4 py-3 font-medium">Status</th>
-                {canManageStaff && <th className="px-4 py-3" />}
+                {(canManageRoleStatus || canManagePermissions) && <th className="px-4 py-3" />}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {staff.map((member) => {
                 const isSelf = member.id === currentUser?.id;
+                const targetIsOwner = member.role === UserRole.OWNER;
+                // Mirrors UsersService's own owner-boundary/self-escalation
+                // guards exactly — see assertCallerMayActOnOwnerBoundary/
+                // assertCallerNotActingOnSelf. Disabling here is a UX
+                // courtesy; the backend rejects these regardless.
+                const canEditRoleOrStatus = canManageRoleStatus && (callerIsOwner || !targetIsOwner) && (callerIsOwner || !isSelf);
+                const canEditPermissions = canManagePermissions && !targetIsOwner && (callerIsOwner || !isSelf);
+                const isEditing = editingId === member.id;
+
                 return (
-                  <tr key={member.id}>
-                    <td className="px-4 py-3 font-medium text-slate-900">
-                      {member.firstName} {member.lastName}
-                      {isSelf && <span className="ml-1 text-xs font-normal text-slate-400">(you)</span>}
-                    </td>
-                    <td className="px-4 py-3 text-slate-500">{member.email}</td>
-                    <td className="px-4 py-3 text-slate-500">
-                      {canManageStaff ? (
-                        <select
-                          value={member.role}
-                          disabled={busyRowId === member.id}
-                          onChange={(e) => handleRoleChange(member.id, e.target.value as UserRole)}
-                          className="rounded-md border border-slate-300 bg-white px-2 py-1 text-sm disabled:opacity-50"
-                        >
-                          {STAFF_ROLES.map((role) => (
-                            <option key={role} value={role}>
-                              {role.replaceAll('_', ' ')}
-                            </option>
-                          ))}
-                        </select>
-                      ) : (
-                        member.role.replaceAll('_', ' ')
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-slate-500">{member.isActive ? 'Active' : 'Inactive'}</td>
-                    {canManageStaff && (
-                      <td className="px-4 py-3">
-                        <button
-                          type="button"
-                          onClick={() => handleStatusToggle(member.id, !member.isActive)}
-                          disabled={busyRowId === member.id}
-                          className="text-xs font-semibold text-primary-700 hover:text-primary-800 disabled:opacity-50"
-                        >
-                          {member.isActive ? 'Deactivate' : 'Reactivate'}
-                        </button>
-                        {rowError[member.id] && <p className="mt-1 text-xs text-red-600">{rowError[member.id]}</p>}
+                  <Fragment key={member.id}>
+                    <tr>
+                      <td className="px-4 py-3 font-medium text-slate-900">
+                        {member.firstName} {member.lastName}
+                        {isSelf && <span className="ml-1 text-xs font-normal text-slate-400">(you)</span>}
                       </td>
+                      <td className="px-4 py-3 text-slate-500">{member.email}</td>
+                      <td className="px-4 py-3 text-slate-500">
+                        {canEditRoleOrStatus ? (
+                          <select
+                            value={member.role}
+                            disabled={busyRowId === member.id}
+                            onChange={(e) => handleRoleChange(member.id, e.target.value as UserRole)}
+                            className="rounded-md border border-slate-300 bg-white px-2 py-1 text-sm disabled:opacity-50"
+                          >
+                            {STAFF_ROLES.map((role) => (
+                              <option key={role} value={role}>
+                                {role.replaceAll('_', ' ')}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          member.role.replaceAll('_', ' ')
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        {targetIsOwner ? (
+                          <Badge variant="primary">Full access</Badge>
+                        ) : (
+                          <div className="flex items-center gap-2">
+                            <Badge>{summarizePermissions(member.permissions)}</Badge>
+                            {canEditPermissions && !isEditing && (
+                              <button
+                                type="button"
+                                onClick={() => openPermissionsEditor(member)}
+                                className="text-xs font-semibold text-primary-700 hover:text-primary-800"
+                              >
+                                Edit
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-slate-500">{member.isActive ? 'Active' : 'Inactive'}</td>
+                      {(canManageRoleStatus || canManagePermissions) && (
+                        <td className="px-4 py-3">
+                          {canEditRoleOrStatus && (
+                            <button
+                              type="button"
+                              onClick={() => handleStatusToggle(member.id, !member.isActive)}
+                              disabled={busyRowId === member.id}
+                              className="text-xs font-semibold text-primary-700 hover:text-primary-800 disabled:opacity-50"
+                            >
+                              {member.isActive ? 'Deactivate' : 'Reactivate'}
+                            </button>
+                          )}
+                          {rowError[member.id] && <p className="mt-1 text-xs text-red-600">{rowError[member.id]}</p>}
+                        </td>
+                      )}
+                    </tr>
+                    {isEditing && (
+                      <tr>
+                        <td colSpan={6} className="bg-slate-50 px-4 py-4">
+                          <p className="text-sm text-slate-500">
+                            Choose what {member.firstName} is allowed to view or manage. Changes take effect immediately.
+                          </p>
+                          <div className="mt-3">
+                            <PermissionsPicker
+                              value={editDraft}
+                              onChange={setEditDraft}
+                              disabledKeys={callerIsOwner ? undefined : unauthorizedKeys}
+                            />
+                          </div>
+                          {editError && <p className="mt-2 text-sm text-red-600">{editError}</p>}
+                          <div className="mt-3 flex gap-2">
+                            <Button type="button" size="sm" disabled={editSaving} onClick={() => savePermissions(member.id)}>
+                              {editSaving ? 'Saving…' : 'Save permissions'}
+                            </Button>
+                            <Button type="button" variant="secondary" size="sm" disabled={editSaving} onClick={() => setEditingId(null)}>
+                              Cancel
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
                     )}
-                  </tr>
+                  </Fragment>
                 );
               })}
             </tbody>

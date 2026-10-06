@@ -7,7 +7,7 @@ import { DocumentType } from '@transatlantic/shared';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
-import { ApiError } from '@/lib/api';
+import { ApiError, isForbidden } from '@/lib/api';
 import { downloadDocument, listDocuments, updateDocument } from '@/lib/documents';
 import { formatDate, formatFileSize, humanizeEnumValue } from '@/lib/format';
 
@@ -19,6 +19,7 @@ const TYPE_FILTERS: { label: string; value: DocumentType | '' }[] = [
 export default function DocumentsPage() {
   const [documents, setDocuments] = useState<DocumentSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [forbidden, setForbidden] = useState(false);
   const [typeFilter, setTypeFilter] = useState<DocumentType | ''>('');
   const [busyId, setBusyId] = useState<string | null>(null);
 
@@ -26,13 +27,12 @@ export default function DocumentsPage() {
     listDocuments(typeFilter ? { type: typeFilter } : undefined)
       .then(setDocuments)
       .catch((err) => {
-        setError(
-          err instanceof ApiError && err.statusCode === 403
-            ? "You don't have permission to view documents."
-            : err instanceof ApiError
-              ? err.message
-              : 'Failed to load documents.',
-        );
+        if (isForbidden(err)) {
+          setForbidden(true);
+          setError("You don't have permission to view documents.");
+          return;
+        }
+        setError(err instanceof ApiError ? err.message : 'Failed to load documents.');
       });
   }
 
@@ -67,6 +67,17 @@ export default function DocumentsPage() {
     } finally {
       setBusyId(null);
     }
+  }
+
+  if (forbidden) {
+    return (
+      <div>
+        <h1 className="text-2xl font-semibold text-slate-900">Documents</h1>
+        <Card className="mt-6">
+          <p className="text-sm text-red-600">{error}</p>
+        </Card>
+      </div>
+    );
   }
 
   return (

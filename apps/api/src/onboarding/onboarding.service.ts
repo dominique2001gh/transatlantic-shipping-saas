@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { OnboardingStep } from '@prisma/client';
+import { OnboardingStep, UserRole } from '@prisma/client';
 import type { TenantOnboardingSummary } from '@transatlantic/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { effectivePrice } from '../saas-plans/promo-pricing.util';
@@ -124,7 +124,10 @@ export class OnboardingService {
    * invitation is what does that.
    */
   async inviteStaff(tenantId: string, invitedByUserId: string, invitedByName: string, dto: InviteStaffDto) {
-    const invitation = await this.staffInvitationsService.invite(tenantId, invitedByUserId, invitedByName, dto);
+    // OnboardingController is @Roles(...ONBOARDING_ROLES) — OWNER only —
+    // so the caller here is always the tenant's own OWNER; no non-owner
+    // delegation path exists during onboarding.
+    const invitation = await this.staffInvitationsService.invite(tenantId, invitedByUserId, invitedByName, dto, UserRole.OWNER, []);
 
     const onboarding = await this.requireOnboarding(tenantId);
     if (!onboarding.staffInvitedAt) {

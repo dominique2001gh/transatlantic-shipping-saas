@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { MANAGER_UP_ROLES } from '@transatlantic/shared';
+import { MANAGER_UP_ROLES, hasPermission } from '@transatlantic/shared';
 import type { WarehouseActivityEntry, WarehouseItemDetail, WarehouseSummary } from '@transatlantic/shared';
 import { AskAiLink } from '@/components/warehouse/AskAiLink';
 import { DestinationReceiveWorkspace } from '@/components/warehouse/DestinationReceiveWorkspace';
@@ -64,6 +64,7 @@ export default function WarehousePage() {
   // unrelated OWNER-only Settings nav gate.
   const currentUser = getStoredUser();
   const canManageWarehouses = !!currentUser && MANAGER_UP_ROLES.includes(currentUser.role);
+  const canView = hasPermission(currentUser, 'warehouse.view');
 
   const [mode, setMode] = useState<WarehouseMode>('RECEIVE');
   /**
@@ -91,10 +92,11 @@ export default function WarehousePage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!canView) return;
     listWarehouseLocations()
       .then(setWarehouses)
       .catch((err) => setError(err instanceof ApiError ? err.message : 'Failed to load warehouses.'));
-  }, []);
+  }, [canView]);
 
   /**
    * Keep the selected warehouse on the correct side of the network for the
@@ -157,6 +159,17 @@ export default function WarehousePage() {
   useEffect(() => {
     reload();
   }, [reload]);
+
+  if (!canView) {
+    return (
+      <div>
+        <h1 className="text-2xl font-semibold text-slate-900">Warehouse</h1>
+        <Card className="mt-6">
+          <p className="text-sm text-red-600">You don&apos;t have permission to view the warehouse.</p>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col gap-8">

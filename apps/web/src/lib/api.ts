@@ -15,6 +15,20 @@ export class ApiError extends Error {
 }
 
 /**
+ * RBAC permissions (2026-10): true for an authenticated-but-insufficient-
+ * permission rejection (PermissionsGuard/RolesGuard, 403) — distinct from
+ * every other failure (network error, 404, validation, etc). A page
+ * should use this to collapse itself down to an access-denied message
+ * only, hiding create/edit/action controls the caller isn't authorized to
+ * use in the first place (hiding the menu is UX only — the backend 403
+ * this checks is the real enforcement; see nav.ts's own doc comment for
+ * the same posture applied to sidebar visibility).
+ */
+export function isForbidden(err: unknown): boolean {
+  return err instanceof ApiError && err.statusCode === 403;
+}
+
+/**
  * Minimal JSON fetch wrapper. Attaches the stored access token, if any.
  *
  * Stage 3G: when `body` is a `FormData` (a document upload), the

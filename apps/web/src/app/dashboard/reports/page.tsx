@@ -29,6 +29,7 @@ import {
 import { EntitlementFeature } from '@transatlantic/shared';
 import { IconLayers } from '@/components/icons';
 import { Card } from '@/components/ui/Card';
+import { isForbidden } from '@/lib/api';
 import { SelectInput } from '@/components/forms/FormField';
 import { fetchMyEntitlements } from '@/lib/entitlements';
 import { computeRange, PRESET_LABELS, type PresetKey } from '@/lib/date-range';
@@ -63,6 +64,7 @@ export default function ReportsPage() {
   const [customers, setCustomers] = useState<AnalyticsCustomersResponse | null>(null);
   const [exceptions, setExceptions] = useState<AnalyticsExceptionsResponse | null>(null);
   const [error, setError] = useState(false);
+  const [forbidden, setForbidden] = useState(false);
   const [entitled, setEntitled] = useState<boolean | null>(null);
 
   /**
@@ -103,7 +105,13 @@ export default function ReportsPage() {
         setCustomers(customersRes);
         setExceptions(exceptionsRes);
       })
-      .catch(() => setError(true));
+      .catch((err) => {
+        if (isForbidden(err)) {
+          setForbidden(true);
+          return;
+        }
+        setError(true);
+      });
   }, [entitled, range.from, range.to, shipmentMode, warehouseId]);
 
   function handlePresetChange(next: PresetKey) {
@@ -125,6 +133,17 @@ export default function ReportsPage() {
           support to upgrade.
         </p>
       </Card>
+    );
+  }
+
+  if (forbidden) {
+    return (
+      <div>
+        <h1 className="text-2xl font-semibold text-slate-900">Reports</h1>
+        <Card className="mt-6">
+          <p className="text-sm text-red-600">You don&apos;t have permission to view reports.</p>
+        </Card>
+      </div>
     );
   }
 

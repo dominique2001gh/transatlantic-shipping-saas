@@ -21,6 +21,18 @@ export function getStoredToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);
 }
 
+/**
+ * RBAC permissions (2026-10): overwrites only the stored user, leaving
+ * the access token untouched — unlike storeSession (login/accept-invite,
+ * where both change together), this is for refreshing a still-valid
+ * session's own user record (see useRequireAuth's background refresh) so
+ * a permission grant made elsewhere during this session is reflected
+ * without forcing a re-login.
+ */
+export function updateStoredUser(user: AuthenticatedUser): void {
+  localStorage.setItem(USER_KEY, JSON.stringify(user));
+}
+
 export function getStoredUser(): AuthenticatedUser | null {
   if (typeof window === 'undefined') return null;
   const raw = localStorage.getItem(USER_KEY);

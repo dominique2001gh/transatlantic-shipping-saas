@@ -3,7 +3,8 @@
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import type { AuthenticatedUser, UserRole } from '@transatlantic/shared';
-import { getStoredToken, getStoredUser, homeRouteForRole } from './auth';
+import { getCurrentUser } from './account';
+import { getStoredToken, getStoredUser, homeRouteForRole, updateStoredUser } from './auth';
 
 /**
  * Client-side route guard for the app shells (dashboard/portal/platform).
@@ -48,6 +49,22 @@ export function useRequireAuth(allowedRoles: UserRole[]): {
 
     setUser(storedUser);
     setLoading(false);
+
+    // RBAC permissions (2026-10): the stored user is a snapshot from
+    // whenever this person last logged in — if an OWNER has since changed
+    // their role or permissions, this tab's nav/UI would otherwise stay
+    // stale for the rest of the session. Refreshed in the background,
+    // after the page has already rendered with the stored copy, so this
+    // never blocks or flashes the UI; a failure here (offline, token
+    // expired) is silently ignored — apiFetch's own 401 handling already
+    // covers a genuinely invalid session, and any other error just means
+    // this tab keeps using its last-known values until the next mount.
+    getCurrentUser()
+      .then((freshUser) => {
+        updateStoredUser(freshUser);
+        setUser(freshUser);
+      })
+      .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

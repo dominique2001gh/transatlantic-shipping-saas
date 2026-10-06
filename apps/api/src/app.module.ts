@@ -13,6 +13,7 @@ import { DisruptionsModule } from './disruptions/disruptions.module';
 import { DocumentsModule } from './documents/documents.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { EntitlementsGuard } from './common/guards/entitlements.guard';
+import { PermissionsGuard } from './common/guards/permissions.guard';
 import { RolesGuard } from './common/guards/roles.guard';
 import { SubscriptionStatusGuard } from './common/guards/subscription-status.guard';
 import { EntitlementsModule } from './entitlements/entitlements.module';
@@ -90,6 +91,11 @@ import { WebhooksModule } from './webhooks/webhooks.module';
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     // Enforces @Roles(...) metadata once a user is authenticated.
     { provide: APP_GUARD, useClass: RolesGuard },
+    // RBAC permissions (2026-10): @RequirePermission(...) enforcement —
+    // see PermissionsGuard's own doc comment. Runs immediately after
+    // RolesGuard, narrowing within whichever role tier that already
+    // allowed; OWNER always passes regardless.
+    { provide: APP_GUARD, useClass: PermissionsGuard },
     // AnanseLogix Phase 1: billing-status access restriction (Section 9) —
     // see SubscriptionStatusGuard's own doc comment. Runs after the two
     // guards above, since it needs req.user already populated.

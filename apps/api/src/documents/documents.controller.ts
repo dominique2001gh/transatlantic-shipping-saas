@@ -19,6 +19,7 @@ import type { Response } from 'express';
 import { memoryStorage } from 'multer';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { RequireEntitlement } from '../common/decorators/require-entitlement.decorator';
+import { RequirePermission } from '../common/decorators/require-permission.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { requireTenantId } from '../common/tenant/tenant.util';
 import { ALLOWED_DOCUMENT_MIME_TYPES, MAX_DOCUMENT_SIZE_BYTES, type UploadedFile } from './documents.service';
@@ -57,6 +58,7 @@ export class DocumentsController {
 
   @Post('shipments/:shipmentId')
   @Roles(...MANAGE_ROLES)
+  @RequirePermission('documents.manage')
   @UseInterceptors(FileInterceptor('file', UPLOAD_INTERCEPTOR_OPTIONS))
   uploadForShipment(
     @CurrentUser() user: AuthenticatedUser,
@@ -72,6 +74,7 @@ export class DocumentsController {
 
   @Post('customers/:customerId')
   @Roles(...MANAGE_ROLES)
+  @RequirePermission('documents.manage')
   @UseInterceptors(FileInterceptor('file', UPLOAD_INTERCEPTOR_OPTIONS))
   uploadForCustomer(
     @CurrentUser() user: AuthenticatedUser,
@@ -87,6 +90,7 @@ export class DocumentsController {
 
   @Get()
   @Roles(...VIEW_ROLES)
+  @RequirePermission('documents.view')
   findAll(
     @CurrentUser() user: AuthenticatedUser,
     @Query('customerId') customerId?: string,
@@ -98,12 +102,14 @@ export class DocumentsController {
 
   @Get(':id')
   @Roles(...VIEW_ROLES)
+  @RequirePermission('documents.view')
   findOne(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
     return this.documentsService.findByIdForTenant(requireTenantId(user.tenantId), id);
   }
 
   @Patch(':id')
   @Roles(...MANAGE_ROLES)
+  @RequirePermission('documents.manage')
   update(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Body() dto: UpdateDocumentDto) {
     return this.documentsService.update(requireTenantId(user.tenantId), id, dto);
   }
@@ -119,6 +125,7 @@ export class DocumentsController {
    */
   @Get(':id/download')
   @Roles(...VIEW_ROLES)
+  @RequirePermission('documents.view')
   async download(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Res() res: Response) {
     const { fileName, mimeType, target } = await this.documentsService.getDownloadTargetForTenant(
       requireTenantId(user.tenantId),

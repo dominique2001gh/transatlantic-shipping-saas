@@ -498,6 +498,7 @@ model Tenant {
   invitations          TenantInvitation[]
   signupSessions       SignupSession[]
   platformAuditLogsFor PlatformAuditLog[]
+  auditLogs            TenantAuditLog[]
   paymentSettings      TenantPaymentSettings?
   paymentMethodConfigs TenantPaymentMethodConfig[]
 
@@ -734,6 +735,25 @@ model User {
   lastName     String
   phone        String?
   role         UserRole
+  /// RBAC permissions (2026-10): fine-grained, additive capability grants
+  /// WITHIN this tenant membership, layered on top of `role` — `role`
+  /// still drives every existing @Roles()-gated route unchanged; this
+  /// only matters for routes explicitly annotated with the new
+  /// @RequirePermission() decorator (none yet — see PermissionsGuard's
+  /// own doc comment). OWNER is never limited by this array; the guard
+  /// short-circuits to full access for OWNER regardless of its contents,
+  /// so OWNER accounts legitimately keep this empty/unused.
+  /// For every OTHER pre-existing (pre-RBAC) staff row, this is backfilled
+  /// once, at rollout, to a concrete permission set matching that row's
+  /// *current* role-based access (see scripts/backfill-rbac-permissions.ts
+  /// and each affected row's own TenantAuditLog entry, action
+  /// "PERMISSIONS_MIGRATED_LEGACY") — never left as a bare `[]` that some
+  /// future code path could misread as "legacy, so allow everything."
+  /// An empty array always means exactly what it says: no optional
+  /// permissions granted. For staff invited after RBAC enforcement goes
+  /// live, `[]` is a legitimate, intentional "no optional permissions"
+  /// grant, not a migration artifact.
+  permissions  String[] @default([])
   isActive     Boolean   @default(true)
   lastLoginAt  DateTime?
   /// Set on every successful password change/reset (self-service change,
@@ -788,6 +808,8 @@ model User {
   tenantInvitationsSent         TenantInvitation[]
   platformAuditLogsPerformed    PlatformAuditLog[]
   accountTokens                 AccountToken[]
+  tenantAuditLogsPerformed      TenantAuditLog[]       @relation("TenantAuditLogActor")
+  tenantAuditLogsAbout          TenantAuditLog[]       @relation("TenantAuditLogTarget")
 
   @@unique([tenantId, email])
   @@index([tenantId])
@@ -2542,6 +2564,12 @@ model TenantInvitation {
   firstName       String
   lastName        String
   role            UserRole
+  /// RBAC permissions (2026-10): the exact permission grant the inviting
+  /// owner/admin selected (preset or custom), applied verbatim to the
+  /// new User row's own `permissions` the moment this invitation is
+  /// accepted — see StaffInvitationsService.accept. Empty by default for
+  /// an invitation that only selected a role with no additional grants.
+  permissions     String[]               @default([])
   tokenHash       String                 @unique
   status          TenantInvitationStatus @default(PENDING)
   invitedByUserId String
@@ -2623,4 +2651,46 @@ model PlatformAuditLog {
   @@index([platformAdminUserId])
   @@index([targetTenantId])
   @@map("platform_audit_logs")
+}
+
+/// RBAC audit log (2026-10): a small, deliberately narrow, tenant-scoped
+/// trail of security-relevant staff events only — invited, invitation
+/// accepted, role changed, permissions changed, deactivated/reactivated,
+/// and the one-time legacy-permissions backfill (action
+/// "PERMISSIONS_MIGRATED_LEGACY") each pre-RBAC staff row receives at
+/// rollout. Not a general-purpose activity log — do not extend this to
+/// log every staff action; see TenantAuditAction for the closed set of
+/// events this is scoped to.
+///
+/// Distinct from PlatformAuditLog (platform-admin actions, no tenantId
+/// scoping) — this is the tenant-level counterpart, scoped and isolated
+/// exactly like every other tenant-owned table (`tenantId`-indexed,
+/// cascade-deleted with the tenant).
+///
+/// `actorUserId` is nullable for the one system-generated event (the
+/// legacy-permissions backfill has no human actor — the migration script
+/// itself is the actor, represented as `null`, never as a fabricated
+/// User row). Both `actor` and `targetUser` are `onDelete: SetNull`
+/// rather than cascade/restrict: a historical audit entry must survive
+/// even if the User row it refers to is later removed — losing the audit
+/// trail would defeat the point of having one.
+model TenantAuditLog {
+  id           String   @id @default(cuid())
+  tenantId     String
+  actorUserId  String?
+  targetUserId String?
+  action       String
+  /// Free-form context for this action — e.g. { role: "MANAGER",
+  /// permissionsBefore: [...], permissionsAfter: [...] }. Shape varies by
+  /// `action`; never holds secrets (no tokens/passwords/codes).
+  metadata     Json?
+  createdAt    DateTime @default(now())
+
+  tenant     Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  actor      User?  @relation("TenantAuditLogActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+  targetUser User?  @relation("TenantAuditLogTarget", fields: [targetUserId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@index([targetUserId])
+  @@map("tenant_audit_logs")
 }

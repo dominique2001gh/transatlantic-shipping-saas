@@ -4,6 +4,7 @@ import type { AuthenticatedUser, EnabledPaymentMethod, TenantPaymentMethodConfig
 import { INVOICE_MANAGE_ROLES, OWNER_ONLY_ROLES } from '@transatlantic/shared';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { RequireEntitlement } from '../common/decorators/require-entitlement.decorator';
+import { RequirePermission } from '../common/decorators/require-permission.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { requireTenantId } from '../common/tenant/tenant.util';
 import { UpsertPaymentMethodsDto } from './dto/upsert-payment-methods.dto';
@@ -36,12 +37,14 @@ export class TenantPaymentMethodsController {
 
   @Get()
   @Roles(...OWNER_ONLY_ROLES)
+  @RequirePermission('settings.sensitive')
   getConfig(@CurrentUser() user: AuthenticatedUser): Promise<TenantPaymentMethodConfigItem[]> {
     return this.tenantPaymentMethodsService.getConfigForTenant(requireTenantId(user.tenantId));
   }
 
   @Put()
   @Roles(...OWNER_ONLY_ROLES)
+  @RequirePermission('settings.sensitive')
   upsertConfig(
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: UpsertPaymentMethodsDto,
@@ -52,6 +55,7 @@ export class TenantPaymentMethodsController {
   /** Record Payment dropdown (staff) — see TenantPaymentMethodsService.getEnabledForStaff's own doc comment for the legacy-fallback rule. */
   @Get('enabled')
   @Roles(...INVOICE_MANAGE_ROLES)
+  @RequirePermission('payments.view')
   getEnabled(@CurrentUser() user: AuthenticatedUser): Promise<EnabledPaymentMethod[]> {
     return this.tenantPaymentMethodsService.getEnabledForStaff(requireTenantId(user.tenantId));
   }

@@ -4,6 +4,7 @@ import type { AuthenticatedUser } from '@transatlantic/shared';
 import { MANAGER_UP_ROLES, OPERATIONS_ROLES, ShipmentItemStatus } from '@transatlantic/shared';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { RequireEntitlement } from '../common/decorators/require-entitlement.decorator';
+import { RequirePermission } from '../common/decorators/require-permission.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { requireTenantId } from '../common/tenant/tenant.util';
 import { CreateWarehouseDto } from './dto/create-warehouse.dto';
@@ -38,6 +39,7 @@ export class WarehouseController {
   constructor(private readonly warehouseService: WarehouseService) {}
 
   @Get('locations')
+  @RequirePermission('warehouse.view')
   listLocations(@CurrentUser() user: AuthenticatedUser) {
     return this.warehouseService.listLocations(requireTenantId(user.tenantId));
   }
@@ -73,16 +75,19 @@ export class WarehouseController {
   }
 
   @Get('scan')
+  @RequirePermission('warehouse.view')
   scan(@CurrentUser() user: AuthenticatedUser, @Query('code') code?: string) {
     return this.warehouseService.resolveScan(requireTenantId(user.tenantId), code ?? '');
   }
 
   @Get('search')
+  @RequirePermission('warehouse.view')
   search(@CurrentUser() user: AuthenticatedUser, @Query('query') query?: string) {
     return this.warehouseService.searchItems(requireTenantId(user.tenantId), query ?? '');
   }
 
   @Post('items/:itemId/receive')
+  @RequirePermission('shipments.receive')
   receive(
     @CurrentUser() user: AuthenticatedUser,
     @Param('itemId') itemId: string,
@@ -92,6 +97,7 @@ export class WarehouseController {
   }
 
   @Post('items/:itemId/process')
+  @RequirePermission('warehouse.process')
   process(
     @CurrentUser() user: AuthenticatedUser,
     @Param('itemId') itemId: string,
@@ -101,6 +107,7 @@ export class WarehouseController {
   }
 
   @Get('inventory')
+  @RequirePermission('warehouse.view')
   inventory(
     @CurrentUser() user: AuthenticatedUser,
     @Query('warehouseId') warehouseId?: string,
@@ -116,6 +123,7 @@ export class WarehouseController {
   }
 
   @Get('activity')
+  @RequirePermission('warehouse.view')
   activity(
     @CurrentUser() user: AuthenticatedUser,
     @Query('warehouseId') warehouseId?: string,
@@ -128,6 +136,7 @@ export class WarehouseController {
   }
 
   @Post('items/:itemId/destination-receive')
+  @RequirePermission('shipments.receive')
   destinationReceive(
     @CurrentUser() user: AuthenticatedUser,
     @Param('itemId') itemId: string,
@@ -138,24 +147,28 @@ export class WarehouseController {
 
   /** Customer Pickup milestone. See WarehouseService.pickupItem for the eligibility/warehouse-match rules. */
   @Post('items/:itemId/pickup')
+  @RequirePermission('dispatch.manage')
   pickup(@CurrentUser() user: AuthenticatedUser, @Param('itemId') itemId: string, @Body() dto: PickupItemDto) {
     return this.warehouseService.pickupItem(requireTenantId(user.tenantId), user.id, itemId, dto);
   }
 
   /** Delivery/Driver Dispatch milestone. See WarehouseService.dispatchItem. */
   @Post('items/:itemId/dispatch')
+  @RequirePermission('dispatch.manage')
   dispatch(@CurrentUser() user: AuthenticatedUser, @Param('itemId') itemId: string, @Body() dto: DispatchItemDto) {
     return this.warehouseService.dispatchItem(requireTenantId(user.tenantId), user.id, itemId, dto);
   }
 
   /** Delivery/Driver Dispatch milestone. See WarehouseService.deliverItem. */
   @Post('items/:itemId/deliver')
+  @RequirePermission('dispatch.manage')
   deliver(@CurrentUser() user: AuthenticatedUser, @Param('itemId') itemId: string, @Body() dto: DeliverItemDto) {
     return this.warehouseService.deliverItem(requireTenantId(user.tenantId), user.id, itemId, dto);
   }
 
   /** Delivery/Driver Dispatch milestone. See WarehouseService.returnItem. */
   @Post('items/:itemId/return')
+  @RequirePermission('dispatch.manage')
   returnToWarehouse(@CurrentUser() user: AuthenticatedUser, @Param('itemId') itemId: string, @Body() dto: ReturnItemDto) {
     return this.warehouseService.returnItem(requireTenantId(user.tenantId), user.id, itemId, dto);
   }

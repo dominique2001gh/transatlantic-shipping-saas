@@ -66,6 +66,32 @@ export function SelectInput({ label, id, required, hideLabel, className = '', ch
   );
 }
 
+type CheckboxProps = Omit<InputHTMLAttributes<HTMLInputElement>, 'id' | 'type'> & {
+  label: string;
+  id: string;
+  /** Shown under the label in a smaller, muted line — e.g. clarifying what a permission actually lets someone do. */
+  description?: string;
+};
+
+/** A labeled checkbox matching this form library's visual language — used by the Staff Invite/Edit Permissions picker, never a bare `<input type="checkbox">`. */
+export function Checkbox({ label, id, description, className = '', ...props }: CheckboxProps) {
+  return (
+    <label htmlFor={id} className="flex items-start gap-2.5 py-1 text-sm text-slate-700">
+      <input
+        id={id}
+        name={id}
+        type="checkbox"
+        className={`mt-0.5 h-4 w-4 rounded border-slate-300 text-primary-700 focus:ring-1 focus:ring-primary-500 ${className}`}
+        {...props}
+      />
+      <span>
+        {label}
+        {description && <span className="block text-xs text-slate-400">{description}</span>}
+      </span>
+    </label>
+  );
+}
+
 type TextAreaProps = Omit<TextareaHTMLAttributes<HTMLTextAreaElement>, 'id'> & { label: string; id: string };
 
 export function TextArea({ label, id, required, className = '', ...props }: TextAreaProps) {

@@ -94,6 +94,9 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       role: user.role as AuthenticatedUser['role'],
       tenantId: user.tenantId,
       customerId: user.customer?.id ?? null,
+      // RBAC permissions (2026-10): re-read fresh on every request, same
+      // as every other field here — see AuthenticatedUser.permissions.
+      permissions: user.permissions,
     };
   }
 }

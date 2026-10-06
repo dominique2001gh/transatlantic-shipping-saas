@@ -4,6 +4,7 @@ import type { AuthenticatedUser } from '@transatlantic/shared';
 import { ANALYTICS_ROLES, DASHBOARD_ROLES, FINANCE_ANALYTICS_ROLES } from '@transatlantic/shared';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { RequireEntitlement } from '../common/decorators/require-entitlement.decorator';
+import { RequirePermission } from '../common/decorators/require-permission.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { requireTenantId } from '../common/tenant/tenant.util';
 import { AnalyticsService } from './analytics.service';
@@ -41,36 +42,42 @@ export class AnalyticsController {
 
   @Get('alerts')
   @Roles(...ANALYTICS_ROLES)
+  @RequirePermission('reports.view')
   alerts(@CurrentUser() user: AuthenticatedUser) {
     return this.analyticsService.getAlerts(requireTenantId(user.tenantId));
   }
 
   @Get('revenue')
   @Roles(...FINANCE_ANALYTICS_ROLES)
+  @RequirePermission('analytics.financial')
   revenue(@CurrentUser() user: AuthenticatedUser, @Query() query: AnalyticsQueryDto) {
     return this.analyticsService.getRevenue(requireTenantId(user.tenantId), query);
   }
 
   @Get('operations')
   @Roles(...ANALYTICS_ROLES)
+  @RequirePermission('reports.view')
   operations(@CurrentUser() user: AuthenticatedUser, @Query() query: AnalyticsQueryDto) {
     return this.analyticsService.getOperations(requireTenantId(user.tenantId), query);
   }
 
   @Get('destinations')
   @Roles(...ANALYTICS_ROLES)
+  @RequirePermission('reports.view')
   destinations(@CurrentUser() user: AuthenticatedUser, @Query() query: AnalyticsQueryDto) {
     return this.analyticsService.getDestinations(requireTenantId(user.tenantId), query);
   }
 
   @Get('customers')
   @Roles(...ANALYTICS_ROLES)
+  @RequirePermission('reports.view')
   customers(@CurrentUser() user: AuthenticatedUser, @Query() query: AnalyticsQueryDto) {
     return this.analyticsService.getCustomers(requireTenantId(user.tenantId), query);
   }
 
   @Get('exceptions')
   @Roles(...ANALYTICS_ROLES)
+  @RequirePermission('reports.view')
   exceptions(@CurrentUser() user: AuthenticatedUser, @Query() query: AnalyticsQueryDto) {
     return this.analyticsService.getExceptions(requireTenantId(user.tenantId), query);
   }
@@ -83,6 +90,7 @@ export class AnalyticsController {
    */
   @Get('executive')
   @Roles(...ANALYTICS_ROLES)
+  @RequirePermission('reports.view')
   executive(@CurrentUser() user: AuthenticatedUser, @Query() query: AnalyticsQueryDto) {
     return this.analyticsService.getExecutive(requireTenantId(user.tenantId), query);
   }

@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
 import type { CustomerSummary, ShipmentSummary, StaffPreRegistrationLookup, WarehouseSummary } from '@transatlantic/shared';
-import { OPERATIONS_ROLES, ShipmentItemType, ShipmentMode, WeightUnit } from '@transatlantic/shared';
+import { OPERATIONS_ROLES, ShipmentItemType, ShipmentMode, WeightUnit, hasPermission } from '@transatlantic/shared';
 import { LoadingScreen } from '@/components/layout/LoadingScreen';
 import { SelectInput, TextArea, TextInput } from '@/components/forms/FormField';
 import { SearchableSelect } from '@/components/forms/SearchableSelect';
@@ -464,6 +464,17 @@ export default function QuickReceivePage() {
 
   if (authLoading || !user) {
     return <LoadingScreen />;
+  }
+
+  if (!hasPermission(user, 'quickreceive.use')) {
+    return (
+      <div className="max-w-3xl">
+        <h1 className="text-2xl font-semibold text-slate-900">Quick Receive</h1>
+        <Card className="mt-6">
+          <p className="text-sm text-red-600">You don&apos;t have permission to use Quick Receive.</p>
+        </Card>
+      </div>
+    );
   }
 
   if (receipt) {

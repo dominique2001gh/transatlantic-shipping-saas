@@ -9,7 +9,7 @@ import { ManifestContainerAssignment } from '@/components/manifests/ManifestCont
 import { ManifestItemAssignment } from '@/components/manifests/ManifestItemAssignment';
 import { Button, LinkButton } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
-import { ApiError } from '@/lib/api';
+import { ApiError, isForbidden } from '@/lib/api';
 import { getStoredUser } from '@/lib/auth';
 import { formatDateTime, humanizeEnumValue } from '@/lib/format';
 import { arriveManifest, departManifest, downloadManifestPdf, finalizeManifest, getManifest, listManifests } from '@/lib/manifests';
@@ -46,6 +46,7 @@ export default function ManifestsPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [warehouses, setWarehouses] = useState<WarehouseSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [forbidden, setForbidden] = useState(false);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [finalizing, setFinalizing] = useState(false);
   const [departing, setDeparting] = useState(false);
@@ -56,7 +57,14 @@ export default function ManifestsPage() {
     if (!canView) return;
     listManifests(statusFilter === 'ALL' ? undefined : { status: statusFilter })
       .then(setManifests)
-      .catch((err) => setError(err instanceof ApiError ? err.message : 'Failed to load manifests.'));
+      .catch((err) => {
+        if (isForbidden(err)) {
+          setForbidden(true);
+          setError("You don't have permission to view manifests.");
+          return;
+        }
+        setError(err instanceof ApiError ? err.message : 'Failed to load manifests.');
+      });
   }, [statusFilter, canView]);
 
   useEffect(() => {
@@ -167,14 +175,16 @@ export default function ManifestsPage() {
     }
   }
 
-  if (!canView) {
+  if (!canView || forbidden) {
     return (
       <div className="flex flex-col gap-6">
         <div>
           <h1 className="text-2xl font-semibold text-slate-900">Manifests</h1>
         </div>
         <Card>
-          <p className="text-sm text-slate-600">Your role does not have access to manifests.</p>
+          <p className="text-sm text-slate-600">
+            {forbidden ? error : 'Your role does not have access to manifests.'}
+          </p>
         </Card>
       </div>
     );

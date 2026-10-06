@@ -4,6 +4,7 @@ import type { AuthenticatedUser } from '@transatlantic/shared';
 import { OPERATIONS_ROLES, ShipmentStatus } from '@transatlantic/shared';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { RequireEntitlement } from '../common/decorators/require-entitlement.decorator';
+import { RequirePermission } from '../common/decorators/require-permission.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { requireTenantId } from '../common/tenant/tenant.util';
 import { CreateShipmentDto } from './dto/create-shipment.dto';
@@ -27,6 +28,7 @@ export class ShipmentsController {
 
   @Get()
   @Roles(...OPERATIONS_ROLES)
+  @RequirePermission('shipments.view')
   findAll(
     @CurrentUser() user: AuthenticatedUser,
     @Query('customerId') customerId?: string,
@@ -42,18 +44,21 @@ export class ShipmentsController {
   // as an :id value.
   @Get('search')
   @Roles(...OPERATIONS_ROLES)
+  @RequirePermission('shipments.view')
   search(@CurrentUser() user: AuthenticatedUser, @Query('query') query?: string) {
     return this.shipmentsService.search(requireTenantId(user.tenantId), query ?? '');
   }
 
   @Get(':id')
   @Roles(...OPERATIONS_ROLES)
+  @RequirePermission('shipments.view')
   findOne(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
     return this.shipmentsService.findById(requireTenantId(user.tenantId), id);
   }
 
   @Post()
   @Roles(...OPERATIONS_ROLES)
+  @RequirePermission('shipments.manage')
   create(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateShipmentDto) {
     return this.shipmentsService.create(requireTenantId(user.tenantId), user.id, dto);
   }
@@ -65,12 +70,14 @@ export class ShipmentsController {
   // here — FINANCE has no shipment access at all, Quick Receive included.
   @Post('quick-receive')
   @Roles(...OPERATIONS_ROLES)
+  @RequirePermission('quickreceive.use')
   quickReceive(@CurrentUser() user: AuthenticatedUser, @Body() dto: QuickReceiveDto) {
     return this.shipmentsService.createQuickReceive(requireTenantId(user.tenantId), user.id, dto);
   }
 
   @Patch(':id')
   @Roles(...OPERATIONS_ROLES)
+  @RequirePermission('shipments.manage')
   update(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id') id: string,
@@ -81,6 +88,7 @@ export class ShipmentsController {
 
   @Post(':id/items')
   @Roles(...OPERATIONS_ROLES)
+  @RequirePermission('shipments.manage')
   addItem(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id') shipmentId: string,
@@ -91,6 +99,7 @@ export class ShipmentsController {
 
   @Patch(':id/items/:itemId')
   @Roles(...OPERATIONS_ROLES)
+  @RequirePermission('shipments.manage')
   updateItem(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id') shipmentId: string,
@@ -102,12 +111,14 @@ export class ShipmentsController {
 
   @Get(':id/tracking-events')
   @Roles(...OPERATIONS_ROLES)
+  @RequirePermission('shipments.view')
   listTrackingEvents(@CurrentUser() user: AuthenticatedUser, @Param('id') shipmentId: string) {
     return this.shipmentsService.listTrackingEvents(requireTenantId(user.tenantId), shipmentId);
   }
 
   @Post(':id/tracking-events')
   @Roles(...OPERATIONS_ROLES)
+  @RequirePermission('shipments.manage')
   createTrackingEvent(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id') shipmentId: string,

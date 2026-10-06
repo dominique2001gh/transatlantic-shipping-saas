@@ -5,6 +5,7 @@ import type { AuthenticatedUser, TenantStripeConnectStatus } from '@transatlanti
 import { OWNER_ONLY_ROLES } from '@transatlantic/shared';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { RequireEntitlement } from '../common/decorators/require-entitlement.decorator';
+import { RequirePermission } from '../common/decorators/require-permission.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { requireTenantId } from '../common/tenant/tenant.util';
 import { resolveTenantWebAppUrl } from '../common/tenant/tenant-web-app-url.util';
@@ -53,6 +54,7 @@ export class TenantPaymentsController {
    */
   @Post('onboarding-link')
   @Roles(...OWNER_ONLY_ROLES)
+  @RequirePermission('settings.sensitive')
   async createOnboardingLink(@CurrentUser() user: AuthenticatedUser): Promise<{ url: string }> {
     const tenantId = requireTenantId(user.tenantId);
     const tenant = await this.prisma.tenant.findUniqueOrThrow({ where: { id: tenantId }, select: { slug: true, customDomain: true, email: true } });
@@ -71,6 +73,7 @@ export class TenantPaymentsController {
   /** Current connection state for the caller's own tenant only — see TenantPaymentsStripeService.getConnectionStatus's own doc comment (pure DB read, never a live Stripe API call). */
   @Get('status')
   @Roles(...OWNER_ONLY_ROLES)
+  @RequirePermission('settings.sensitive')
   getStatus(@CurrentUser() user: AuthenticatedUser): Promise<TenantStripeConnectStatus> {
     return this.tenantPaymentsStripeService.getConnectionStatus(requireTenantId(user.tenantId));
   }

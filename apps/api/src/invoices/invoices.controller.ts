@@ -4,6 +4,7 @@ import type { AuthenticatedUser } from '@transatlantic/shared';
 import { INVOICE_MANAGE_ROLES, InvoiceStatus } from '@transatlantic/shared';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { RequireEntitlement } from '../common/decorators/require-entitlement.decorator';
+import { RequirePermission } from '../common/decorators/require-permission.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { requireTenantId } from '../common/tenant/tenant.util';
 import { CreatePaymentDto } from '../payments/dto/create-payment.dto';
@@ -36,6 +37,7 @@ export class InvoicesController {
 
   @Get()
   @Roles(...VIEW_ROLES)
+  @RequirePermission('invoices.view')
   findAll(
     @CurrentUser() user: AuthenticatedUser,
     @Query('customerId') customerId?: string,
@@ -49,18 +51,21 @@ export class InvoicesController {
 
   @Get(':id')
   @Roles(...VIEW_ROLES)
+  @RequirePermission('invoices.view')
   findOne(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
     return this.invoicesService.findById(requireTenantId(user.tenantId), id);
   }
 
   @Post()
   @Roles(...MANAGE_ROLES)
+  @RequirePermission('invoices.manage')
   create(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateInvoiceDto) {
     return this.invoicesService.create(requireTenantId(user.tenantId), dto);
   }
 
   @Post(':id/issue')
   @Roles(...MANAGE_ROLES)
+  @RequirePermission('invoices.manage')
   issue(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
     return this.invoicesService.issue(requireTenantId(user.tenantId), id);
   }
@@ -73,12 +78,14 @@ export class InvoicesController {
    */
   @Get(':id/payments')
   @Roles(...VIEW_ROLES)
+  @RequirePermission('payments.view')
   listPayments(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
     return this.paymentsService.listForInvoice(requireTenantId(user.tenantId), id);
   }
 
   @Post(':id/payments')
   @Roles(...MANAGE_ROLES)
+  @RequirePermission('payments.manage')
   recordPayment(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id') id: string,

@@ -7,7 +7,7 @@ import { InvoiceStatus } from '@transatlantic/shared';
 import { StatusBadge } from '@/components/dashboard/StatusBadge';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
-import { ApiError } from '@/lib/api';
+import { ApiError, isForbidden } from '@/lib/api';
 import { formatCurrency, formatDate } from '@/lib/format';
 import { listInvoices } from '@/lib/invoices';
 
@@ -24,6 +24,7 @@ const STATUS_FILTERS: { label: string; value: InvoiceStatus | '' }[] = [
 export default function InvoicesPage() {
   const [invoices, setInvoices] = useState<InvoiceSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [forbidden, setForbidden] = useState(false);
   const [statusFilter, setStatusFilter] = useState<InvoiceStatus | ''>('');
   const [search, setSearch] = useState('');
 
@@ -31,7 +32,8 @@ export default function InvoicesPage() {
     listInvoices(statusFilter ? { status: statusFilter } : undefined)
       .then(setInvoices)
       .catch((err) => {
-        if (err instanceof ApiError && err.statusCode === 403) {
+        if (isForbidden(err)) {
+          setForbidden(true);
           setError("You don't have permission to view invoices.");
         } else {
           setError(err instanceof ApiError ? err.message : 'Failed to load invoices.');
@@ -50,6 +52,17 @@ export default function InvoicesPage() {
         (invoice.shipmentTrackingNumber ?? '').toLowerCase().includes(term),
     );
   }, [invoices, search]);
+
+  if (forbidden) {
+    return (
+      <div>
+        <h1 className="text-2xl font-semibold text-slate-900">Invoices</h1>
+        <Card className="mt-6">
+          <p className="text-sm text-red-600">{error}</p>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div>

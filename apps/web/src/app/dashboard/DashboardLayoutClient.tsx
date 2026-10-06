@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
-import { DASHBOARD_ROLES } from '@transatlantic/shared';
+import { DASHBOARD_ROLES, hasPermission } from '@transatlantic/shared';
 import { AppShell } from '@/components/layout/AppShell';
 import { LoadingScreen } from '@/components/layout/LoadingScreen';
 import { TrialBanner } from '@/components/layout/TrialBanner';
@@ -64,10 +64,21 @@ export default function DashboardLayoutClient({ children }: { children: React.Re
   }
 
   // UX only, not a security boundary (matches useRequireAuth's own
-  // posture) — hides nav items whose action a role can't actually use, so
-  // e.g. a warehouse-only user never sees "Invoices"/"Payments" only to
-  // hit a 403. The API's @Roles() guard is what actually enforces access.
-  const visibleNavItems = dashboardNavItems.filter((item) => !item.roles || item.roles.includes(user.role));
+  // posture) — hides nav items whose action this role/permission grant
+  // can't actually use, so e.g. a warehouse-only user never sees
+  // "Invoices"/"Payments" only to hit a 403. The API's RolesGuard +
+  // PermissionsGuard are what actually enforce access — see both guards'
+  // own doc comments. `roles` is the coarse role-tier gate (unchanged
+  // from before RBAC permissions existed); `permission` is the
+  // fine-grained gate added on top, for a module an individual staff
+  // member's own permission grant doesn't cover even though their role
+  // tier could otherwise reach it.
+  const visibleNavItems = dashboardNavItems.filter(
+    (item) =>
+      (!item.roles || item.roles.includes(user.role)) &&
+      (!item.permission || hasPermission(user, item.permission)) &&
+      (!item.anyPermission || item.anyPermission.some((key) => hasPermission(user, key))),
+  );
 
   return (
     <>

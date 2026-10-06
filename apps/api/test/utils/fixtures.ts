@@ -1,4 +1,6 @@
 import { PrismaClient, UserRole } from '@prisma/client';
+import { legacyRolePermissions } from '@transatlantic/shared';
+import type { UserRole as SharedUserRole } from '@transatlantic/shared';
 import * as bcrypt from 'bcrypt';
 import { randomUUID } from 'crypto';
 
@@ -65,6 +67,16 @@ export async function createTestTenant(
       firstName: 'E2E',
       lastName: label,
       role,
+      // RBAC permissions (2026-10): these fixtures predate fine-grained
+      // permissions and were written to test ROLE-tier access (RolesGuard)
+      // — legacyRolePermissions(role) is exactly what the one-time
+      // production backfill assigns to an existing account of this role,
+      // so applying it here too keeps every "MANAGER/STAFF/FINANCE can do
+      // X" assertion meaningful under PermissionsGuard without rewriting
+      // this whole suite. A test that specifically needs to exercise a
+      // *new*, zero-permission staff member should create one directly
+      // rather than relying on this default.
+      permissions: legacyRolePermissions(role as unknown as SharedUserRole),
     },
   });
 
@@ -149,6 +161,8 @@ export async function createUserInTenant(
       firstName: 'E2E',
       lastName: label,
       role,
+      // See createTestTenant's own comment on legacyRolePermissions above.
+      permissions: legacyRolePermissions(role as unknown as SharedUserRole),
     },
   });
   return { id: user.id, email: user.email, password: TEST_PASSWORD };

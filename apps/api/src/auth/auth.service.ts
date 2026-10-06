@@ -128,6 +128,7 @@ export class AuthService {
     role: string;
     tenantId: string | null;
     customer: { id: string } | null;
+    permissions: string[];
   }): Promise<LoginResponseDto> {
     await this.prisma.user.update({
       where: { id: user.id },
@@ -142,6 +143,10 @@ export class AuthService {
       role: user.role as AuthenticatedUser['role'],
       tenantId: user.tenantId,
       customerId: user.customer?.id ?? null,
+      // RBAC permissions (2026-10): see AuthenticatedUser.permissions —
+      // re-read on every subsequent request by JwtStrategy regardless, but
+      // the token issued right here should reflect the same fresh value.
+      permissions: user.permissions,
     };
 
     const payload: JwtPayload = {
@@ -306,6 +311,7 @@ export class AuthService {
       role: user.role,
       tenantId: user.tenantId,
       customer: { id: customerId },
+      permissions: user.permissions,
     });
   }
 

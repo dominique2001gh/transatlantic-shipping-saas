@@ -5,6 +5,7 @@ import type { WebsiteLeadSummary } from '@transatlantic/shared';
 import { WebsiteLeadStatus, WebsiteLeadType } from '@transatlantic/shared';
 import { StatusBadge } from '@/components/dashboard/StatusBadge';
 import { Card } from '@/components/ui/Card';
+import { isForbidden } from '@/lib/api';
 import { formatDateTime, humanizeEnumValue } from '@/lib/format';
 import { listLeads, updateLeadStatus } from '@/lib/leads';
 
@@ -20,6 +21,7 @@ import { listLeads, updateLeadStatus } from '@/lib/leads';
 export default function LeadsPage() {
   const [leads, setLeads] = useState<WebsiteLeadSummary[] | null>(null);
   const [error, setError] = useState(false);
+  const [forbidden, setForbidden] = useState(false);
   const [statusFilter, setStatusFilter] = useState<WebsiteLeadStatus | ''>('');
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -29,8 +31,25 @@ export default function LeadsPage() {
     setError(false);
     listLeads(statusFilter ? { status: statusFilter } : undefined)
       .then(setLeads)
-      .catch(() => setError(true));
+      .catch((err) => {
+        if (isForbidden(err)) {
+          setForbidden(true);
+          return;
+        }
+        setError(true);
+      });
   }, [statusFilter]);
+
+  if (forbidden) {
+    return (
+      <div>
+        <h1 className="text-2xl font-semibold text-slate-900">Website Leads</h1>
+        <Card className="mt-6">
+          <p className="text-sm text-red-600">You don&apos;t have permission to view website leads.</p>
+        </Card>
+      </div>
+    );
+  }
 
   async function handleStatusChange(id: string, status: WebsiteLeadStatus) {
     setUpdatingId(id);

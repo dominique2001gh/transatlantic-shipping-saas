@@ -5,6 +5,7 @@ import { MANAGER_UP_ROLES, ManifestStatus, OPERATIONS_ROLES, ShipmentMode } from
 import type { Response } from 'express';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { RequireEntitlement } from '../common/decorators/require-entitlement.decorator';
+import { RequirePermission } from '../common/decorators/require-permission.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { requireTenantId } from '../common/tenant/tenant.util';
 import { AssignContainerDto } from './dto/assign-container.dto';
@@ -43,6 +44,7 @@ export class ManifestsController {
 
   @Get()
   @Roles(...OPERATIONS_ROLES)
+  @RequirePermission('manifests.view')
   findAll(
     @CurrentUser() user: AuthenticatedUser,
     @Query('status') status?: string,
@@ -58,6 +60,7 @@ export class ManifestsController {
 
   @Get(':id')
   @Roles(...OPERATIONS_ROLES)
+  @RequirePermission('manifests.view')
   findOne(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
     return this.manifestsService.findById(requireTenantId(user.tenantId), id);
   }
@@ -73,12 +76,14 @@ export class ManifestsController {
    */
   @Get(':id/print')
   @Roles(...OPERATIONS_ROLES)
+  @RequirePermission('manifests.view')
   getPrintDocument(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
     return this.manifestsService.getPrintDocument(requireTenantId(user.tenantId), id);
   }
 
   @Get(':id/pdf')
   @Roles(...OPERATIONS_ROLES)
+  @RequirePermission('manifests.view')
   async getPdf(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Res() res: Response) {
     const doc = await this.manifestsService.getPrintDocument(requireTenantId(user.tenantId), id);
     const pdf = renderManifestPdf(doc);
@@ -93,12 +98,14 @@ export class ManifestsController {
 
   @Post()
   @Roles(...OPERATIONS_ROLES)
+  @RequirePermission('manifests.manage')
   create(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateManifestDto) {
     return this.manifestsService.create(requireTenantId(user.tenantId), dto);
   }
 
   @Post(':id/containers/:containerId')
   @Roles(...OPERATIONS_ROLES)
+  @RequirePermission('manifests.manage')
   assignContainer(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id') manifestId: string,
@@ -110,6 +117,7 @@ export class ManifestsController {
 
   @Delete(':id/containers/:containerId')
   @Roles(...OPERATIONS_ROLES)
+  @RequirePermission('manifests.manage')
   unassignContainer(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id') manifestId: string,
@@ -121,6 +129,7 @@ export class ManifestsController {
 
   @Post(':id/items/:itemId')
   @Roles(...OPERATIONS_ROLES)
+  @RequirePermission('manifests.manage')
   assignItem(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id') manifestId: string,
@@ -132,6 +141,7 @@ export class ManifestsController {
 
   @Delete(':id/items/:itemId')
   @Roles(...OPERATIONS_ROLES)
+  @RequirePermission('manifests.manage')
   unassignItem(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id') manifestId: string,
@@ -155,6 +165,7 @@ export class ManifestsController {
 
   @Post(':id/arrive')
   @Roles(...OPERATIONS_ROLES)
+  @RequirePermission('manifests.manage')
   arrive(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
     return this.manifestsService.arrive(requireTenantId(user.tenantId), user.id, id);
   }

@@ -1,6 +1,6 @@
 import { UserRole } from '@prisma/client';
-import { STAFF_ROLES } from '@transatlantic/shared';
-import { IsEmail, IsIn, IsString, MinLength } from 'class-validator';
+import { PERMISSION_KEYS, STAFF_ROLES } from '@transatlantic/shared';
+import { ArrayUnique, IsArray, IsEmail, IsIn, IsOptional, IsString, MinLength } from 'class-validator';
 
 /**
  * Staff Invitations stage: canonical invite-staff request shape, used by
@@ -34,4 +34,20 @@ export class InviteStaffDto {
 
   @IsIn(STAFF_ROLES)
   role!: UserRole;
+
+  /**
+   * RBAC permissions (2026-10): optional fine-grained permissions to
+   * apply to the User created when this invitation is accepted. Omitted
+   * (or empty) means "no optional permissions" — a deliberate, legitimate
+   * state for a new post-RBAC staff member, not a bug (see
+   * User.permissions' own schema doc comment). StaffInvitationsService
+   * additionally rejects a non-owner inviter granting a permission they
+   * don't themselves hold, and rejects role: OWNER from any non-owner
+   * inviter — this DTO only validates that every key is real.
+   */
+  @IsOptional()
+  @IsArray()
+  @ArrayUnique()
+  @IsIn(PERMISSION_KEYS, { each: true })
+  permissions?: string[];
 }

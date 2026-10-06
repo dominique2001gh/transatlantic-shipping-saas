@@ -1,10 +1,11 @@
-import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Prisma, TenantInvitationStatus } from '@prisma/client';
+import { Prisma, TenantInvitationStatus, UserRole } from '@prisma/client';
 import type { AcceptInvitePreview, TenantInvitationSummary } from '@transatlantic/shared';
-import { STAFF_ROLES } from '@transatlantic/shared';
+import { PERMISSION_KEY_SET, STAFF_ROLES } from '@transatlantic/shared';
 import { AuthService } from '../auth/auth.service';
 import { resolveTenantWebAppUrl, type TenantForWebAppUrl } from '../common/tenant/tenant-web-app-url.util';
+import { writeTenantAuditLog } from '../common/tenant/tenant-audit.util';
 import { generateToken, hashToken } from '../common/token/token.util';
 import { staffInvitationEmail } from '../notifications/templates/platform-emails';
 import { resolvePlatformEmailSender } from '../notifications/providers/platform-email-sender.util';
@@ -54,7 +55,14 @@ export class StaffInvitationsService {
    * the exact same user-facing message the pre-check already returns in
    * the common, non-racing case.
    */
-  async invite(tenantId: string, invitedByUserId: string, invitedByName: string, dto: InviteStaffDto): Promise<TenantInvitationSummary> {
+  async invite(
+    tenantId: string,
+    invitedByUserId: string,
+    invitedByName: string,
+    dto: InviteStaffDto,
+    inviterRole: UserRole,
+    inviterPermissions: string[],
+  ): Promise<TenantInvitationSummary> {
     // Defense-in-depth beyond InviteStaffDto's own @IsIn(STAFF_ROLES) check
     // — never trust a single validation layer for something as
     // consequential as "what role can this invite create." PLATFORM_ADMIN
@@ -62,6 +70,29 @@ export class StaffInvitationsService {
     // be reachable through this staff-only invite flow.
     if (!(STAFF_ROLES as string[]).includes(dto.role)) {
       throw new BadRequestException('Invalid role for a staff invitation.');
+    }
+
+    const permissions = dto.permissions ?? [];
+
+    // RBAC permissions (2026-10): a non-owner inviter (e.g. an ADMIN-preset
+    // MANAGER with staff.invite) can never create another OWNER, and can
+    // never grant a permission they don't themselves currently hold — "you
+    // cannot delegate authority you don't have." OWNER inviters are exempt
+    // from both checks, same as every other owner-boundary check in this
+    // RBAC rollout.
+    if (inviterRole !== UserRole.OWNER) {
+      if (dto.role === UserRole.OWNER) {
+        throw new ForbiddenException('Only an OWNER can invite another OWNER.');
+      }
+      const notAuthorized = permissions.filter((p) => !inviterPermissions.includes(p));
+      if (notAuthorized.length > 0) {
+        throw new ForbiddenException(`You cannot grant permissions you do not have yourself: ${notAuthorized.join(', ')}`);
+      }
+    }
+
+    const invalid = permissions.filter((p) => !PERMISSION_KEY_SET.has(p));
+    if (invalid.length > 0) {
+      throw new BadRequestException(`Unknown permission key(s): ${invalid.join(', ')}`);
     }
 
     const email = dto.email.toLowerCase().trim();
@@ -89,6 +120,7 @@ export class StaffInvitationsService {
           firstName: dto.firstName.trim(),
           lastName: dto.lastName.trim(),
           role: dto.role,
+          permissions,
           tokenHash: hashToken(rawToken),
           invitedByUserId,
           expiresAt: new Date(Date.now() + INVITATION_TTL_DAYS * 24 * 60 * 60 * 1000),
@@ -100,6 +132,14 @@ export class StaffInvitationsService {
       }
       throw err;
     }
+
+    await writeTenantAuditLog(this.prisma, {
+      tenantId,
+      actorUserId: invitedByUserId,
+      targetUserId: null,
+      action: 'STAFF_INVITED',
+      metadata: { email: invitation.email, role: invitation.role, permissions },
+    });
 
     await this.sendInvitationEmail(invitation.email, tenant, invitedByName, rawToken, invitation.expiresAt);
 
@@ -191,23 +231,37 @@ export class StaffInvitationsService {
 
     const passwordHash = await AuthService.hashPassword(password);
     const now = new Date();
-    await this.prisma.$transaction([
-      this.prisma.user.create({
+    await this.prisma.$transaction(async (tx) => {
+      const createdUser = await tx.user.create({
         data: {
           tenantId: invitation.tenantId,
           email: invitation.email,
           firstName: invitation.firstName,
           lastName: invitation.lastName,
           role: invitation.role,
+          // RBAC permissions (2026-10): whatever the inviter granted at
+          // invite time — see StaffInvitationsService.invite's own
+          // owner-boundary/delegation checks for how that set was
+          // constrained before it ever reached this row.
+          permissions: invitation.permissions,
           passwordHash,
           isActive: true,
         },
-      }),
-      this.prisma.tenantInvitation.update({
+      });
+      await tx.tenantInvitation.update({
         where: { id: invitation.id },
         data: { status: TenantInvitationStatus.ACCEPTED, acceptedAt: now },
-      }),
-    ]);
+      });
+      // No human actor — this is the invitee's own self-service action,
+      // not something another staff member performed on their behalf.
+      await writeTenantAuditLog(tx, {
+        tenantId: invitation.tenantId,
+        actorUserId: null,
+        targetUserId: createdUser.id,
+        action: 'STAFF_INVITATION_ACCEPTED',
+        metadata: { email: invitation.email, role: invitation.role, permissions: invitation.permissions },
+      });
+    });
   }
 
   private async sendInvitationEmail(
@@ -246,6 +300,7 @@ export class StaffInvitationsService {
     status: TenantInvitationStatus;
     expiresAt: Date;
     createdAt: Date;
+    permissions: string[];
   }): TenantInvitationSummary {
     return {
       id: invitation.id,
@@ -256,6 +311,7 @@ export class StaffInvitationsService {
       status: invitation.status as TenantInvitationSummary['status'],
       expiresAt: invitation.expiresAt.toISOString(),
       createdAt: invitation.createdAt.toISOString(),
+      permissions: invitation.permissions,
     };
   }
 }

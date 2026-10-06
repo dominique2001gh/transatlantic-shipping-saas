@@ -4,6 +4,7 @@ import type { AuthenticatedUser } from '@transatlantic/shared';
 import { INVOICE_MANAGE_ROLES, PaymentStatus } from '@transatlantic/shared';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { RequireEntitlement } from '../common/decorators/require-entitlement.decorator';
+import { RequirePermission } from '../common/decorators/require-permission.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { requireTenantId } from '../common/tenant/tenant.util';
 import { PaymentsService } from './payments.service';
@@ -24,6 +25,7 @@ export class PaymentsController {
 
   @Get()
   @Roles(...VIEW_ROLES)
+  @RequirePermission('payments.view')
   findAll(
     @CurrentUser() user: AuthenticatedUser,
     @Query('invoiceId') invoiceId?: string,

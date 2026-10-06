@@ -5,20 +5,22 @@ import { useEffect, useMemo, useState } from 'react';
 import type { PaymentListItem } from '@transatlantic/shared';
 import { Badge } from '@/components/ui/Badge';
 import { Card } from '@/components/ui/Card';
-import { ApiError } from '@/lib/api';
+import { ApiError, isForbidden } from '@/lib/api';
 import { formatCurrency, formatDateTime, humanizeEnumValue, statusBadgeVariant } from '@/lib/format';
 import { listPayments } from '@/lib/payments';
 
 export default function PaymentsPage() {
   const [payments, setPayments] = useState<PaymentListItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [forbidden, setForbidden] = useState(false);
   const [search, setSearch] = useState('');
 
   useEffect(() => {
     listPayments()
       .then(setPayments)
       .catch((err) => {
-        if (err instanceof ApiError && err.statusCode === 403) {
+        if (isForbidden(err)) {
+          setForbidden(true);
           setError("You don't have permission to view payments.");
         } else {
           setError(err instanceof ApiError ? err.message : 'Failed to load payments.');
@@ -35,6 +37,17 @@ export default function PaymentsPage() {
         payment.invoiceNumber.toLowerCase().includes(term) || payment.customerName.toLowerCase().includes(term),
     );
   }, [payments, search]);
+
+  if (forbidden) {
+    return (
+      <div>
+        <h1 className="text-2xl font-semibold text-slate-900">Payments</h1>
+        <Card className="mt-6">
+          <p className="text-sm text-red-600">{error}</p>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div>

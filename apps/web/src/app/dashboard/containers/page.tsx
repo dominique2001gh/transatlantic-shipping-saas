@@ -8,7 +8,7 @@ import { StatusBadge } from '@/components/dashboard/StatusBadge';
 import { ContainerContentsList } from '@/components/warehouse/ContainerContentsList';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
-import { ApiError } from '@/lib/api';
+import { ApiError, isForbidden } from '@/lib/api';
 import { getStoredUser } from '@/lib/auth';
 import {
   closeContainerUnloading,
@@ -41,6 +41,7 @@ export default function ContainersPage() {
   const [statusFilter, setStatusFilter] = useState<(typeof STATUS_FILTERS)[number]>('ALL');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [forbidden, setForbidden] = useState(false);
   const [finalizing, setFinalizing] = useState(false);
   const [removingItemId, setRemovingItemId] = useState<string | null>(null);
   const [opening, setOpening] = useState(false);
@@ -54,7 +55,14 @@ export default function ContainersPage() {
   const reload = useCallback(() => {
     listContainers(statusFilter === 'ALL' ? undefined : { status: statusFilter })
       .then(setContainers)
-      .catch((err) => setError(err instanceof ApiError ? err.message : 'Failed to load containers.'));
+      .catch((err) => {
+        if (isForbidden(err)) {
+          setForbidden(true);
+          setError("You don't have permission to view containers.");
+          return;
+        }
+        setError(err instanceof ApiError ? err.message : 'Failed to load containers.');
+      });
   }, [statusFilter]);
 
   useEffect(() => {
@@ -124,6 +132,17 @@ export default function ContainersPage() {
     } finally {
       setClosing(false);
     }
+  }
+
+  if (forbidden) {
+    return (
+      <div>
+        <h1 className="text-2xl font-semibold text-slate-900">Containers</h1>
+        <Card className="mt-6">
+          <p className="text-sm text-red-600">{error}</p>
+        </Card>
+      </div>
+    );
   }
 
   return (

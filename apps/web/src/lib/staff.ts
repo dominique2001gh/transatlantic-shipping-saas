@@ -15,7 +15,13 @@ export function listInvitations(): Promise<TenantInvitationSummary[]> {
   return authedFetch('/users/invitations');
 }
 
-export function inviteStaff(input: { firstName: string; lastName: string; email: string; role: UserRole }): Promise<TenantInvitationSummary> {
+export function inviteStaff(input: {
+  firstName: string;
+  lastName: string;
+  email: string;
+  role: UserRole;
+  permissions?: string[];
+}): Promise<TenantInvitationSummary> {
   return authedFetch('/users/invite', { method: 'POST', body: JSON.stringify(input) });
 }
 
@@ -31,6 +37,17 @@ export function updateStaffRole(id: string, role: UserRole): Promise<StaffMember
 /** RBAC V1, OWNER only — see UsersController.updateStatus. May reject with a 403 if deactivating would leave the tenant with no active OWNER. */
 export function updateStaffStatus(id: string, isActive: boolean): Promise<StaffMemberSummary> {
   return authedFetch(`/users/${id}/status`, { method: 'PATCH', body: JSON.stringify({ isActive }) });
+}
+
+/**
+ * RBAC permissions (2026-10): gated by the `staff.permissions` permission
+ * (OWNER always passes) — see UsersService.updatePermissions for the full
+ * set of backend guards (target can't be OWNER, caller can't target
+ * themselves unless OWNER, caller can't grant what they don't themselves
+ * hold). Sends the complete desired permission set, not a delta.
+ */
+export function updateStaffPermissions(id: string, permissions: string[]): Promise<StaffMemberSummary> {
+  return authedFetch(`/users/${id}/permissions`, { method: 'PATCH', body: JSON.stringify({ permissions }) });
 }
 
 /** Public — no auth token, matching /auth/accept-invite/:token itself being @Public(). */

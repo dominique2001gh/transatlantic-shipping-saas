@@ -4,6 +4,7 @@ import type { AuthenticatedUser } from '@transatlantic/shared';
 import { CUSTOMER_VIEW_ROLES, OPERATIONS_ROLES } from '@transatlantic/shared';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { RequireEntitlement } from '../common/decorators/require-entitlement.decorator';
+import { RequirePermission } from '../common/decorators/require-permission.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { requireTenantId } from '../common/tenant/tenant.util';
 import { CustomersService } from './customers.service';
@@ -28,24 +29,28 @@ export class CustomersController {
 
   @Get()
   @Roles(...VIEW_ROLES)
+  @RequirePermission('customers.view')
   findAll(@CurrentUser() user: AuthenticatedUser, @Query('search') search?: string) {
     return this.customersService.findAll(requireTenantId(user.tenantId), search);
   }
 
   @Get(':id')
   @Roles(...VIEW_ROLES)
+  @RequirePermission('customers.view')
   findOne(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
     return this.customersService.findById(requireTenantId(user.tenantId), id);
   }
 
   @Post()
   @Roles(...MANAGE_ROLES)
+  @RequirePermission('customers.manage')
   create(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateCustomerDto) {
     return this.customersService.create(requireTenantId(user.tenantId), dto);
   }
 
   @Patch(':id')
   @Roles(...MANAGE_ROLES)
+  @RequirePermission('customers.manage')
   update(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id') id: string,

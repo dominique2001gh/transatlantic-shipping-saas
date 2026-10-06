@@ -4,6 +4,7 @@ import type { AuthenticatedUser } from '@transatlantic/shared';
 import { NOTIFICATION_MANAGE_ROLES } from '@transatlantic/shared';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { RequireEntitlement } from '../common/decorators/require-entitlement.decorator';
+import { RequirePermission } from '../common/decorators/require-permission.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { requireTenantId } from '../common/tenant/tenant.util';
 import { DisruptionsService } from './disruptions.service';
@@ -11,9 +12,10 @@ import { CreateDisruptionDto } from './dto/create-disruption.dto';
 
 const MANAGE_ROLES = NOTIFICATION_MANAGE_ROLES;
 
-/** Stage 3H: staff-composed bulk container/manifest disruption messaging — see DisruptionsService's own doc comment. */
+/** Stage 3H: staff-composed bulk container/manifest disruption messaging — see DisruptionsService's own doc comment. Same role tier as NotificationsController, so it shares that controller's `messages.manage` permission mapping too. */
 @Controller('disruptions')
 @RequireEntitlement(EntitlementFeature.OPERATIONS_SOFTWARE)
+@RequirePermission('messages.manage')
 export class DisruptionsController {
   constructor(private readonly disruptionsService: DisruptionsService) {}
 
