@@ -110,12 +110,31 @@ export function demoRequestConfirmationEmail(params: { contactName: string; comp
  * Kept here so that future work has one place to read from instead of a
  * new hardcoded string.
  */
-export function passwordResetEmail(params: { firstName: string; resetUrl: string; expiresInMinutes: number }): PlatformEmail {
+/**
+ * `organizationName` is only passed when the requesting email matches more
+ * than one active account (see AuthService.requestPasswordReset) — a
+ * person with a single account keeps today's exact generic wording
+ * unchanged. When present, it's threaded into both the subject and a
+ * dedicated body line so two reset emails arriving in the same inbox at
+ * the same time are never visually identical — the only thing that used
+ * to distinguish them was the greeting's first name.
+ */
+export function passwordResetEmail(params: {
+  firstName: string;
+  resetUrl: string;
+  expiresInMinutes: number;
+  organizationName?: string;
+}): PlatformEmail {
   return {
-    subject: `Reset your AnanseLogix password`,
+    subject: params.organizationName
+      ? `Reset your AnanseLogix password for ${params.organizationName}`
+      : `Reset your AnanseLogix password`,
     body: [
       `Hi ${params.firstName},`,
       '',
+      ...(params.organizationName
+        ? [`This reset link is for your ${params.organizationName} account specifically.`, '']
+        : []),
       `We received a request to reset your password. This link expires in ${params.expiresInMinutes} minutes.`,
       `Reset your password: ${params.resetUrl}`,
       '',

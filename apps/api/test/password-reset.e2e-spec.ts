@@ -86,6 +86,11 @@ describe('Password recovery: forgot/reset password (e2e)', () => {
     expect(res.body).toEqual({ message: "If an account exists for that email, we've sent password reset instructions." });
     expect(sent).toHaveLength(1);
     expect(sent[0].to).toBe(tenantA.user.email);
+    // Duplicate-email fix: a single-account email keeps the exact
+    // unlabeled subject/body it always had — no regression for the
+    // overwhelmingly common case.
+    expect(sent[0].subject).toBe('Reset your AnanseLogix password');
+    expect(sent[0].body).not.toContain('specifically');
   });
 
   it('does not leak account existence for an unknown email — identical response, no email sent', async () => {
@@ -278,6 +283,14 @@ describe('Password recovery: forgot/reset password (e2e)', () => {
 
     await request(app.getHttpServer()).post('/auth/forgot-password').send({ email: sharedEmail }).expect(200);
     expect(sent).toHaveLength(2); // one token/email per matching account, not one shared token
+
+    // Duplicate-email fix: the two emails must be distinguishable from
+    // each other (previously identical subject/body apart from first
+    // name) — each is now labeled with its own tenant's name, and the
+    // two labels must differ from each other.
+    expect(sent[0].subject).not.toBe('Reset your AnanseLogix password');
+    expect(sent[1].subject).not.toBe('Reset your AnanseLogix password');
+    expect(sent[0].subject).not.toBe(sent[1].subject);
 
     const tokenForA = extractToken(sent[0]); // whichever account's token this is, resetting it must never touch the other
     const newPasswordForA = 'OnlyAccountAChanges1!';

@@ -55,11 +55,9 @@ export class AuthService {
     // email is unique per tenant, not globally (Stage 2C: the same person
     // may hold independent customer-portal accounts at more than one
     // tenant with the same email). The login form only collects
-    // email+password, so every account with this email is a candidate —
-    // whichever one's password matches (and whose tenant, if any, is
-    // active) is the account that gets logged into. In the overwhelmingly
-    // common case (one account per email) this is exactly one candidate,
-    // so behavior is unchanged from before.
+    // email+password, so every account with this email is a candidate.
+    // In the overwhelmingly common case (one account per email) this is
+    // exactly one candidate, so behavior is unchanged from before.
     const candidates = await this.prisma.user.findMany({
       where: { email: normalizedEmail },
       include: { customer: { select: { id: true } } },
@@ -67,11 +65,20 @@ export class AuthService {
 
     let tenantInactiveMatch: (typeof candidates)[number] | null = null;
 
+    // Duplicate-email-across-tenants fix: collect EVERY candidate whose
+    // password matches (not just the first one found) before deciding
+    // what to do. Login must never silently pick an arbitrary tenant when
+    // more than one of a person's own accounts shares both the submitted
+    // email and password — that previously resolved deterministically to
+    // whichever row came back first from this query, which is not a
+    // meaningful "intent" signal and caused a real incident (Gold
+    // Coast/Tatanic, 2026-10-07).
+    const passwordMatches: typeof candidates = [];
     for (const user of candidates) {
       if (!user.isActive) continue;
 
-      const passwordMatches = await bcrypt.compare(password, user.passwordHash);
-      if (!passwordMatches) continue;
+      const matches = await bcrypt.compare(password, user.passwordHash);
+      if (!matches) continue;
 
       if (user.tenantId) {
         const tenant = await this.prisma.tenant.findUnique({ where: { id: user.tenantId } });
@@ -81,13 +88,36 @@ export class AuthService {
         }
       }
 
+      passwordMatches.push(user);
+    }
+
+    if (passwordMatches.length > 1) {
+      // Generic, tenant-agnostic: fires for ANY current or future tenant
+      // pair that ends up in this state, never a specific tenant name.
+      // Deliberately refuses to guess rather than picking one — unlike
+      // adding a client-supplied tenantId to disambiguate, which would
+      // reintroduce exactly the kind of browser-trusted tenant selection
+      // tenant-isolation guards elsewhere in this app are built to reject
+      // (see resolveCustomerEntryPoint's/AnanseLogixLoginPage's own doc
+      // comments). Resolution is the same operational fix used for the
+      // original incident: change the password on one of the colliding
+      // accounts so only one matches.
+      this.logger.warn(
+        `Login blocked: ${passwordMatches.length} accounts across different tenants matched the same email+password (user ids: ${passwordMatches.map((u) => u.id).join(', ')})`,
+      );
+      throw new UnauthorizedException(
+        'This email is linked to more than one account in different organizations, so we cannot safely tell which one you mean. Please contact support to resolve this before signing in.',
+      );
+    }
+
+    const user = passwordMatches[0];
+    if (user) {
       if ((STAFF_ROLES as string[]).includes(user.role)) {
         return {
           mfaRequired: true,
           mfaToken: await this.mfaStageTokenService.issue(user.id, 'mfa_challenge'),
         };
       }
-
       return this.buildLoginResponse(user);
     }
 
@@ -448,8 +478,17 @@ export class AuthService {
     const normalizedEmail = email.toLowerCase().trim();
     const users = await this.prisma.user.findMany({
       where: { email: normalizedEmail, isActive: true },
-      include: { tenant: { select: { slug: true, customDomain: true } } },
+      include: { tenant: { select: { slug: true, customDomain: true, legalName: true, name: true } } },
     });
+
+    // Duplicate-email-across-tenants fix: a single-account email keeps
+    // today's exact generic wording (organizationName stays undefined
+    // below). Only when this email resolves to more than one active
+    // account do the resulting emails get labeled with each account's
+    // organization name, so two reset emails landing in the same inbox
+    // at the same moment are never visually identical — see
+    // passwordResetEmail's own doc comment.
+    const isAmbiguous = users.length > 1;
 
     for (const user of users) {
       try {
@@ -481,6 +520,11 @@ export class AuthService {
           firstName: user.firstName,
           resetUrl: `${webAppUrl.replace(/\/$/, '')}/reset-password?token=${rawToken}`,
           expiresInMinutes: PASSWORD_RESET_TTL_MINUTES,
+          organizationName: isAmbiguous
+            ? user.tenant
+              ? user.tenant.legalName ?? user.tenant.name
+              : 'Platform Administration'
+            : undefined,
         });
         await this.emailProvider.send({
           to: user.email,
