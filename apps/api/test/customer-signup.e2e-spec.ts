@@ -7,19 +7,38 @@ import { createTestApp } from './utils/test-app';
 /**
  * Customer Self-Service Pre-Registration: POST /auth/customer-signup.
  *
- * Without a `tenantSlug` in the request body, this endpoint resolves to the
- * real "transatlantic" tenant — unchanged default behavior, still true
- * today for every existing caller (Trans Atlantic's own /register reached
- * directly). See AuthService.customerSignup's own doc comment for the full
+ * Without a `tenantSlug` in the request body, this endpoint resolves to
+ * whichever tenant LEGACY_CUSTOM_DOMAIN_TENANT_SLUG names (TRANS_ATLANTIC_
+ * TENANT_SLUG cleanup: no longer a second hardcoded literal — the same
+ * config-driven single source of truth every other legacy-grandfather
+ * special case in auth.service.ts already reads). Set here to
+ * "transatlantic" — matching real production exactly — before any
+ * `createTestApp()` call in this file compiles the module (dotenv never
+ * overwrites an already-set process.env value, so this is what actually
+ * takes effect; see staff-invitations.e2e-spec.ts's own comment for the
+ * identical pattern). Local dev's own .env deliberately leaves this unset
+ * (see .env.example) so that convenience is untouched; this file overrides
+ * it for its own test run only and restores it afterward.
+ *
+ * See AuthService.customerSignup's own doc comment for the full
  * multi-tenant resolution rules now layered on top of that default; the
  * "Customer signup: multi-tenant tenantSlug resolution" describe block
- * below covers the `tenantSlug` path specifically. Since e2e fixtures never
- * touch the real seeded "transatlantic" tenant (see fixtures.ts's own
- * doc comment), this suite drives the default-path endpoint against
- * whatever tenant actually has that slug in the target database — local
- * dev's seeded tenant — and cleans up every User/Customer row it creates
- * itself afterward rather than deleting the tenant.
+ * below covers the `tenantSlug` path specifically, and
+ * customer-signup-legacy-slug-fallback.e2e-spec.ts covers the fallback's
+ * own set/unset behavior in isolation. Since e2e fixtures never touch the
+ * real seeded "transatlantic" tenant (see fixtures.ts's own doc comment),
+ * this suite drives the default-path endpoint against whatever tenant
+ * actually has that slug in the target database — local dev's seeded
+ * tenant — and cleans up every User/Customer row it creates itself
+ * afterward rather than deleting the tenant.
  */
+const ORIGINAL_LEGACY_SLUG = process.env.LEGACY_CUSTOM_DOMAIN_TENANT_SLUG;
+process.env.LEGACY_CUSTOM_DOMAIN_TENANT_SLUG = 'transatlantic';
+
+afterAll(() => {
+  process.env.LEGACY_CUSTOM_DOMAIN_TENANT_SLUG = ORIGINAL_LEGACY_SLUG;
+});
+
 describe('Customer signup (Stage 2, e2e)', () => {
   let app: INestApplication;
   const prisma = new PrismaClient();

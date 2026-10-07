@@ -20,17 +20,6 @@ import { CustomerSignupDto } from './dto/customer-signup.dto';
 /** How long a forgot-password link stays valid — short by design; see AuthService.requestPasswordReset's own doc comment. */
 const PASSWORD_RESET_TTL_MINUTES = 30;
 
-/**
- * customerSignup's own default-tenant fallback when no `tenantSlug` is
- * supplied (its own doc comment covers why this is intentionally not a
- * client-supplied value). resolveCustomerEntryPoint below no longer uses
- * this constant — it now reads the config-driven
- * LEGACY_CUSTOM_DOMAIN_TENANT_SLUG via isSharedAnanseLogixDomain instead,
- * the same check every other tenant-domain resolver in this codebase
- * already uses, so there's only ever one place that knows the legacy
- * slug's *source of truth* (env var, not a second hardcoded literal).
- */
-const TRANS_ATLANTIC_TENANT_SLUG = 'transatlantic';
 
 @Injectable()
 export class AuthService {
@@ -207,17 +196,24 @@ export class AuthService {
    *
    * When `dto.tenantSlug` is omitted — every existing caller of this
    * endpoint today, e.g. Trans Atlantic's own /register reached directly at
-   * talogisticssolutions.com/register — resolution falls back to
-   * TRANS_ATLANTIC_TENANT_SLUG exactly as before this change. Zero behavior
-   * change for that path.
+   * talogisticssolutions.com/register — resolution falls back to the
+   * config-driven LEGACY_CUSTOM_DOMAIN_TENANT_SLUG, the same single source
+   * of truth every other legacy-grandfather special case in this codebase
+   * already reads (see tenant-web-app-url.util.ts and
+   * resolveCustomerEntryPoint below) — not a second hardcoded literal. Zero
+   * behavior change for that path as long as that var stays set to
+   * "transatlantic" in production, exactly as it already is today. If it
+   * were ever unset, signup-with-no-slug fails with the same
+   * BadRequestException below rather than guessing a tenant — correct,
+   * since no other tenant is ever reached without an explicit slug anyway.
    */
   async customerSignup(dto: CustomerSignupDto): Promise<LoginResponseDto> {
     const normalizedEmail = dto.email.toLowerCase().trim();
 
-    const targetSlug = dto.tenantSlug?.trim() || TRANS_ATLANTIC_TENANT_SLUG;
-    const tenant = await this.prisma.tenant.findFirst({
-      where: { slug: targetSlug, isActive: true },
-    });
+    const targetSlug = dto.tenantSlug?.trim() || this.configService.get<string>('LEGACY_CUSTOM_DOMAIN_TENANT_SLUG');
+    const tenant = targetSlug
+      ? await this.prisma.tenant.findFirst({ where: { slug: targetSlug, isActive: true } })
+      : null;
     if (!tenant) {
       throw new BadRequestException('Customer sign-up is not available right now.');
     }
