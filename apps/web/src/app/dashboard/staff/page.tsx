@@ -2,7 +2,7 @@
 
 import { Fragment, useEffect, useRef, useState, type FormEvent } from 'react';
 import { PERMISSION_KEYS, PERMISSION_PRESET_OPTIONS, STAFF_ROLES, UserRole, hasPermission } from '@transatlantic/shared';
-import type { PermissionKey, StaffMemberSummary, TenantInvitationSummary } from '@transatlantic/shared';
+import type { PermissionKey, RemovedStaffMemberSummary, StaffMemberSummary, TenantInvitationSummary } from '@transatlantic/shared';
 import { SelectInput, TextInput } from '@/components/forms/FormField';
 import { PermissionsPicker } from '@/components/staff/PermissionsPicker';
 import { Badge } from '@/components/ui/Badge';
@@ -13,8 +13,12 @@ import { getStoredUser } from '@/lib/auth';
 import {
   inviteStaff,
   listInvitations,
+  listRemovedStaff,
   listStaff,
+  removeStaffMember,
   resendInvitation,
+  revokeInvitation,
+  triggerStaffPasswordReset,
   updateStaffPermissions,
   updateStaffRole,
   updateStaffStatus,
@@ -59,17 +63,30 @@ export default function StaffPage() {
 
   const [staff, setStaff] = useState<StaffMemberSummary[] | null>(null);
   const [invitations, setInvitations] = useState<TenantInvitationSummary[] | null>(null);
+  const [removedStaff, setRemovedStaff] = useState<RemovedStaffMemberSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [inviteError, setInviteError] = useState<string | null>(null);
   const [inviteSuccess, setInviteSuccess] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [resendingId, setResendingId] = useState<string | null>(null);
+  const [revokingId, setRevokingId] = useState<string | null>(null);
+  const [removingId, setRemovingId] = useState<string | null>(null);
+  const [resettingPasswordId, setResettingPasswordId] = useState<string | null>(null);
+  const [passwordResetSentId, setPasswordResetSentId] = useState<string | null>(null);
   const [rowError, setRowError] = useState<Record<string, string>>({});
   const [busyRowId, setBusyRowId] = useState<string | null>(null);
 
   // Invite form: role and permissions are controlled (a preset choice
   // updates both at once); name/email stay plain uncontrolled fields read
-  // via FormData, same as before.
+  // via FormData, same as before. `inviteDefaults` + `inviteFormKey` are
+  // the one addition: Reinvite (on a removed row) needs to prefill
+  // name/email without converting these to controlled inputs — bumping
+  // the key remounts the <form> with fresh `defaultValue`s instead. This
+  // is deliberately independent of handleInvite's own currentTarget-
+  // capture-before-await fix below (see staff-invite-form-reset.test.ts) —
+  // that fix stays untouched.
+  const [inviteDefaults, setInviteDefaults] = useState({ firstName: '', lastName: '', email: '' });
+  const [inviteFormKey, setInviteFormKey] = useState(0);
   const [inviteRole, setInviteRole] = useState<UserRole>(UserRole.STAFF);
   const [invitePermissions, setInvitePermissions] = useState<PermissionKey[]>([]);
 
@@ -92,6 +109,13 @@ export default function StaffPage() {
       listInvitations()
         .then(setInvitations)
         .catch((err) => setError(err instanceof ApiError ? err.message : 'Failed to load invitations.'));
+    }
+    // Owner-managed staff administration (2026-10): GET /users/staff/removed
+    // is gated server-side by staff.manage, same as the Remove action itself.
+    if (canManageRoleStatus) {
+      listRemovedStaff()
+        .then(setRemovedStaff)
+        .catch((err) => setError(err instanceof ApiError ? err.message : 'Failed to load removed staff.'));
     }
   }
 
@@ -129,6 +153,7 @@ export default function StaffPage() {
       setInviteSuccess(`Invitation sent to ${email}.`);
       setInviteError(null);
       formElement.reset();
+      setInviteDefaults({ firstName: '', lastName: '', email: '' });
       setInviteRole(UserRole.STAFF);
       setInvitePermissions([]);
       refresh();
@@ -141,6 +166,28 @@ export default function StaffPage() {
     }
   }
 
+  /**
+   * Owner-managed staff administration (2026-10): prefills the Invite
+   * form from a removed row's last known name/role/email — the row's
+   * email is preserved (never mangled), so there's no need to make the
+   * owner retype it. Bumping `inviteFormKey` remounts the (uncontrolled)
+   * form with these as its new `defaultValue`s, since name/email aren't
+   * controlled inputs (see this file's own note on why, just above).
+   * Still a normal `invite()` call once submitted: it creates a
+   * brand-new User row with a new id, never a restore of the old one.
+   * Permissions are NOT prefilled — RBAC permissions are a fresh,
+   * deliberate choice each time, the same reason this whole feature
+   * exists for Kingsley-style pre-RBAC accounts.
+   */
+  function handleReinvite(member: RemovedStaffMemberSummary) {
+    setInviteDefaults({ firstName: member.firstName, lastName: member.lastName, email: member.email });
+    setInviteFormKey((k) => k + 1);
+    setInviteRole(member.role === UserRole.OWNER ? UserRole.STAFF : member.role);
+    setInvitePermissions([]);
+    setInviteError(null);
+    setInviteSuccess(null);
+  }
+
   async function handleResend(id: string) {
     setResendingId(id);
     setInviteError(null);
@@ -151,6 +198,20 @@ export default function StaffPage() {
       setInviteError(err instanceof ApiError ? err.message : 'Failed to resend invitation.');
     } finally {
       setResendingId(null);
+    }
+  }
+
+  /** Owner-managed staff administration (2026-10) — permanently cancels a still-pending invitation. */
+  async function handleRevoke(id: string) {
+    setRevokingId(id);
+    setInviteError(null);
+    try {
+      await revokeInvitation(id);
+      refresh();
+    } catch (err) {
+      setInviteError(err instanceof ApiError ? err.message : 'Failed to cancel invitation.');
+    } finally {
+      setRevokingId(null);
     }
   }
 
@@ -177,6 +238,35 @@ export default function StaffPage() {
       setRowError((prev) => ({ ...prev, [memberId]: err instanceof ApiError ? err.message : 'Failed to update status.' }));
     } finally {
       setBusyRowId(null);
+    }
+  }
+
+  /** Owner-managed staff administration (2026-10) — one-way; see UsersService.removeStaffMember's own doc comment. */
+  async function handleRemove(memberId: string) {
+    setRemovingId(memberId);
+    setRowError((prev) => ({ ...prev, [memberId]: '' }));
+    try {
+      await removeStaffMember(memberId);
+      refresh();
+    } catch (err) {
+      setRowError((prev) => ({ ...prev, [memberId]: err instanceof ApiError ? err.message : 'Failed to remove staff member.' }));
+    } finally {
+      setRemovingId(null);
+    }
+  }
+
+  /** Owner-managed staff administration (2026-10) — the caller never sees or sets the new password. */
+  async function handleSendPasswordReset(memberId: string) {
+    setResettingPasswordId(memberId);
+    setPasswordResetSentId(null);
+    setRowError((prev) => ({ ...prev, [memberId]: '' }));
+    try {
+      await triggerStaffPasswordReset(memberId);
+      setPasswordResetSentId(memberId);
+    } catch (err) {
+      setRowError((prev) => ({ ...prev, [memberId]: err instanceof ApiError ? err.message : 'Failed to send password reset.' }));
+    } finally {
+      setResettingPasswordId(null);
     }
   }
 
@@ -212,16 +302,16 @@ export default function StaffPage() {
       {canInvite && (
         <Card className="mt-6 p-6">
           <h2 className="text-sm font-semibold text-slate-900">Invite an employee</h2>
-          <form onSubmit={handleInvite} className="mt-4 flex flex-col gap-4">
+          <form key={inviteFormKey} onSubmit={handleInvite} className="mt-4 flex flex-col gap-4">
             <div className="flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-end">
               <div className="w-full sm:w-40">
-                <TextInput label="First name" id="firstName" name="firstName" required />
+                <TextInput label="First name" id="firstName" name="firstName" defaultValue={inviteDefaults.firstName} required />
               </div>
               <div className="w-full sm:w-40">
-                <TextInput label="Last name" id="lastName" name="lastName" required />
+                <TextInput label="Last name" id="lastName" name="lastName" defaultValue={inviteDefaults.lastName} required />
               </div>
               <div className="flex-1 sm:min-w-[14rem]">
-                <TextInput label="Email" id="email" name="email" type="email" required />
+                <TextInput label="Email" id="email" name="email" type="email" defaultValue={inviteDefaults.email} required />
               </div>
               <div className="w-48">
                 <SelectInput
@@ -303,14 +393,24 @@ export default function StaffPage() {
                   <td className="px-4 py-3 text-slate-500">{new Date(inv.expiresAt).toLocaleDateString()}</td>
                   <td className="px-4 py-3">
                     {inv.status === 'PENDING' && (
-                      <button
-                        type="button"
-                        onClick={() => handleResend(inv.id)}
-                        disabled={resendingId === inv.id}
-                        className="text-xs font-semibold text-primary-700 hover:text-primary-800 disabled:opacity-50"
-                      >
-                        {resendingId === inv.id ? 'Resending…' : 'Resend'}
-                      </button>
+                      <div className="flex items-center gap-3">
+                        <button
+                          type="button"
+                          onClick={() => handleResend(inv.id)}
+                          disabled={resendingId === inv.id || revokingId === inv.id}
+                          className="text-xs font-semibold text-primary-700 hover:text-primary-800 disabled:opacity-50"
+                        >
+                          {resendingId === inv.id ? 'Resending…' : 'Resend'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleRevoke(inv.id)}
+                          disabled={resendingId === inv.id || revokingId === inv.id}
+                          className="text-xs font-semibold text-red-600 hover:text-red-700 disabled:opacity-50"
+                        >
+                          {revokingId === inv.id ? 'Cancelling…' : 'Cancel'}
+                        </button>
+                      </div>
                     )}
                   </td>
                 </tr>
@@ -397,14 +497,36 @@ export default function StaffPage() {
                       {(canManageRoleStatus || canManagePermissions) && (
                         <td className="px-4 py-3">
                           {canEditRoleOrStatus && (
-                            <button
-                              type="button"
-                              onClick={() => handleStatusToggle(member.id, !member.isActive)}
-                              disabled={busyRowId === member.id}
-                              className="text-xs font-semibold text-primary-700 hover:text-primary-800 disabled:opacity-50"
-                            >
-                              {member.isActive ? 'Deactivate' : 'Reactivate'}
-                            </button>
+                            <div className="flex flex-wrap items-center gap-3">
+                              <button
+                                type="button"
+                                onClick={() => handleStatusToggle(member.id, !member.isActive)}
+                                disabled={busyRowId === member.id}
+                                className="text-xs font-semibold text-primary-700 hover:text-primary-800 disabled:opacity-50"
+                              >
+                                {member.isActive ? 'Deactivate' : 'Reactivate'}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleSendPasswordReset(member.id)}
+                                disabled={resettingPasswordId === member.id || !member.isActive}
+                                className="text-xs font-semibold text-primary-700 hover:text-primary-800 disabled:opacity-50"
+                                title={member.isActive ? undefined : 'Reactivate this account before sending a password reset'}
+                              >
+                                {resettingPasswordId === member.id ? 'Sending…' : 'Send reset email'}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleRemove(member.id)}
+                                disabled={removingId === member.id}
+                                className="text-xs font-semibold text-red-600 hover:text-red-700 disabled:opacity-50"
+                              >
+                                {removingId === member.id ? 'Removing…' : 'Remove'}
+                              </button>
+                            </div>
+                          )}
+                          {passwordResetSentId === member.id && (
+                            <p className="mt-1 text-xs text-emerald-600">Reset email sent.</p>
                           )}
                           {rowError[member.id] && <p className="mt-1 text-xs text-red-600">{rowError[member.id]}</p>}
                         </td>
@@ -442,6 +564,49 @@ export default function StaffPage() {
           </table>
         )}
       </Card>
+
+      {canManageRoleStatus && removedStaff && removedStaff.length > 0 && (
+        <Card className="mt-6 overflow-x-auto p-0">
+          <div className="border-b border-slate-200 px-4 py-3 text-sm font-semibold text-slate-900">Removed staff</div>
+          <p className="px-4 pt-3 text-sm text-slate-500">
+            Former staff members. Their activity history is preserved. Reinviting creates a brand-new account.
+          </p>
+          <table className="mt-2 w-full text-left text-sm">
+            <thead className="border-b border-slate-200 bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+              <tr>
+                <th className="px-4 py-3 font-medium">Name</th>
+                <th className="px-4 py-3 font-medium">Email</th>
+                <th className="px-4 py-3 font-medium">Last role</th>
+                <th className="px-4 py-3 font-medium">Removed</th>
+                {canInvite && <th className="px-4 py-3" />}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {removedStaff.map((member) => (
+                <tr key={member.id}>
+                  <td className="px-4 py-3 font-medium text-slate-900">
+                    {member.firstName} {member.lastName}
+                  </td>
+                  <td className="px-4 py-3 text-slate-500">{member.email}</td>
+                  <td className="px-4 py-3 text-slate-500">{member.role.replaceAll('_', ' ')}</td>
+                  <td className="px-4 py-3 text-slate-500">{new Date(member.removedAt).toLocaleDateString()}</td>
+                  {canInvite && (
+                    <td className="px-4 py-3">
+                      <button
+                        type="button"
+                        onClick={() => handleReinvite(member)}
+                        className="text-xs font-semibold text-primary-700 hover:text-primary-800"
+                      >
+                        Reinvite
+                      </button>
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Card>
+      )}
     </div>
   );
 }

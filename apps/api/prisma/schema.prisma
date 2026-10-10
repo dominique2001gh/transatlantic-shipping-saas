@@ -755,6 +755,18 @@ model User {
   /// grant, not a migration artifact.
   permissions  String[] @default([])
   isActive     Boolean   @default(true)
+  /// Owner-managed staff administration (2026-10): set when an OWNER
+  /// (or a staff.manage-holding delegate) "removes" this staff member —
+  /// distinct from `isActive: false` (temporary, reversible, same email).
+  /// A removed row is permanent: it keeps its id, email, and every FK'd
+  /// operational/audit record forever (never deleted), but its `email`
+  /// no longer occupies the (tenantId, email) slot — see the partial
+  /// unique index this same migration adds — so the real address becomes
+  /// free for a brand-new invitation (a fresh onboarding, a new User row
+  /// with a new id, never a restore of this one). Null means "never
+  /// removed" and is excluded from UsersService.findStaffForTenant by
+  /// default.
+  removedAt    DateTime?
   lastLoginAt  DateTime?
   /// Set on every successful password change/reset (self-service change,
   /// or the forgot-password flow) — never on account creation itself, so
@@ -811,8 +823,20 @@ model User {
   tenantAuditLogsPerformed      TenantAuditLog[]       @relation("TenantAuditLogActor")
   tenantAuditLogsAbout          TenantAuditLog[]       @relation("TenantAuditLogTarget")
 
-  @@unique([tenantId, email])
+  // Owner-managed staff administration (2026-10): the previous
+  // unconditional @@unique([tenantId, email]) is replaced by a PARTIAL
+  // unique index scoped to non-removed rows only (WHERE "removedAt" IS
+  // NULL) — see migration 20261009000000_staff_removal_and_partial_
+  // unique_email, which is this constraint's sole source of truth
+  // (Prisma's schema.prisma has no declarative WHERE-clause unique
+  // syntax, exactly like the TenantInvitation PENDING-only partial index
+  // added in migration 20260915000000). A tenant may now legitimately
+  // hold more than one User row for the same email over time (one
+  // removed, one active), the same way TenantInvitation already allows
+  // more than one row per email over time (one revoked/expired, one
+  // pending).
   @@index([tenantId])
+  @@index([tenantId, email])
   @@map("users")
 }
 

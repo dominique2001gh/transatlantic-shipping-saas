@@ -1656,6 +1656,22 @@ export interface TenantInvitationSummary {
   permissions: string[];
 }
 
+/**
+ * Owner-managed staff administration (2026-10): GET /users/staff/removed —
+ * matches UsersService.findRemovedStaffForTenant's select shape exactly.
+ * A former staff member whose email is now free for a fresh invitation
+ * (see User.removedAt's own schema doc comment); never includes a
+ * password, hash, or anything beyond what's needed to drive "Reinvite."
+ */
+export interface RemovedStaffMemberSummary {
+  id: string;
+  email: string;
+  firstName: string;
+  lastName: string;
+  role: UserRole;
+  removedAt: string;
+}
+
 export interface CreateTenantInvitationRequest {
   firstName: string;
   lastName: string;

@@ -13,7 +13,11 @@ export type TenantAuditAction =
   | 'STAFF_DEACTIVATED'
   | 'STAFF_REACTIVATED'
   | 'PERMISSIONS_CHANGED'
-  | 'PERMISSIONS_MIGRATED_LEGACY';
+  | 'PERMISSIONS_MIGRATED_LEGACY'
+  // Owner-managed staff administration (2026-10):
+  | 'INVITATION_REVOKED'
+  | 'STAFF_REMOVED'
+  | 'STAFF_PASSWORD_RESET_TRIGGERED';
 
 export interface TenantAuditLogInput {
   tenantId: string;

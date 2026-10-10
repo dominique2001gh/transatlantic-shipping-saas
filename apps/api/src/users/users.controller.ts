@@ -114,6 +114,19 @@ export class UsersController {
   }
 
   /**
+   * Owner-managed staff administration (2026-10): permanently cancels a
+   * still-PENDING invitation. Same permission as sending one — cancelling
+   * an invite is part of the same "who can bring people on" authority, not
+   * the broader staff.manage surface (role/status/removal).
+   */
+  @Post('invitations/:id/revoke')
+  @Roles(...STAFF_ROLES)
+  @RequirePermission('staff.invite')
+  revokeInvitation(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+    return this.staffInvitationsService.revoke(requireTenantId(user.tenantId), id, user.id);
+  }
+
+  /**
    * Changes an existing staff member's tier. Tenant-scoped lookup (404 on
    * a cross-tenant id, same as every other module) — UsersService
    * additionally rejects a change that would leave the tenant with zero
@@ -160,5 +173,46 @@ export class UsersController {
       id,
       dto.permissions,
     );
+  }
+
+  /**
+   * Owner-managed staff administration (2026-10): the "Removed" section
+   * of the Staff page — see UsersService.findRemovedStaffForTenant's own
+   * doc comment. Gated by staff.manage, the same permission that removes
+   * a staff member in the first place.
+   */
+  @Get('staff/removed')
+  @Roles(...STAFF_ROLES)
+  @RequirePermission('staff.manage')
+  listRemovedStaff(@CurrentUser() user: AuthenticatedUser) {
+    return this.usersService.findRemovedStaffForTenant(requireTenantId(user.tenantId));
+  }
+
+  /**
+   * Owner-managed staff administration (2026-10): removes a staff member
+   * without deleting their row or any historical record — see
+   * UsersService.removeStaffMember's own doc comment. One-way; the only
+   * path back is a fresh invitation (POST /users/invite) to the same
+   * email, now that it's free.
+   */
+  @Post(':id/remove')
+  @Roles(...STAFF_ROLES)
+  @RequirePermission('staff.manage')
+  removeStaffMember(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+    return this.usersService.removeStaffMember(requireTenantId(user.tenantId), user.id, user.role, id);
+  }
+
+  /**
+   * Owner-managed staff administration (2026-10): triggers a password-
+   * reset email for one specific staff member — the caller never sees or
+   * sets the new password. See UsersService.triggerPasswordReset's own
+   * doc comment for the exact-id scoping that makes this safe even when
+   * this email also matches an account at a different tenant.
+   */
+  @Post(':id/password-reset')
+  @Roles(...STAFF_ROLES)
+  @RequirePermission('staff.manage')
+  triggerPasswordReset(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+    return this.usersService.triggerPasswordReset(requireTenantId(user.tenantId), user.id, user.role, id);
   }
 }

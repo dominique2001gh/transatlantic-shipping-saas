@@ -7,7 +7,7 @@ import { STAFF_ROLES } from '@transatlantic/shared';
 import * as bcrypt from 'bcrypt';
 import { generateCustomerNumber } from '../common/numbering/numbering.util';
 import { generateToken, hashToken } from '../common/token/token.util';
-import { isSharedAnanseLogixDomain, resolveTenantWebAppUrl } from '../common/tenant/tenant-web-app-url.util';
+import { isSharedAnanseLogixDomain, resolveTenantWebAppUrl, type TenantForWebAppUrl } from '../common/tenant/tenant-web-app-url.util';
 import { SMS_CONSENT_DISCLOSURE_VERSION } from '../notifications/sms-consent.constants';
 import { MfaStageTokenService } from './mfa/mfa-stage-token.service';
 import { passwordResetEmail } from '../notifications/templates/platform-emails';
@@ -248,8 +248,13 @@ export class AuthService {
       throw new BadRequestException('Customer sign-up is not available right now.');
     }
 
-    const existingUser = await this.prisma.user.findUnique({
-      where: { tenantId_email: { tenantId: tenant.id, email: normalizedEmail } },
+    // Owner-managed staff administration (2026-10): User is no longer
+    // unconditionally unique per (tenantId, email) — see schema.prisma's
+    // own comment on the partial unique index this replaced — so this is
+    // a plain findFirst, scoped to non-removed rows only (a removed row's
+    // email is deliberately free to be claimed again, by design).
+    const existingUser = await this.prisma.user.findFirst({
+      where: { tenantId: tenant.id, email: normalizedEmail, removedAt: null },
     });
     if (existingUser) {
       throw new ConflictException('An account with this email already exists. Please sign in instead.');
@@ -492,50 +497,94 @@ export class AuthService {
 
     for (const user of users) {
       try {
-        const rawToken = generateToken();
-        await this.prisma.accountToken.create({
-          data: {
-            userId: user.id,
-            purpose: AccountTokenPurpose.PASSWORD_RESET,
-            tokenHash: hashToken(rawToken),
-            expiresAt: new Date(Date.now() + PASSWORD_RESET_TTL_MINUTES * 60 * 1000),
-          },
-        });
-
-        // Multi-tenant hostname fix (2026-10): reset links must resolve
-        // to the SAME tenant-aware host staff-invitation links already
-        // use (resolveTenantWebAppUrl) — not the global WEB_APP_URL,
-        // which only ever means Trans Atlantic's own legacy domain (see
-        // that util's own doc comment for the full precedence rules).
-        // Using WEB_APP_URL unconditionally here would have sent every
-        // other tenant's (and every future tenant's) reset link to Trans
-        // Atlantic's hostname. A PLATFORM_ADMIN (tenantId null, no tenant
-        // row at all) falls through to the platform's own hostname —
-        // resolveTenantWebAppUrl's own legacy-slug branch can never match
-        // a null tenant, so this is safe without a special case here.
-        const webAppUrl = user.tenant
-          ? resolveTenantWebAppUrl(user.tenant, this.configService)
-          : this.configService.get<string>('ANANSELOGIX_BASE_URL', 'http://localhost:3000')!;
-        const resetEmail = passwordResetEmail({
-          firstName: user.firstName,
-          resetUrl: `${webAppUrl.replace(/\/$/, '')}/reset-password?token=${rawToken}`,
-          expiresInMinutes: PASSWORD_RESET_TTL_MINUTES,
+        await this.issuePasswordResetEmail(user, {
           organizationName: isAmbiguous
             ? user.tenant
               ? user.tenant.legalName ?? user.tenant.name
               : 'Platform Administration'
             : undefined,
         });
-        await this.emailProvider.send({
-          to: user.email,
-          subject: resetEmail.subject,
-          body: resetEmail.body,
-          ...resolvePlatformEmailSender(this.configService),
-        });
       } catch (err) {
         this.logger.error(`Failed to issue/send password reset for user ${user.id}: ${err}`);
       }
     }
+  }
+
+  /**
+   * Owner-managed staff administration (2026-10): triggers a password-
+   * reset email for one specific, already-tenant-scoped user id — the
+   * owner is acting on an exact row they can already see on the Staff
+   * page (UsersService.triggerPasswordReset does the tenant/permission/
+   * owner-boundary checks before this is ever called), so unlike
+   * `requestPasswordReset` above there is no "does this email exist"
+   * ambiguity to hide and no duplicate-email-across-tenants resolution
+   * to perform — this never does an email lookup, only an exact id
+   * lookup, which is what makes it inherently safe for an account whose
+   * email happens to match another tenant's user: it can only ever
+   * reach the one row the caller already has the id for. Unlike that
+   * self-service flow, failures here are NOT swallowed — the owner
+   * clicked a specific button and deserves a real error if the email
+   * genuinely failed to send, not a false "sent" confirmation.
+   */
+  async triggerPasswordResetForUserId(userId: string): Promise<void> {
+    const user = await this.prisma.user.findUniqueOrThrow({
+      where: { id: userId },
+      include: { tenant: { select: { slug: true, customDomain: true, legalName: true, name: true } } },
+    });
+    await this.issuePasswordResetEmail(user, { organizationName: undefined });
+  }
+
+  /**
+   * Single call site for "create a reset token + email it" — shared by
+   * the self-service email-lookup flow (which may call this once per
+   * matching account) and the owner-triggered exact-id flow (always
+   * exactly once). See each caller's own doc comment for how they differ
+   * in ambiguity-handling and error-swallowing, neither of which belongs
+   * in this shared piece.
+   */
+  private async issuePasswordResetEmail(
+    user: {
+      id: string;
+      email: string;
+      firstName: string;
+      tenant: (TenantForWebAppUrl & { legalName: string | null; name: string }) | null;
+    },
+    opts: { organizationName: string | undefined },
+  ): Promise<void> {
+    const rawToken = generateToken();
+    await this.prisma.accountToken.create({
+      data: {
+        userId: user.id,
+        purpose: AccountTokenPurpose.PASSWORD_RESET,
+        tokenHash: hashToken(rawToken),
+        expiresAt: new Date(Date.now() + PASSWORD_RESET_TTL_MINUTES * 60 * 1000),
+      },
+    });
+
+    // Multi-tenant hostname fix (2026-10): reset links must resolve to
+    // the SAME tenant-aware host staff-invitation links already use
+    // (resolveTenantWebAppUrl) — not the global WEB_APP_URL, which only
+    // ever means Trans Atlantic's own legacy domain (see that util's own
+    // doc comment for the full precedence rules). A PLATFORM_ADMIN
+    // (tenantId null, no tenant row at all) falls through to the
+    // platform's own hostname — resolveTenantWebAppUrl's own legacy-slug
+    // branch can never match a null tenant, so this is safe without a
+    // special case here.
+    const webAppUrl = user.tenant
+      ? resolveTenantWebAppUrl(user.tenant, this.configService)
+      : this.configService.get<string>('ANANSELOGIX_BASE_URL', 'http://localhost:3000')!;
+    const resetEmail = passwordResetEmail({
+      firstName: user.firstName,
+      resetUrl: `${webAppUrl.replace(/\/$/, '')}/reset-password?token=${rawToken}`,
+      expiresInMinutes: PASSWORD_RESET_TTL_MINUTES,
+      organizationName: opts.organizationName,
+    });
+    await this.emailProvider.send({
+      to: user.email,
+      subject: resetEmail.subject,
+      body: resetEmail.body,
+      ...resolvePlatformEmailSender(this.configService),
+    });
   }
 
   /**

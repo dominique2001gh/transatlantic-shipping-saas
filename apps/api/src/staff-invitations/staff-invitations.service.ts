@@ -97,7 +97,12 @@ export class StaffInvitationsService {
 
     const email = dto.email.toLowerCase().trim();
 
-    const existingUser = await this.prisma.user.findFirst({ where: { tenantId, email } });
+    // Owner-managed staff administration (2026-10): only a non-removed
+    // row blocks a new invitation — a removed staff member's email is
+    // deliberately free to be claimed again by a brand-new invite/accept
+    // cycle (a new User row, new id); see schema.prisma's own comment on
+    // the partial unique index this relies on.
+    const existingUser = await this.prisma.user.findFirst({ where: { tenantId, email, removedAt: null } });
     if (existingUser) {
       throw new BadRequestException('A user with this email already exists for this tenant.');
     }
@@ -174,6 +179,41 @@ export class StaffInvitationsService {
     return this.toSummary(updated);
   }
 
+  /**
+   * Owner-managed staff administration (2026-10): cancels a still-PENDING
+   * invitation outright — unlike `resend` (which keeps the row alive with
+   * a fresh token), this permanently closes it off so the emailed link
+   * can never be used, and `invite` can be called again for the same
+   * email right away (the PENDING-only partial unique index no longer
+   * matches a REVOKED row). An ACCEPTED/EXPIRED/already-REVOKED
+   * invitation has nothing to revoke.
+   */
+  async revoke(tenantId: string, invitationId: string, revokedByUserId: string): Promise<TenantInvitationSummary> {
+    const invitation = await this.prisma.tenantInvitation.findFirst({ where: { id: invitationId, tenantId } });
+    if (!invitation) {
+      throw new NotFoundException('Invitation not found');
+    }
+    if (invitation.status !== TenantInvitationStatus.PENDING) {
+      throw new BadRequestException(`This invitation is ${invitation.status.toLowerCase()} and can't be revoked.`);
+    }
+
+    const [updated] = await this.prisma.$transaction([
+      this.prisma.tenantInvitation.update({
+        where: { id: invitation.id },
+        data: { status: TenantInvitationStatus.REVOKED },
+      }),
+      writeTenantAuditLog(this.prisma, {
+        tenantId,
+        actorUserId: revokedByUserId,
+        targetUserId: null,
+        action: 'INVITATION_REVOKED',
+        metadata: { email: invitation.email, role: invitation.role },
+      }),
+    ]);
+
+    return this.toSummary(updated);
+  }
+
   async listForTenant(tenantId: string): Promise<TenantInvitationSummary[]> {
     const invitations = await this.prisma.tenantInvitation.findMany({ where: { tenantId }, orderBy: { createdAt: 'desc' } });
     return invitations.map((i) => this.toSummary(i));
@@ -224,7 +264,9 @@ export class StaffInvitationsService {
       throw new BadRequestException('This invitation has expired — ask your admin to resend it.');
     }
 
-    const existingUser = await this.prisma.user.findFirst({ where: { tenantId: invitation.tenantId, email: invitation.email } });
+    const existingUser = await this.prisma.user.findFirst({
+      where: { tenantId: invitation.tenantId, email: invitation.email, removedAt: null },
+    });
     if (existingUser) {
       throw new BadRequestException('A user with this email already exists for this tenant.');
     }
