@@ -657,7 +657,7 @@ export class ShipmentsService {
     }
 
     const { confirmLabelRegeneration, reason, ...patch } = dto;
-    const fields = Object.keys(patch) as (keyof typeof patch)[];
+    const fields = (Object.keys(patch) as (keyof typeof patch)[]).filter((field) => patch[field] !== undefined);
     if (fields.length === 0) {
       return this.findById(tenantId, id);
     }
@@ -761,7 +761,7 @@ export class ShipmentsService {
     }
 
     const { confirmLabelRegeneration, reason, ...patch } = dto;
-    const fields = Object.keys(patch) as (keyof typeof patch)[];
+    const fields = (Object.keys(patch) as (keyof typeof patch)[]).filter((field) => patch[field] !== undefined);
     if (fields.length === 0) {
       return this.findById(tenantId, shipmentId);
     }
