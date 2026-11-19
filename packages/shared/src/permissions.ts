@@ -51,7 +51,6 @@ export const PERMISSION_KEYS = [
   'receiving.manage',
   'consolidation.manage',
   'customers.archive',
-  'shipments.edit',
 ] as const;
 
 export type PermissionKey = (typeof PERMISSION_KEYS)[number];
@@ -69,7 +68,7 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
   { label: 'Customers', keys: ['customers.view', 'customers.manage', 'customers.archive'] },
   {
     label: 'Shipments',
-    keys: ['shipments.view', 'shipments.manage', 'shipments.receive', 'shipments.labels', 'shipments.edit'],
+    keys: ['shipments.view', 'shipments.manage', 'shipments.receive', 'shipments.labels'],
   },
   { label: 'Quick Receive', keys: ['quickreceive.use'] },
   { label: 'Warehouse Receiving', keys: ['receiving.view', 'receiving.manage'] },
@@ -137,7 +136,6 @@ export const PERMISSION_PRESETS: Record<'ADMIN' | 'MANAGER' | 'WAREHOUSE_STAFF' 
     'receiving.manage',
     'consolidation.manage',
     'customers.archive',
-    'shipments.edit',
   ],
   MANAGER: [
     'customers.view',
@@ -165,7 +163,6 @@ export const PERMISSION_PRESETS: Record<'ADMIN' | 'MANAGER' | 'WAREHOUSE_STAFF' 
     'receiving.manage',
     'consolidation.manage',
     'customers.archive',
-    'shipments.edit',
   ],
   WAREHOUSE_STAFF: [
     'customers.view',
@@ -344,7 +341,6 @@ export const PERMISSION_LABELS: Record<PermissionKey, string> = {
   'receiving.manage': 'Create and correct warehouse receiving records',
   'consolidation.manage': 'Consolidate received packages into shipments',
   'customers.archive': 'Archive, restore, and delete customers',
-  'shipments.edit': 'Edit shipments after creation, including locked or in-transit shipments',
 };
 
 /**

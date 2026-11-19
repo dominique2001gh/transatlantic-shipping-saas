@@ -96,14 +96,29 @@ const BROAD_ITEM_FIELD_SET = new Set<string>(BROAD_ITEM_FIELDS);
 const MINIMAL_ITEM_FIELD_SET = new Set<string>(MINIMAL_ITEM_FIELDS);
 const EMPTY_FIELD_SET = new Set<string>();
 
+/** OWNER or MANAGER — the "elevated permission" tier from LOADED onward. STAFF is excluded here only; every earlier tier remains open to STAFF, matching its pre-existing access. */
+function isOwnerOrManager(role: UserRole): boolean {
+  return role === UserRole.OWNER || role === UserRole.MANAGER;
+}
+
 interface ShipmentEditTier {
   allowedShipmentFields: ReadonlySet<string>;
   allowedItemFields: ReadonlySet<string>;
-  /** LOADED and every stage beyond it — "elevated permission" per this feature's own spec requirement. */
-  requiresOwner: boolean;
-  /** DELIVERED/COMPLETED — a documented correction, per this feature's own spec requirement. */
+  /**
+   * LOADED and every stage beyond it — "elevated permission" per this
+   * feature's own spec requirement. OWNER or MANAGER only; STAFF retains
+   * its pre-existing ability to edit a shipment at every earlier tier
+   * (DRAFT through BOOKED) — this is the one tier where STAFF's
+   * historical unrestricted-edit behavior is deliberately not preserved,
+   * by explicit product decision, since nothing in this system ever
+   * guaranteed STAFF access to a specific lifecycle stage by name and a
+   * shipment that's already loaded into a sealed container is exactly
+   * the point past which broader staff access stops being appropriate.
+   */
+  requiresManagerUp: boolean;
+  /** DELIVERED/COMPLETED — a documented correction, per this feature's own spec requirement. Applies to every role equally, including STAFF. */
   requiresReason: boolean;
-  /** BOOKED only — a label has already been printed from this data. */
+  /** BOOKED only — a label has already been printed from this data. Applies to every role equally, including STAFF. */
   isLabelLockedTier: boolean;
 }
 
@@ -525,26 +540,37 @@ export class ShipmentsService {
   /**
    * Shipment Editing Phase 4: which fields a PATCH may touch, and under
    * what extra conditions, depends on the shipment's current lifecycle
-   * status:
+   * status. The route itself stays OPERATIONS_ROLES + shipments.manage —
+   * the same gate STAFF already had before this feature existed — so
+   * STAFF is never blocked from calling this endpoint at all; what varies
+   * by tier is which fields are editable and, for LOADED-and-later, which
+   * roles may act:
    *   - DRAFT/AWAITING_ITEMS and every stage through CONSOLIDATED: broad
-   *     edit, no extra confirmation (WAREHOUSE_RECEIVED onward is still a
-   *     "correction" in spirit — the audit log records it the same way
-   *     regardless, see `lifecycleTier` in its metadata).
-   *   - BOOKED: same broad field set, but a label has already been
-   *     printed from this data — a change to any LABEL_AFFECTING field
-   *     requires the caller to resubmit with `confirmLabelRegeneration:
-   *     true`, which is the "clear confirmation before changes that
-   *     affect labels" this feature's own spec requires.
+   *     edit, available to OWNER/MANAGER/STAFF alike, no extra
+   *     confirmation (WAREHOUSE_RECEIVED onward is still a "correction"
+   *     in spirit — the audit log records it the same way regardless,
+   *     see `lifecycleTier` in its metadata).
+   *   - BOOKED: same broad field set and same OWNER/MANAGER/STAFF access,
+   *     but a label has already been printed from this data — a change
+   *     to any LABEL_AFFECTING field requires the caller to resubmit with
+   *     `confirmLabelRegeneration: true`, which is the "clear
+   *     confirmation before changes that affect labels" this feature's
+   *     own spec requires, for every role equally.
    *   - LOADED: narrows to description/declaredValue/currency only, and
-   *     requires the actor's role to be OWNER specifically — "elevated
-   *     permission" per spec, enforced here rather than via a second
-   *     static @RequirePermission (which can't vary by a resource's own
-   *     current state, only by route).
-   *   - DEPARTED through OUT_FOR_DELIVERY: OWNER only, description only —
-   *     weight/dims/qty/declaredValue are locked because a Manifest
-   *     snapshot has already been taken from this shipment's data.
-   *   - DELIVERED/COMPLETED: OWNER only, description only, and a non-empty
-   *     `reason` is required — "documented corrections" per spec.
+   *     requires the actor's role to be OWNER or MANAGER — "elevated
+   *     permission" per spec. This is the one tier where STAFF's
+   *     historical unrestricted access is deliberately not preserved —
+   *     see ShipmentEditTier.requiresManagerUp's own doc comment.
+   *     Enforced here rather than via a second static
+   *     @RequirePermission (which can't vary by a resource's own current
+   *     state, only by route).
+   *   - DEPARTED through OUT_FOR_DELIVERY: OWNER/MANAGER only,
+   *     description only — weight/dims/qty/declaredValue are locked
+   *     because a Manifest snapshot has already been taken from this
+   *     shipment's data.
+   *   - DELIVERED/COMPLETED: OWNER/MANAGER only, description only, and a
+   *     non-empty `reason` is required — "documented corrections" per
+   *     spec, for every role equally.
    *   - CANCELLED (and any future status not enumerated here): no edits
    *     at all, by omission from the switch below.
    */
@@ -560,7 +586,7 @@ export class ShipmentsService {
         return {
           allowedShipmentFields: BROAD_SHIPMENT_FIELD_SET,
           allowedItemFields: BROAD_ITEM_FIELD_SET,
-          requiresOwner: false,
+          requiresManagerUp: false,
           requiresReason: false,
           isLabelLockedTier: false,
         };
@@ -568,7 +594,7 @@ export class ShipmentsService {
         return {
           allowedShipmentFields: BROAD_SHIPMENT_FIELD_SET,
           allowedItemFields: BROAD_ITEM_FIELD_SET,
-          requiresOwner: false,
+          requiresManagerUp: false,
           requiresReason: false,
           isLabelLockedTier: true,
         };
@@ -576,7 +602,7 @@ export class ShipmentsService {
         return {
           allowedShipmentFields: NARROW_SHIPMENT_FIELD_SET,
           allowedItemFields: MINIMAL_ITEM_FIELD_SET,
-          requiresOwner: true,
+          requiresManagerUp: true,
           requiresReason: false,
           isLabelLockedTier: false,
         };
@@ -590,7 +616,7 @@ export class ShipmentsService {
         return {
           allowedShipmentFields: MINIMAL_SHIPMENT_FIELD_SET,
           allowedItemFields: MINIMAL_ITEM_FIELD_SET,
-          requiresOwner: true,
+          requiresManagerUp: true,
           requiresReason: false,
           isLabelLockedTier: false,
         };
@@ -599,7 +625,7 @@ export class ShipmentsService {
         return {
           allowedShipmentFields: MINIMAL_SHIPMENT_FIELD_SET,
           allowedItemFields: MINIMAL_ITEM_FIELD_SET,
-          requiresOwner: true,
+          requiresManagerUp: true,
           requiresReason: true,
           isLabelLockedTier: false,
         };
@@ -607,7 +633,7 @@ export class ShipmentsService {
         return {
           allowedShipmentFields: EMPTY_FIELD_SET,
           allowedItemFields: EMPTY_FIELD_SET,
-          requiresOwner: true,
+          requiresManagerUp: true,
           requiresReason: false,
           isLabelLockedTier: false,
         };
@@ -637,8 +663,8 @@ export class ShipmentsService {
     }
 
     const tier = this.resolveEditTier(shipment.status);
-    if (tier.requiresOwner && actorRole !== UserRole.OWNER) {
-      throw new ForbiddenException(`Only an OWNER may edit a shipment in ${shipment.status} status.`);
+    if (tier.requiresManagerUp && !isOwnerOrManager(actorRole)) {
+      throw new ForbiddenException(`Only an OWNER or MANAGER may edit a shipment in ${shipment.status} status.`);
     }
     const disallowed = fields.filter((field) => !tier.allowedShipmentFields.has(field));
     if (disallowed.length > 0) {
@@ -741,8 +767,8 @@ export class ShipmentsService {
     }
 
     const tier = this.resolveEditTier(shipment.status);
-    if (tier.requiresOwner && actorRole !== UserRole.OWNER) {
-      throw new ForbiddenException(`Only an OWNER may edit a shipment item while its shipment is ${shipment.status}.`);
+    if (tier.requiresManagerUp && !isOwnerOrManager(actorRole)) {
+      throw new ForbiddenException(`Only an OWNER or MANAGER may edit a shipment item while its shipment is ${shipment.status}.`);
     }
     const disallowed = fields.filter((field) => !tier.allowedItemFields.has(field));
     if (disallowed.length > 0) {

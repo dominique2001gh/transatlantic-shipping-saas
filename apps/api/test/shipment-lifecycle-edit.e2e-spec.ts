@@ -31,7 +31,7 @@ describe('Shipment Editing — lifecycle tiers (e2e)', () => {
     ownerToken = await completeStaffLogin(app, tenant.user.email, tenant.user.password);
 
     const manager = await createUserInTenant(prisma, tenant.tenantId, 'EditManager', UserRole.MANAGER);
-    await prisma.user.update({ where: { id: manager.id }, data: { permissions: ['shipments.view', 'shipments.edit'] } });
+    await prisma.user.update({ where: { id: manager.id }, data: { permissions: ['shipments.view', 'shipments.manage'] } });
     managerToken = await completeStaffLogin(app, manager.email, manager.password);
 
     const staff = await createUserInTenant(prisma, tenant.tenantId, 'EditStaff', UserRole.STAFF);
@@ -82,10 +82,25 @@ describe('Shipment Editing — lifecycle tiers (e2e)', () => {
     expect(auditEntry).not.toBeNull();
   });
 
-  it('a STAFF member (shipments.manage but not shipments.edit) is forbidden from editing any shipment', async () => {
+  it('DRAFT: a STAFF member with shipments.manage keeps its pre-existing broad edit access, including recipient fields', async () => {
     const shipment = await createShipment('DRAFT');
-    const res = await patchShipment(staffToken, shipment.id, { description: 'nope' });
-    expect(res.status).toBe(403);
+    const res = await patchShipment(staffToken, shipment.id, {
+      description: 'Staff correction',
+      recipientName: 'Staff-Updated Recipient',
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.recipientName).toBe('Staff-Updated Recipient');
+  });
+
+  it('BOOKED: STAFF is subject to the same label-regeneration confirmation as everyone else', async () => {
+    const shipment = await createShipment('BOOKED');
+    const rejected = await patchShipment(staffToken, shipment.id, { recipientName: 'Staff Changed Name' });
+    expect(rejected.status).toBe(409);
+    const confirmed = await patchShipment(staffToken, shipment.id, {
+      recipientName: 'Staff Changed Name',
+      confirmLabelRegeneration: true,
+    });
+    expect(confirmed.status).toBe(200);
   });
 
   it('BOOKED: a label-affecting field change is rejected without confirmLabelRegeneration, and accepted with it', async () => {
@@ -111,11 +126,14 @@ describe('Shipment Editing — lifecycle tiers (e2e)', () => {
     expect(res.status).toBe(200);
   });
 
-  it('LOADED: requires OWNER specifically — MANAGER is forbidden even with shipments.edit', async () => {
+  it('LOADED: requires OWNER or MANAGER — STAFF is forbidden, this is the one tier where its broad access does not carry over', async () => {
     const shipment = await createShipment('LOADED');
 
+    const staffAttempt = await patchShipment(staffToken, shipment.id, { description: 'Staff correction' });
+    expect(staffAttempt.status).toBe(403);
+
     const managerAttempt = await patchShipment(managerToken, shipment.id, { description: 'Manager correction' });
-    expect(managerAttempt.status).toBe(403);
+    expect(managerAttempt.status).toBe(200);
 
     const ownerAttempt = await patchShipment(ownerToken, shipment.id, { description: 'Owner correction' });
     expect(ownerAttempt.status).toBe(200);
@@ -127,23 +145,26 @@ describe('Shipment Editing — lifecycle tiers (e2e)', () => {
     expect(res.status).toBe(400);
   });
 
-  it('DEPARTED: only description is editable, OWNER only', async () => {
+  it('DEPARTED: only description is editable, OWNER or MANAGER (STAFF forbidden)', async () => {
     const shipment = await createShipment('DEPARTED');
 
-    const weightAttempt = await patchShipment(ownerToken, shipment.id, { declaredValue: 500 });
+    const staffAttempt = await patchShipment(staffToken, shipment.id, { description: 'Staff correction' });
+    expect(staffAttempt.status).toBe(403);
+
+    const weightAttempt = await patchShipment(managerToken, shipment.id, { declaredValue: 500 });
     expect(weightAttempt.status).toBe(400);
 
-    const descriptionAttempt = await patchShipment(ownerToken, shipment.id, { description: 'In-transit correction' });
+    const descriptionAttempt = await patchShipment(managerToken, shipment.id, { description: 'In-transit correction' });
     expect(descriptionAttempt.status).toBe(200);
   });
 
-  it('DELIVERED: requires a non-empty reason', async () => {
+  it('DELIVERED: requires a non-empty reason (MANAGER, not just OWNER, can act here)', async () => {
     const shipment = await createShipment('DELIVERED');
 
-    const noReason = await patchShipment(ownerToken, shipment.id, { description: 'Correction' });
+    const noReason = await patchShipment(managerToken, shipment.id, { description: 'Correction' });
     expect(noReason.status).toBe(400);
 
-    const withReason = await patchShipment(ownerToken, shipment.id, {
+    const withReason = await patchShipment(managerToken, shipment.id, {
       description: 'Correction',
       reason: 'Customer reported a typo in the delivery notes',
     });

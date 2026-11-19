@@ -21,7 +21,12 @@ export default function ShipmentDetailPage() {
   const params = useParams<{ id: string }>();
   const shipmentId = params.id;
   const currentUser = getStoredUser();
-  const canEditShipment = hasPermission(currentUser, 'shipments.edit');
+  // Shipment Editing Phase 4: same permission that already gates every
+  // other shipment mutation (shipments.manage) — STAFF keeps the exact
+  // access it had before this feature existed. The server is the real
+  // enforcement of which fields/tiers are actually editable right now;
+  // this only decides whether to show the Edit button at all.
+  const canEditShipment = hasPermission(currentUser, 'shipments.manage');
 
   const [shipment, setShipment] = useState<ShipmentSummary | null>(null);
   const [events, setEvents] = useState<TrackingEventSummary[] | null>(null);

@@ -1,7 +1,7 @@
 import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { EntitlementFeature } from '@prisma/client';
 import type { AuthenticatedUser } from '@transatlantic/shared';
-import { MANAGER_UP_ROLES, OPERATIONS_ROLES, ShipmentStatus } from '@transatlantic/shared';
+import { OPERATIONS_ROLES, ShipmentStatus } from '@transatlantic/shared';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { RequireEntitlement } from '../common/decorators/require-entitlement.decorator';
 import { RequirePermission } from '../common/decorators/require-permission.decorator';
@@ -75,17 +75,17 @@ export class ShipmentsController {
     return this.shipmentsService.createQuickReceive(requireTenantId(user.tenantId), user.id, dto);
   }
 
-  // Shipment Editing Phase 4: deliberately narrower than every other route
-  // on this controller — @Roles(MANAGER_UP_ROLES) + 'shipments.edit', not
-  // OPERATIONS_ROLES + 'shipments.manage'. STAFF may create a shipment and
-  // add its items, but editing it afterward is OWNER/MANAGER only, per
-  // this feature's own spec requirement. The OWNER-only stricter tiers
-  // (LOADED and beyond) are enforced inside ShipmentsService.update itself
-  // — see resolveEditTier's own doc comment for why that can't be
-  // expressed as static route metadata.
+  // Shipment Editing Phase 4: same route-level gate as every other route
+  // on this controller — OPERATIONS_ROLES + 'shipments.manage' — so STAFF
+  // keeps exactly the access it already had before this feature existed.
+  // The tier-dependent OWNER/MANAGER-only restriction (LOADED and beyond)
+  // is enforced inside ShipmentsService.update itself — see
+  // resolveEditTier's own doc comment for why that can't be expressed as
+  // static route metadata (it depends on the resource's own current
+  // status, not just the caller's role).
   @Patch(':id')
-  @Roles(...MANAGER_UP_ROLES)
-  @RequirePermission('shipments.edit')
+  @Roles(...OPERATIONS_ROLES)
+  @RequirePermission('shipments.manage')
   update(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id') id: string,
@@ -105,10 +105,10 @@ export class ShipmentsController {
     return this.shipmentsService.addItem(requireTenantId(user.tenantId), user.id, shipmentId, dto);
   }
 
-  // Shipment Editing Phase 4 — same deliberate narrowing as PATCH :id above.
+  // Shipment Editing Phase 4 — same route-level gate as PATCH :id above.
   @Patch(':id/items/:itemId')
-  @Roles(...MANAGER_UP_ROLES)
-  @RequirePermission('shipments.edit')
+  @Roles(...OPERATIONS_ROLES)
+  @RequirePermission('shipments.manage')
   updateItem(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id') shipmentId: string,
