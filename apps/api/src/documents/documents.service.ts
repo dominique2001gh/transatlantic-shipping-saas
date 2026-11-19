@@ -64,7 +64,7 @@ export class DocumentsService {
     return this.storeAndCreate(
       tenantId,
       uploadedByUserId,
-      { shipmentId, customerId: shipment.customerId },
+      { shipmentId, customerId: shipment.customerId, receivingRecordId: null },
       file,
       dto,
     );
@@ -82,7 +82,28 @@ export class DocumentsService {
     if (!customer) {
       throw new NotFoundException('Customer not found');
     }
-    return this.storeAndCreate(tenantId, uploadedByUserId, { shipmentId: null, customerId }, file, dto);
+    return this.storeAndCreate(tenantId, uploadedByUserId, { shipmentId: null, customerId, receivingRecordId: null }, file, dto);
+  }
+
+  /** Warehouse Receiving Phase 1: attaches an optional package photograph to a receiving record — reuses the exact same storage/metadata path as a shipment/customer document (see this model's own doc comment on Document.receivingRecordId in schema.prisma). */
+  async uploadForReceivingRecord(
+    tenantId: string,
+    uploadedByUserId: string,
+    receivingRecordId: string,
+    file: UploadedFile,
+    dto: CreateDocumentDto,
+  ): Promise<DocumentSummary> {
+    const record = await this.prisma.receivingRecord.findFirst({ where: { id: receivingRecordId, tenantId } });
+    if (!record) {
+      throw new NotFoundException('Receiving record not found');
+    }
+    return this.storeAndCreate(
+      tenantId,
+      uploadedByUserId,
+      { shipmentId: null, customerId: record.customerId, receivingRecordId },
+      file,
+      dto,
+    );
   }
 
   async findAllForTenant(
@@ -208,7 +229,7 @@ export class DocumentsService {
   private async storeAndCreate(
     tenantId: string,
     uploadedByUserId: string,
-    ids: { shipmentId: string | null; customerId: string | null },
+    ids: { shipmentId: string | null; customerId: string | null; receivingRecordId: string | null },
     file: UploadedFile,
     dto: CreateDocumentDto,
   ): Promise<DocumentSummary> {
@@ -221,6 +242,7 @@ export class DocumentsService {
         tenantId,
         customerId: ids.customerId,
         shipmentId: ids.shipmentId,
+        receivingRecordId: ids.receivingRecordId,
         type: dto.type,
         fileName: file.originalname,
         fileUrl: storageKey,
