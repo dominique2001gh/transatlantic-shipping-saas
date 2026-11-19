@@ -47,6 +47,10 @@ export const PERMISSION_KEYS = [
   'staff.permissions',
   'settings.view',
   'settings.sensitive',
+  'receiving.view',
+  'receiving.manage',
+  'consolidation.manage',
+  'customers.archive',
 ] as const;
 
 export type PermissionKey = (typeof PERMISSION_KEYS)[number];
@@ -61,9 +65,14 @@ export interface PermissionGroup {
 
 /** Grouped purely for the Invite/Edit Staff checkbox UI (Phase D) — carries no authorization meaning of its own. */
 export const PERMISSION_GROUPS: PermissionGroup[] = [
-  { label: 'Customers', keys: ['customers.view', 'customers.manage'] },
-  { label: 'Shipments', keys: ['shipments.view', 'shipments.manage', 'shipments.receive', 'shipments.labels'] },
+  { label: 'Customers', keys: ['customers.view', 'customers.manage', 'customers.archive'] },
+  {
+    label: 'Shipments',
+    keys: ['shipments.view', 'shipments.manage', 'shipments.receive', 'shipments.labels'],
+  },
   { label: 'Quick Receive', keys: ['quickreceive.use'] },
+  { label: 'Warehouse Receiving', keys: ['receiving.view', 'receiving.manage'] },
+  { label: 'Consolidation', keys: ['consolidation.manage'] },
   { label: 'Warehouse', keys: ['warehouse.view', 'warehouse.process'] },
   { label: 'Containers', keys: ['containers.view', 'containers.manage'] },
   { label: 'Manifests', keys: ['manifests.view', 'manifests.manage'] },
@@ -123,6 +132,10 @@ export const PERMISSION_PRESETS: Record<'ADMIN' | 'MANAGER' | 'WAREHOUSE_STAFF' 
     'aiassistant.use',
     'staff.view',
     'settings.view',
+    'receiving.view',
+    'receiving.manage',
+    'consolidation.manage',
+    'customers.archive',
   ],
   MANAGER: [
     'customers.view',
@@ -146,6 +159,10 @@ export const PERMISSION_PRESETS: Record<'ADMIN' | 'MANAGER' | 'WAREHOUSE_STAFF' 
     'messages.manage',
     'leads.manage',
     'aiassistant.use',
+    'receiving.view',
+    'receiving.manage',
+    'consolidation.manage',
+    'customers.archive',
   ],
   WAREHOUSE_STAFF: [
     'customers.view',
@@ -168,6 +185,8 @@ export const PERMISSION_PRESETS: Record<'ADMIN' | 'MANAGER' | 'WAREHOUSE_STAFF' 
     'messages.manage',
     'leads.manage',
     'aiassistant.use',
+    'receiving.view',
+    'receiving.manage',
   ],
   ACCOUNTING: [
     'customers.view',
@@ -318,6 +337,10 @@ export const PERMISSION_LABELS: Record<PermissionKey, string> = {
   'staff.permissions': "Manage other staff members' permissions",
   'settings.view': 'View company settings',
   'settings.sensitive': 'Manage payment and billing settings',
+  'receiving.view': 'View warehouse receiving records',
+  'receiving.manage': 'Create and correct warehouse receiving records',
+  'consolidation.manage': 'Consolidate received packages into shipments',
+  'customers.archive': 'Archive, restore, and delete customers',
 };
 
 /**
@@ -350,7 +373,8 @@ export const PERMISSION_PRESET_OPTIONS: PermissionPresetUiOption[] = [
   {
     key: 'WAREHOUSE_STAFF',
     label: 'Warehouse Staff',
-    description: 'Receive, process, and move shipments and containers. No access to invoices, payments, or settings.',
+    description:
+      'Receive, process, and move shipments and containers, including warehouse receiving. No access to invoices, payments, or settings.',
     permissions: PERMISSION_PRESETS.WAREHOUSE_STAFF,
     defaultRole: UserRole.STAFF,
   },
@@ -364,7 +388,8 @@ export const PERMISSION_PRESET_OPTIONS: PermissionPresetUiOption[] = [
   {
     key: 'MANAGER',
     label: 'Operations',
-    description: 'Full day-to-day operations: shipments, warehouse, containers, manifests, and dispatch. No invoices, payments, or staff management.',
+    description:
+      'Full day-to-day operations: shipments, warehouse receiving, consolidation, containers, manifests, and dispatch. No invoices, payments, or staff management.',
     permissions: PERMISSION_PRESETS.MANAGER,
     defaultRole: UserRole.MANAGER,
   },

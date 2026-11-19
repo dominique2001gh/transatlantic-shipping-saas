@@ -94,6 +94,43 @@ export interface QuickReceiveInput extends RecipientInput {
   preRegistrationId?: string;
 }
 
+/**
+ * Shipment Editing Phase 4: which fields may actually be sent depends on
+ * the shipment's current lifecycle tier — the server is the real
+ * enforcement (see ShipmentsService.resolveEditTier's own doc comment);
+ * every field here is optional at the client layer for the same reason
+ * UpdateShipmentDto's fields are.
+ */
+export interface UpdateShipmentInput {
+  originLocation?: string;
+  destinationCountry?: string;
+  destinationLocation?: string;
+  originWarehouseId?: string;
+  destinationWarehouseId?: string;
+  routeId?: string;
+  description?: string;
+  declaredValue?: number;
+  currency?: string;
+  recipientName?: string;
+  recipientPhone?: string;
+  recipientEmail?: string;
+  recipientAddressLine1?: string;
+  recipientAddressLine2?: string;
+  recipientCity?: string;
+  recipientState?: string;
+  recipientCountry?: string;
+  recipientPostalCode?: string;
+  /** Required when the edit changes a label-visible field on a BOOKED shipment — see UpdateShipmentDto's own doc comment. */
+  confirmLabelRegeneration?: boolean;
+  /** Required when editing a DELIVERED/COMPLETED shipment. */
+  reason?: string;
+}
+
+export type UpdateShipmentItemInput = Partial<ShipmentItemInput> & {
+  confirmLabelRegeneration?: boolean;
+  reason?: string;
+};
+
 export interface CreateTrackingEventInput {
   eventType: TrackingEventType;
   shipmentItemId?: string;
@@ -137,6 +174,26 @@ export function createShipment(input: CreateShipmentInput): Promise<ShipmentSumm
 export function createQuickReceive(input: QuickReceiveInput): Promise<ShipmentSummary> {
   return apiFetch<ShipmentSummary>('/shipments/quick-receive', {
     method: 'POST',
+    body: JSON.stringify(input),
+    token: authToken(),
+  });
+}
+
+export function updateShipment(id: string, input: UpdateShipmentInput): Promise<ShipmentSummary> {
+  return apiFetch<ShipmentSummary>(`/shipments/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+    token: authToken(),
+  });
+}
+
+export function updateShipmentItem(
+  shipmentId: string,
+  itemId: string,
+  input: UpdateShipmentItemInput,
+): Promise<ShipmentSummary> {
+  return apiFetch<ShipmentSummary>(`/shipments/${shipmentId}/items/${itemId}`, {
+    method: 'PATCH',
     body: JSON.stringify(input),
     token: authToken(),
   });

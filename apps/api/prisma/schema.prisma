@@ -122,6 +122,30 @@ enum ShipmentItemStatus {
   CANCELLED
 }
 
+/// Warehouse Receiving Phase 1 — see ReceivingRecord's own doc comment.
+/// OTHER requires ReceivingRecord.carrierOther to be set (enforced at the
+/// DTO layer).
+enum ReceivingCarrier {
+  UPS
+  USPS
+  FEDEX
+  DHL
+  OTHER
+}
+
+/// Warehouse Receiving / Package Consolidation — denormalized from
+/// ReceivingRecord.allocatedQuantity vs quantity, recomputed only by
+/// ConsolidationService whenever allocatedQuantity changes. CANCELLED is a
+/// terminal state set by staff for a mis-logged record; a cancelled record
+/// is excluded from duplicate-tracking-number checks and from the
+/// awaiting-consolidation list.
+enum ReceivingRecordStatus {
+  AWAITING_CONSOLIDATION
+  PARTIALLY_CONSOLIDATED
+  FULLY_CONSOLIDATED
+  CANCELLED
+}
+
 /// Customer Self-Service Pre-Registration, Stage 1 — see ShipmentPreRegistration's
 /// own doc comment. Deliberately its own enum, never reusing ShipmentStatus:
 /// a pre-registration is not a Shipment and must never be able to collide
@@ -462,45 +486,47 @@ model Tenant {
   /// given domain once this is wired up.
   customDomain    String?  @unique
 
-  settings              TenantSettings?
-  users                 User[]
-  customers             Customer[]
-  addresses             Address[]
-  warehouses            Warehouse[]
-  routes                Route[]
-  shipments             Shipment[]
-  shipmentItems         ShipmentItem[]
+  settings                 TenantSettings?
+  users                    User[]
+  customers                Customer[]
+  addresses                Address[]
+  warehouses               Warehouse[]
+  routes                   Route[]
+  shipments                Shipment[]
+  shipmentItems            ShipmentItem[]
   shipmentPreRegistrations ShipmentPreRegistration[]
-  itemInspections       ItemInspection[]
-  pickupDeliveryRecords PickupDeliveryRecord[]
-  vehicleDetails        VehicleDetails[]
-  containers            Container[]
-  containerItems        ContainerItem[]
-  manifests             Manifest[]
-  manifestItems         ManifestItem[]
-  trackingEvents        TrackingEvent[]
-  quotes                Quote[]
-  invoices              Invoice[]
-  invoiceItems          InvoiceItem[]
-  payments              Payment[]
-  documents             Document[]
-  notifications         Notification[]
-  notificationEvents    NotificationEvent[]
-  operationalExceptions OperationalException[]
-  websiteLeads          WebsiteLead[]
+  itemInspections          ItemInspection[]
+  pickupDeliveryRecords    PickupDeliveryRecord[]
+  vehicleDetails           VehicleDetails[]
+  containers               Container[]
+  containerItems           ContainerItem[]
+  manifests                Manifest[]
+  manifestItems            ManifestItem[]
+  trackingEvents           TrackingEvent[]
+  quotes                   Quote[]
+  invoices                 Invoice[]
+  invoiceItems             InvoiceItem[]
+  payments                 Payment[]
+  documents                Document[]
+  notifications            Notification[]
+  notificationEvents       NotificationEvent[]
+  operationalExceptions    OperationalException[]
+  websiteLeads             WebsiteLead[]
 
   publicLocations       TenantLocation[]
   agentKnowledgeEntries TenantAgentKnowledgeEntry[]
 
-  subscription         TenantSubscription?
-  entitlements         TenantEntitlement[]
-  onboarding           TenantOnboarding?
-  invitations          TenantInvitation[]
-  signupSessions       SignupSession[]
-  platformAuditLogsFor PlatformAuditLog[]
-  auditLogs            TenantAuditLog[]
-  paymentSettings      TenantPaymentSettings?
-  paymentMethodConfigs TenantPaymentMethodConfig[]
+  subscription            TenantSubscription?
+  entitlements            TenantEntitlement[]
+  onboarding              TenantOnboarding?
+  invitations             TenantInvitation[]
+  signupSessions          SignupSession[]
+  platformAuditLogsFor    PlatformAuditLog[]
+  auditLogs               TenantAuditLog[]
+  paymentSettings         TenantPaymentSettings?
+  paymentMethodConfigs    TenantPaymentMethodConfig[]
+  ReceivingRecord         ReceivingRecord[]
+  ConsolidationAllocation ConsolidationAllocation[]
 
   @@map("tenants")
 }
@@ -632,6 +658,15 @@ model TenantSettings {
   preRegistrationNumberPrefix   String @default("PRE")
   preRegistrationNumberSequence Int    @default(0)
 
+  /// Warehouse Receiving Phase 1: internal receiving reference namespace
+  /// (e.g. "RCV-2026-000001") — deliberately never trackingNumberPrefix or
+  /// preRegistrationNumberPrefix. A ReceivingRecord is not a Shipment and
+  /// not a ShipmentPreRegistration; its reference must never collide with,
+  /// or be mistaken for, either. Same atomic-increment pattern as every
+  /// other counter on this model.
+  receivingRefPrefix   String @default("RCV")
+  receivingRefSequence Int    @default(0)
+
   defaultOriginCountry      String?
   defaultDestinationCountry String?
 
@@ -720,8 +755,8 @@ model TenantAgentKnowledgeEntry {
 /// user has a tenantId and is linked 1:1 to a Customer record;
 /// PLATFORM_ADMIN users have tenantId = null.
 model User {
-  id           String    @id @default(cuid())
-  tenantId     String?
+  id                String    @id @default(cuid())
+  tenantId          String?
   // Not globally @unique: a CUSTOMER may hold independent portal accounts
   // at more than one tenant with the same email address (Stage 2C). Unique
   // only per tenant instead — see @@unique below. Accepted trade-off:
@@ -729,12 +764,12 @@ model User {
   // as distinct for uniqueness, so two platform admins could theoretically
   // share an email post-change. Acceptable since platform admins are only
   // ever created manually/via seed, never self-serve.
-  email        String
-  passwordHash String
-  firstName    String
-  lastName     String
-  phone        String?
-  role         UserRole
+  email             String
+  passwordHash      String
+  firstName         String
+  lastName          String
+  phone             String?
+  role              UserRole
   /// RBAC permissions (2026-10): fine-grained, additive capability grants
   /// WITHIN this tenant membership, layered on top of `role` — `role`
   /// still drives every existing @Roles()-gated route unchanged; this
@@ -753,8 +788,8 @@ model User {
   /// permissions granted. For staff invited after RBAC enforcement goes
   /// live, `[]` is a legitimate, intentional "no optional permissions"
   /// grant, not a migration artifact.
-  permissions  String[] @default([])
-  isActive     Boolean   @default(true)
+  permissions       String[]  @default([])
+  isActive          Boolean   @default(true)
   /// Owner-managed staff administration (2026-10): set when an OWNER
   /// (or a staff.manage-holding delegate) "removes" this staff member —
   /// distinct from `isActive: false` (temporary, reversible, same email).
@@ -766,8 +801,8 @@ model User {
   /// with a new id, never a restore of this one). Null means "never
   /// removed" and is excluded from UsersService.findStaffForTenant by
   /// default.
-  removedAt    DateTime?
-  lastLoginAt  DateTime?
+  removedAt         DateTime?
+  lastLoginAt       DateTime?
   /// Set on every successful password change/reset (self-service change,
   /// or the forgot-password flow) — never on account creation itself, so
   /// existing seeded/production accounts start with this null. JwtStrategy
@@ -786,42 +821,45 @@ model User {
   /// same "don't destructively clean up a dormant structure" reasoning
   /// applied to Twilio/SMS. Do not read or write these three fields or
   /// MfaRecoveryCode from new code.
-  mfaEnabled   Boolean   @default(false)
+  mfaEnabled        Boolean   @default(false)
   /// Superseded — see mfaEnabled's own comment just above.
-  mfaSecret    String?
+  mfaSecret         String?
   /// Superseded — see mfaEnabled's own comment just above.
-  mfaEnrolledAt DateTime?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  mfaEnrolledAt     DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
-  tenant   Tenant?   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant           Tenant?           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   mfaRecoveryCodes MfaRecoveryCode[]
-  mfaEmailOtps MfaEmailOtp[]
-  customer Customer? @relation("CustomerUser")
+  mfaEmailOtps     MfaEmailOtp[]
+  customer         Customer?         @relation("CustomerUser")
 
-  notifications                 Notification[]
-  itemsReceived                 ShipmentItem[] // items this user marked received (ShipmentItem.receivedByUserId)
-  itemsLastInspected            ShipmentItem[]         @relation("ShipmentItemLastInspectedBy") // items this user most recently inspected (denormalized convenience only — see ItemInspection for history)
-  itemInspections               ItemInspection[] // full inspection history this user performed
-  pickupDeliveryRecordsHandled  PickupDeliveryRecord[] @relation("PickupDeliveryHandledBy") // handoffs this user personally performed
-  pickupDeliveryRecordsAsDriver PickupDeliveryRecord[] @relation("PickupDeliveryDriver") // deliveries this user drove/couriered (unused until Delivery milestone)
-  trackingEventsCreated         TrackingEvent[] // audit trail rows this user is the actor for
-  containerItemsLoaded          ContainerItem[]        @relation("ContainerItemLoadedBy")
-  containerItemsRemoved         ContainerItem[]        @relation("ContainerItemRemovedBy")
-  containersFinalized           Container[]
-  manifestsFinalized            Manifest[]             @relation("ManifestFinalizedBy")
-  manifestsDeparted             Manifest[]             @relation("ManifestDepartedBy")
-  manifestsArrived              Manifest[]             @relation("ManifestArrivedBy")
-  manifestItemsAdded            ManifestItem[]         @relation("ManifestItemAddedBy")
-  manifestItemsRemoved          ManifestItem[]         @relation("ManifestItemRemovedBy")
-  documentsUploaded             Document[]             @relation("DocumentUploader") // Stage 3G
-  operationalExceptionsCreated  OperationalException[] // Stage 3H
-  notificationEventsTriggered   NotificationEvent[] // Stage 3H
-  tenantInvitationsSent         TenantInvitation[]
-  platformAuditLogsPerformed    PlatformAuditLog[]
-  accountTokens                 AccountToken[]
-  tenantAuditLogsPerformed      TenantAuditLog[]       @relation("TenantAuditLogActor")
-  tenantAuditLogsAbout          TenantAuditLog[]       @relation("TenantAuditLogTarget")
+  notifications                   Notification[]
+  itemsReceived                   ShipmentItem[] // items this user marked received (ShipmentItem.receivedByUserId)
+  itemsLastInspected              ShipmentItem[]            @relation("ShipmentItemLastInspectedBy") // items this user most recently inspected (denormalized convenience only — see ItemInspection for history)
+  itemInspections                 ItemInspection[] // full inspection history this user performed
+  pickupDeliveryRecordsHandled    PickupDeliveryRecord[]    @relation("PickupDeliveryHandledBy") // handoffs this user personally performed
+  pickupDeliveryRecordsAsDriver   PickupDeliveryRecord[]    @relation("PickupDeliveryDriver") // deliveries this user drove/couriered (unused until Delivery milestone)
+  trackingEventsCreated           TrackingEvent[] // audit trail rows this user is the actor for
+  containerItemsLoaded            ContainerItem[]           @relation("ContainerItemLoadedBy")
+  containerItemsRemoved           ContainerItem[]           @relation("ContainerItemRemovedBy")
+  containersFinalized             Container[]
+  manifestsFinalized              Manifest[]                @relation("ManifestFinalizedBy")
+  manifestsDeparted               Manifest[]                @relation("ManifestDepartedBy")
+  manifestsArrived                Manifest[]                @relation("ManifestArrivedBy")
+  manifestItemsAdded              ManifestItem[]            @relation("ManifestItemAddedBy")
+  manifestItemsRemoved            ManifestItem[]            @relation("ManifestItemRemovedBy")
+  documentsUploaded               Document[]                @relation("DocumentUploader") // Stage 3G
+  operationalExceptionsCreated    OperationalException[] // Stage 3H
+  notificationEventsTriggered     NotificationEvent[] // Stage 3H
+  tenantInvitationsSent           TenantInvitation[]
+  platformAuditLogsPerformed      PlatformAuditLog[]
+  accountTokens                   AccountToken[]
+  tenantAuditLogsPerformed        TenantAuditLog[]          @relation("TenantAuditLogActor")
+  tenantAuditLogsAbout            TenantAuditLog[]          @relation("TenantAuditLogTarget")
+  receivingRecordsReceived        ReceivingRecord[]         @relation("ReceivingRecordReceivedBy")
+  consolidationAllocationsCreated ConsolidationAllocation[] @relation("ConsolidationAllocationCreatedBy")
+  customersArchived               Customer[]                @relation("CustomerArchivedBy")
 
   // Owner-managed staff administration (2026-10): the previous
   // unconditional @@unique([tenantId, email]) is replaced by a PARTIAL
@@ -927,28 +965,28 @@ model MfaEmailOtp {
 /// A customer (shipper) belonging to a tenant. May optionally have a
 /// linked User account for portal access.
 model Customer {
-  id               String   @id @default(cuid())
-  tenantId         String
-  customerNumber   String
-  firstName        String
-  lastName         String
-  email            String
-  phone            String?
-  userId           String?  @unique
+  id                String    @id @default(cuid())
+  tenantId          String
+  customerNumber    String
+  firstName         String
+  lastName          String
+  email             String
+  phone             String?
+  userId            String?   @unique
   /// Stage 3H: per-channel notification opt-in. Email defaults on (matches
   /// how every business in this domain already communicates); SMS and
   /// WhatsApp default OFF — both are opt-in by design (WhatsApp Business
   /// Platform policy requires demonstrable opt-in for business-initiated
   /// messages outside a customer-started session; SMS carries a real cost
   /// per message and the same "ask, don't assume" posture applies).
-  notifyByEmail    Boolean  @default(true)
-  notifyBySms      Boolean  @default(false)
-  notifyByWhatsapp Boolean  @default(false)
+  notifyByEmail     Boolean   @default(true)
+  notifyBySms       Boolean   @default(false)
+  notifyByWhatsapp  Boolean   @default(false)
   /// E.164-formatted (e.g. "+233201234567") — deliberately separate from
   /// the general `phone` field above, since a WhatsApp send target must be
   /// the specific number the customer opted in with, not just "whatever
   /// phone number happens to be on file."
-  whatsappPhone    String?
+  whatsappPhone     String?
   /// SMS/Twilio A2P Phase 1: affirmative consent, deliberately distinct
   /// from `notifyBySms` above. `notifyBySms` is only ever the operative
   /// on/off switch NotificationsService checks at send time; it must never
@@ -974,24 +1012,39 @@ model Customer {
   /// this tenant's own staff/customer-facing views only. The actual
   /// cross-tenant enforcement gate is SmsOptOut below, never this field.
   smsOptOutAt       DateTime?
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  /// Customer Management Phase 3: archived = not null. Mirrors the
+  /// User.isActive/removedAt precedent, but a Customer only needs the
+  /// reversible concept — there is no separate "temporarily disabled"
+  /// state — so a single nullable timestamp suffices rather than two
+  /// columns. Nullable so every pre-existing Customer row remains valid
+  /// with zero backfill. Archived customers keep every shipment/payment/
+  /// invoice/warehouse/audit relation intact; they are only excluded from
+  /// the default customer list query (see CustomersService.findAll).
+  archivedAt        DateTime?
+  archivedByUserId  String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
-  tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  user          User?          @relation("CustomerUser", fields: [userId], references: [id], onDelete: SetNull)
-  addresses     Address[]
-  shipments     Shipment[]
-  quotes        Quote[]
-  invoices      Invoice[]
-  payments      Payment[]
-  documents     Document[]
-  notifications Notification[]
+  tenant           Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user             User?                     @relation("CustomerUser", fields: [userId], references: [id], onDelete: SetNull)
+  archivedByUser   User?                     @relation("CustomerArchivedBy", fields: [archivedByUserId], references: [id], onDelete: SetNull)
+  addresses        Address[]
+  shipments        Shipment[]
+  quotes           Quote[]
+  invoices         Invoice[]
+  payments         Payment[]
+  documents        Document[]
+  notifications    Notification[]
   preRegistrations ShipmentPreRegistration[]
+  receivingRecords ReceivingRecord[]
 
   @@unique([tenantId, customerNumber])
   @@index([tenantId])
   /// Stage 4: customer-growth-over-time analytics group by tenantId+createdAt.
   @@index([tenantId, createdAt])
+  /// Customer Management Phase 3: keeps the default (archivedAt: null) list
+  /// query and the `?archived=true` filter both sargable.
+  @@index([tenantId, archivedAt])
   /// SMS/Twilio A2P Phase 1: the inbound Twilio webhook looks up every
   /// Customer row across every tenant that shares an inbound STOP's phone
   /// number (see SmsOptOut's own doc comment for why this must be
@@ -1104,6 +1157,9 @@ model Warehouse {
   containers            Container[]
   /// Manifests originating from this warehouse (Milestone 3E).
   manifests             Manifest[]
+  /// Warehouse Receiving Phase 1: incoming deliveries physically received
+  /// at this warehouse, independent of any Shipment.
+  receivingRecords      ReceivingRecord[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -1139,6 +1195,108 @@ model Route {
 
   @@index([tenantId])
   @@map("routes")
+}
+
+// ==========================================================================
+// WAREHOUSE RECEIVING & PACKAGE CONSOLIDATION
+// ==========================================================================
+
+/// Warehouse Receiving Phase 1: a package physically dropped off or
+/// arriving via an external carrier (UPS/USPS/FedEx/DHL) BEFORE it has been
+/// consolidated into a customer's own outbound Shipment. Deliberately NOT a
+/// Shipment and NOT a ShipmentItem — same reasoning as
+/// ShipmentPreRegistration's own doc comment: minting a Shipment the
+/// instant a package shows up would force an official tracking
+/// number/label before staff know how many of a customer's packages will
+/// end up boxed together. `internalReference` lives in its own namespace
+/// (TenantSettings.receivingRefPrefix, default "RCV") for the same reason
+/// ShipmentPreRegistration.referenceNumber does.
+///
+/// `allocatedQuantity` is a denormalized running total, written only by
+/// ConsolidationService inside the same transaction as each
+/// ConsolidationAllocation row it creates — never set directly anywhere
+/// else. `status` is likewise denormalized from allocatedQuantity vs
+/// quantity, recomputed every time allocatedQuantity changes.
+///
+/// Duplicate carrierTrackingNumber values are NOT a DB constraint —
+/// legitimate split deliveries can legitimately reuse the same carrier
+/// tracking number for multiple distinct physical pieces. The guard is
+/// application-level (see ReceivingService.create), with an explicit
+/// override instead of a hard block.
+model ReceivingRecord {
+  id          String                @id @default(cuid())
+  tenantId    String
+  customerId  String
+  warehouseId String
+  status      ReceivingRecordStatus @default(AWAITING_CONSOLIDATION)
+
+  carrier               ReceivingCarrier
+  /// Required only when carrier = OTHER — enforced at the DTO layer.
+  carrierOther          String?
+  carrierTrackingNumber String?
+
+  description String?
+  quantity    Int     @default(1)
+
+  /// Running total already allocated into ConsolidationAllocation rows —
+  /// see this model's own doc comment above. Never greater than quantity.
+  allocatedQuantity Int @default(0)
+
+  receivedAt       DateTime @default(now())
+  receivedByUserId String?
+  notes            String?
+
+  /// Opaque, tenant-scoped internal reference — see this model's own doc
+  /// comment above. Never a substitute for a real tracking number.
+  internalReference String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant         Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customer       Customer                  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  warehouse      Warehouse                 @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+  receivedByUser User?                     @relation("ReceivingRecordReceivedBy", fields: [receivedByUserId], references: [id], onDelete: SetNull)
+  /// Optional package photograph(s) — reuses the existing Document model
+  /// and StorageModule exactly like shipment/customer photos do (see
+  /// DocumentsService.uploadForReceivingRecord).
+  photos         Document[]
+  allocations    ConsolidationAllocation[]
+
+  @@unique([tenantId, internalReference])
+  @@index([tenantId])
+  @@index([tenantId, status])
+  @@index([customerId])
+  @@index([tenantId, carrier, carrierTrackingNumber])
+  @@map("receiving_records")
+}
+
+/// Package Consolidation Phase 2: records that `allocatedQuantity` units of
+/// a ReceivingRecord were packed into one specific ShipmentItem (one
+/// "box"). Acts as a many-to-many join — one ReceivingRecord may be split
+/// across several boxes, one box may contain pieces of several
+/// ReceivingRecords — and is the append-only traceability history behind
+/// ReceivingRecord.allocatedQuantity, the authoritative running total.
+/// Never updated after creation, matching the append-only posture of
+/// ItemInspection/PickupDeliveryRecord elsewhere in this schema.
+model ConsolidationAllocation {
+  id                String   @id @default(cuid())
+  tenantId          String
+  receivingRecordId String
+  shipmentItemId    String
+  allocatedQuantity Int
+  createdAt         DateTime @default(now())
+  createdByUserId   String?
+
+  tenant          Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  receivingRecord ReceivingRecord @relation(fields: [receivingRecordId], references: [id], onDelete: Cascade)
+  shipmentItem    ShipmentItem    @relation(fields: [shipmentItemId], references: [id], onDelete: Cascade)
+  createdByUser   User?           @relation("ConsolidationAllocationCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@index([receivingRecordId])
+  @@index([shipmentItemId])
+  @@map("consolidation_allocations")
 }
 
 // ==========================================================================
@@ -1190,18 +1348,18 @@ model Shipment {
   /// the real handoff moment (may differ from the person named here) —
   /// this field is only ever a same-tenant UX default for that screen, never
   /// overwritten by it and never a substitute for it.
-  recipientName          String?
-  recipientPhone         String?
-  recipientEmail         String?
-  recipientAddressLine1  String?
-  recipientAddressLine2  String?
-  recipientCity          String?
-  recipientState         String?
-  recipientCountry       String?
-  recipientPostalCode    String?
+  recipientName         String?
+  recipientPhone        String?
+  recipientEmail        String?
+  recipientAddressLine1 String?
+  recipientAddressLine2 String?
+  recipientCity         String?
+  recipientState        String?
+  recipientCountry      String?
+  recipientPostalCode   String?
 
-  createdAt              DateTime       @default(now())
-  updatedAt              DateTime       @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   tenant                Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   customer              Customer               @relation(fields: [customerId], references: [id], onDelete: Cascade)
@@ -1296,23 +1454,28 @@ model ShipmentItem {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  tenant                Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  shipment              Shipment               @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
-  vehicleDetails        VehicleDetails?
-  currentWarehouse      Warehouse?             @relation(fields: [currentWarehouseId], references: [id], onDelete: SetNull)
-  receivedByUser        User?                  @relation(fields: [receivedByUserId], references: [id], onDelete: SetNull)
-  lastInspectedByUser   User?                  @relation("ShipmentItemLastInspectedBy", fields: [lastInspectedByUserId], references: [id], onDelete: SetNull)
-  trackingEvents        TrackingEvent[]
-  containerItems        ContainerItem[]
-  manifestItems         ManifestItem[]
+  tenant                   Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  shipment                 Shipment                  @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+  vehicleDetails           VehicleDetails?
+  currentWarehouse         Warehouse?                @relation(fields: [currentWarehouseId], references: [id], onDelete: SetNull)
+  receivedByUser           User?                     @relation(fields: [receivedByUserId], references: [id], onDelete: SetNull)
+  lastInspectedByUser      User?                     @relation("ShipmentItemLastInspectedBy", fields: [lastInspectedByUserId], references: [id], onDelete: SetNull)
+  trackingEvents           TrackingEvent[]
+  containerItems           ContainerItem[]
+  manifestItems            ManifestItem[]
   /// Full append-only inspection history (Milestone 3C). Ordered by
   /// inspectedAt for "most recent" reads; never updated or deleted, so
   /// reinspection always adds a new row instead of overwriting one.
-  inspections           ItemInspection[]
+  inspections              ItemInspection[]
   /// Full pickup/delivery handoff history (Customer Pickup milestone).
   /// Ordered by handledAt for "most recent" reads; never updated or
   /// deleted — same append-only posture as `inspections` above.
-  pickupDeliveryRecords PickupDeliveryRecord[]
+  pickupDeliveryRecords    PickupDeliveryRecord[]
+  /// Package Consolidation Phase 2: which ReceivingRecord(s) (and how much
+  /// of each) were packed into this item/box — see ConsolidationAllocation's
+  /// own doc comment. Empty for an item created via the normal New Shipment
+  /// or Quick Receive flow (never consolidated from receiving records).
+  consolidationAllocations ConsolidationAllocation[]
 
   @@unique([shipmentId, sequenceNumber])
   @@unique([tenantId, itemCode])
@@ -2016,6 +2179,10 @@ model Document {
   tenantId          String
   customerId        String?
   shipmentId        String?
+  /// Warehouse Receiving Phase 1: set when this document is a receiving
+  /// photo, following the exact same "owner FK" convention as customerId/
+  /// shipmentId above (see DocumentsService.uploadForReceivingRecord).
+  receivingRecordId String?
   type              DocumentType
   fileName          String
   fileUrl           String
@@ -2035,12 +2202,14 @@ model Document {
   tenant             Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   customer           Customer?           @relation(fields: [customerId], references: [id], onDelete: SetNull)
   shipment           Shipment?           @relation(fields: [shipmentId], references: [id], onDelete: SetNull)
+  receivingRecord    ReceivingRecord?    @relation(fields: [receivingRecordId], references: [id], onDelete: SetNull)
   uploadedByUser     User?               @relation("DocumentUploader", fields: [uploadedByUserId], references: [id], onDelete: SetNull)
   notificationEvents NotificationEvent[]
 
   @@index([tenantId])
   @@index([shipmentId])
   @@index([customerId])
+  @@index([receivingRecordId])
   @@map("documents")
 }
 

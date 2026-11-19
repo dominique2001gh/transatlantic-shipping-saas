@@ -17,7 +17,21 @@ export type TenantAuditAction =
   // Owner-managed staff administration (2026-10):
   | 'INVITATION_REVOKED'
   | 'STAFF_REMOVED'
-  | 'STAFF_PASSWORD_RESET_TRIGGERED';
+  | 'STAFF_PASSWORD_RESET_TRIGGERED'
+  // Warehouse Receiving Phase 1:
+  | 'RECEIVING_RECORD_CREATED'
+  | 'RECEIVING_RECORD_CORRECTED'
+  | 'RECEIVING_RECORD_DUPLICATE_OVERRIDDEN'
+  | 'RECEIVING_RECORD_CANCELLED'
+  // Package Consolidation Phase 2:
+  | 'CONSOLIDATION_CREATED'
+  // Customer Management Phase 3:
+  | 'CUSTOMER_UPDATED'
+  | 'CUSTOMER_ARCHIVED'
+  | 'CUSTOMER_RESTORED'
+  | 'CUSTOMER_DELETED'
+  // Shipment Editing Phase 4:
+  | 'SHIPMENT_UPDATED';
 
 export interface TenantAuditLogInput {
   tenantId: string;

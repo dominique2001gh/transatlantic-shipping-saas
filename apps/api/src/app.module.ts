@@ -28,6 +28,8 @@ import { PlatformSmsConsentModule } from './platform-sms-consent/platform-sms-co
 import { PreRegistrationsModule } from './pre-registrations/pre-registrations.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { PublicAiAgentModule } from './public-ai-agent/public-ai-agent.module';
+import { ReceivingModule } from './receiving/receiving.module';
+import { ConsolidationModule } from './consolidation/consolidation.module';
 import { SaasAnalyticsModule } from './saas-analytics/saas-analytics.module';
 import { SaasPlansModule } from './saas-plans/saas-plans.module';
 import { ShipmentsModule } from './shipments/shipments.module';
@@ -55,6 +57,8 @@ import { WebhooksModule } from './webhooks/webhooks.module';
     TenantsModule,
     CustomersModule,
     ShipmentsModule,
+    ReceivingModule,
+    ConsolidationModule,
     WarehouseModule,
     ContainersModule,
     ManifestsModule,

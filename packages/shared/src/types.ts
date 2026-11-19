@@ -19,6 +19,8 @@ import type {
   PaymentStatus,
   PlatformLeadSource,
   PlatformLeadStatus,
+  ReceivingCarrier,
+  ReceivingRecordStatus,
   SaasPlanType,
   SetupFeeStatus,
   ShipmentItemCondition,
@@ -174,6 +176,9 @@ export interface CustomerSummary {
   lastName: string;
   email: string;
   phone: string | null;
+  /** Customer Management Phase 3: archived = not null — see Customer's own doc comment in schema.prisma. */
+  archivedAt: string | null;
+  archivedByUserId: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -915,6 +920,48 @@ export interface CreateCheckoutSessionResponse {
  * GET /documents/:id/download, which resolves the file after its own
  * ownership check, not from a URL handed to the client in this shape.
  */
+// ==========================================================================
+// WAREHOUSE RECEIVING & PACKAGE CONSOLIDATION
+// (Warehouse Receiving Phase 1 / Package Consolidation Phase 2)
+// ==========================================================================
+
+export interface ReceivingRecordSummary {
+  id: string;
+  tenantId: string;
+  customerId: string;
+  /** Display-only, joined from Customer. */
+  customerName: string | null;
+  warehouseId: string;
+  /** Display-only, joined from Warehouse. */
+  warehouseName: string | null;
+  status: ReceivingRecordStatus;
+  carrier: ReceivingCarrier;
+  carrierOther: string | null;
+  carrierTrackingNumber: string | null;
+  description: string | null;
+  quantity: number;
+  /** Running total already allocated into ConsolidationAllocation rows — see ReceivingRecord's own doc comment in schema.prisma. */
+  allocatedQuantity: number;
+  receivedAt: string;
+  receivedByUserId: string | null;
+  /** Display-only, joined from User — null if receivedByUserId is null. */
+  receivedByName: string | null;
+  notes: string | null;
+  internalReference: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Traces which ReceivingRecord(s) (and how much of each) fed one consolidated ShipmentItem ("box") — see ConsolidationAllocation's own doc comment in schema.prisma. */
+export interface ConsolidationAllocationSummary {
+  id: string;
+  receivingRecordId: string;
+  shipmentItemId: string;
+  allocatedQuantity: number;
+  createdAt: string;
+  createdByUserId: string | null;
+}
+
 export interface DocumentSummary {
   id: string;
   tenantId: string;

@@ -1,5 +1,5 @@
 import { DimensionUnit, ShipmentItemCondition, ShipmentItemType, WeightUnit } from '@transatlantic/shared';
-import { IsEnum, IsInt, IsNumber, IsOptional, IsString, Min } from 'class-validator';
+import { IsBoolean, IsEnum, IsInt, IsNumber, IsOptional, IsString, Min, MinLength } from 'class-validator';
 
 /**
  * Descriptive/physical attribute updates only — deliberately excludes
@@ -60,4 +60,15 @@ export class UpdateShipmentItemDto {
   @IsOptional()
   @IsString()
   externalTrackingNumber?: string;
+
+  /** Shipment Editing Phase 4 — see UpdateShipmentDto's identical field. */
+  @IsOptional()
+  @IsBoolean()
+  confirmLabelRegeneration?: boolean;
+
+  /** Shipment Editing Phase 4 — see UpdateShipmentDto's identical field. */
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  reason?: string;
 }

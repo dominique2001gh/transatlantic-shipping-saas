@@ -1,7 +1,7 @@
-import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { EntitlementFeature } from '@prisma/client';
 import type { AuthenticatedUser } from '@transatlantic/shared';
-import { CUSTOMER_VIEW_ROLES, OPERATIONS_ROLES } from '@transatlantic/shared';
+import { CUSTOMER_VIEW_ROLES, MANAGER_UP_ROLES, OPERATIONS_ROLES } from '@transatlantic/shared';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { RequireEntitlement } from '../common/decorators/require-entitlement.decorator';
 import { RequirePermission } from '../common/decorators/require-permission.decorator';
@@ -18,9 +18,16 @@ import { UpdateCustomerDto } from './dto/update-customer.dto';
  * explicitly part of FINANCE's remit ("customers plus invoices, payments,
  * financial reporting"), so FINANCE can look up whose invoice it's
  * handling, but doesn't create/edit customer profiles itself.
+ *
+ * Customer Management Phase 3: archive/restore/delete are deliberately
+ * narrower than ordinary edits — MANAGER_UP_ROLES (OWNER/MANAGER only),
+ * per this feature's own spec requirement, not OPERATIONS_ROLES. STAFF
+ * may create and edit customers but may not archive, restore, or delete
+ * one.
  */
 const MANAGE_ROLES = OPERATIONS_ROLES;
 const VIEW_ROLES = CUSTOMER_VIEW_ROLES;
+const ARCHIVE_ROLES = MANAGER_UP_ROLES;
 
 @Controller('customers')
 @RequireEntitlement(EntitlementFeature.OPERATIONS_SOFTWARE)
@@ -30,8 +37,12 @@ export class CustomersController {
   @Get()
   @Roles(...VIEW_ROLES)
   @RequirePermission('customers.view')
-  findAll(@CurrentUser() user: AuthenticatedUser, @Query('search') search?: string) {
-    return this.customersService.findAll(requireTenantId(user.tenantId), search);
+  findAll(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query('search') search?: string,
+    @Query('archived') archived?: string,
+  ) {
+    return this.customersService.findAll(requireTenantId(user.tenantId), search, archived === 'true');
   }
 
   @Get(':id')
@@ -56,6 +67,27 @@ export class CustomersController {
     @Param('id') id: string,
     @Body() dto: UpdateCustomerDto,
   ) {
-    return this.customersService.update(requireTenantId(user.tenantId), id, dto);
+    return this.customersService.update(requireTenantId(user.tenantId), user.id, id, dto);
+  }
+
+  @Post(':id/archive')
+  @Roles(...ARCHIVE_ROLES)
+  @RequirePermission('customers.archive')
+  archive(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+    return this.customersService.archive(requireTenantId(user.tenantId), user.id, id);
+  }
+
+  @Post(':id/restore')
+  @Roles(...ARCHIVE_ROLES)
+  @RequirePermission('customers.archive')
+  restore(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+    return this.customersService.restore(requireTenantId(user.tenantId), user.id, id);
+  }
+
+  @Delete(':id')
+  @Roles(...ARCHIVE_ROLES)
+  @RequirePermission('customers.archive')
+  remove(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+    return this.customersService.remove(requireTenantId(user.tenantId), user.id, id);
   }
 }

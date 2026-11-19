@@ -25,8 +25,11 @@ export interface DuplicateCustomerErrorBody {
 
 export type UpdateCustomerInput = Partial<CreateCustomerInput>;
 
-export function listCustomers(search?: string): Promise<CustomerSummary[]> {
-  const qs = search ? `?search=${encodeURIComponent(search)}` : '';
+export function listCustomers(search?: string, archived?: boolean): Promise<CustomerSummary[]> {
+  const params = new URLSearchParams();
+  if (search) params.set('search', search);
+  if (archived) params.set('archived', 'true');
+  const qs = params.toString() ? `?${params.toString()}` : '';
   return apiFetch<CustomerSummary[]>(`/customers${qs}`, { token: authToken() });
 }
 
@@ -48,4 +51,22 @@ export function updateCustomer(id: string, input: UpdateCustomerInput): Promise<
     body: JSON.stringify(input),
     token: authToken(),
   });
+}
+
+export function archiveCustomer(id: string): Promise<CustomerSummary> {
+  return apiFetch<CustomerSummary>(`/customers/${id}/archive`, { method: 'POST', token: authToken() });
+}
+
+export function restoreCustomer(id: string): Promise<CustomerSummary> {
+  return apiFetch<CustomerSummary>(`/customers/${id}/restore`, { method: 'POST', token: authToken() });
+}
+
+/** Shape of the 409 response body from CustomersService.remove's linked-history guard — read via ApiError.details. */
+export interface CustomerDeleteGuardErrorBody {
+  message: string;
+  linkedCounts: { shipments: number; receivingRecords: number; invoices: number; payments: number; documents: number };
+}
+
+export function deleteCustomer(id: string): Promise<void> {
+  return apiFetch<void>(`/customers/${id}`, { method: 'DELETE', token: authToken() });
 }

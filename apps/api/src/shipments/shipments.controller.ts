@@ -75,6 +75,14 @@ export class ShipmentsController {
     return this.shipmentsService.createQuickReceive(requireTenantId(user.tenantId), user.id, dto);
   }
 
+  // Shipment Editing Phase 4: same route-level gate as every other route
+  // on this controller — OPERATIONS_ROLES + 'shipments.manage' — so STAFF
+  // keeps exactly the access it already had before this feature existed.
+  // The tier-dependent OWNER/MANAGER-only restriction (LOADED and beyond)
+  // is enforced inside ShipmentsService.update itself — see
+  // resolveEditTier's own doc comment for why that can't be expressed as
+  // static route metadata (it depends on the resource's own current
+  // status, not just the caller's role).
   @Patch(':id')
   @Roles(...OPERATIONS_ROLES)
   @RequirePermission('shipments.manage')
@@ -83,7 +91,7 @@ export class ShipmentsController {
     @Param('id') id: string,
     @Body() dto: UpdateShipmentDto,
   ) {
-    return this.shipmentsService.update(requireTenantId(user.tenantId), id, dto);
+    return this.shipmentsService.update(requireTenantId(user.tenantId), user.id, user.role, id, dto);
   }
 
   @Post(':id/items')
@@ -97,6 +105,7 @@ export class ShipmentsController {
     return this.shipmentsService.addItem(requireTenantId(user.tenantId), user.id, shipmentId, dto);
   }
 
+  // Shipment Editing Phase 4 — same route-level gate as PATCH :id above.
   @Patch(':id/items/:itemId')
   @Roles(...OPERATIONS_ROLES)
   @RequirePermission('shipments.manage')
@@ -106,7 +115,7 @@ export class ShipmentsController {
     @Param('itemId') itemId: string,
     @Body() dto: UpdateShipmentItemDto,
   ) {
-    return this.shipmentsService.updateItem(requireTenantId(user.tenantId), shipmentId, itemId, dto);
+    return this.shipmentsService.updateItem(requireTenantId(user.tenantId), user.id, user.role, shipmentId, itemId, dto);
   }
 
   @Get(':id/tracking-events')
