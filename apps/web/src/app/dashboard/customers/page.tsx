@@ -11,12 +11,13 @@ import { listCustomers } from '@/lib/customers';
 export default function CustomersPage() {
   const [customers, setCustomers] = useState<CustomerSummary[] | null>(null);
   const [search, setSearch] = useState('');
+  const [showArchived, setShowArchived] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [forbidden, setForbidden] = useState(false);
 
   useEffect(() => {
     let active = true;
-    listCustomers(search || undefined)
+    listCustomers(search || undefined, showArchived)
       .then((data) => {
         if (active) setCustomers(data);
       })
@@ -32,7 +33,7 @@ export default function CustomersPage() {
     return () => {
       active = false;
     };
-  }, [search]);
+  }, [search, showArchived]);
 
   if (forbidden) {
     return (
@@ -57,7 +58,7 @@ export default function CustomersPage() {
         </Link>
       </div>
 
-      <div className="mt-6">
+      <div className="mt-6 flex flex-wrap items-center gap-4">
         <input
           type="search"
           placeholder="Search by name, email, or customer number…"
@@ -65,6 +66,14 @@ export default function CustomersPage() {
           onChange={(event) => setSearch(event.target.value)}
           className="w-full max-w-sm rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500 sm:w-80"
         />
+        <div className="flex gap-2">
+          <Button variant={!showArchived ? 'primary' : 'secondary'} size="sm" onClick={() => setShowArchived(false)}>
+            Active
+          </Button>
+          <Button variant={showArchived ? 'primary' : 'secondary'} size="sm" onClick={() => setShowArchived(true)}>
+            Archived
+          </Button>
+        </div>
       </div>
 
       <Card className="mt-6 overflow-x-auto p-0">
