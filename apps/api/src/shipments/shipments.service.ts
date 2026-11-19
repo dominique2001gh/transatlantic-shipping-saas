@@ -1,7 +1,8 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { formatItemCode, ShipmentItemType } from '@transatlantic/shared';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { formatItemCode, ShipmentItemType, UserRole } from '@transatlantic/shared';
 import type { Prisma } from '@prisma/client';
 import {
+  InvoiceStatus,
   PreRegistrationStatus,
   ShipmentItemStatus,
   ShipmentStatus,
@@ -9,6 +10,7 @@ import {
   TrackingEventType,
 } from '@prisma/client';
 import { generateTrackingNumber } from '../common/numbering/numbering.util';
+import { writeTenantAuditLog } from '../common/tenant/tenant-audit.util';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateShipmentDto } from './dto/create-shipment.dto';
@@ -34,6 +36,76 @@ const SYSTEM_ONLY_EVENT_TYPES = new Set<TrackingEventType>([
   TrackingEventType.SHIPMENT_CREATED,
   TrackingEventType.ITEM_REGISTERED,
 ]);
+
+/**
+ * Shipment Editing Phase 4: which UpdateShipmentDto/UpdateShipmentItemDto
+ * fields a PATCH may touch, keyed by the shipment's current lifecycle
+ * status — see resolveEditTier's own doc comment for the full tier table.
+ * Field-set membership only; `declaredValue` is additionally blocked at
+ * every tier once a non-DRAFT Invoice exists (checked separately in
+ * update/updateItem, since that's a cross-cutting rule, not a per-tier one).
+ */
+const BROAD_SHIPMENT_FIELDS = [
+  'originLocation',
+  'destinationCountry',
+  'destinationLocation',
+  'originWarehouseId',
+  'destinationWarehouseId',
+  'routeId',
+  'description',
+  'declaredValue',
+  'currency',
+  'recipientName',
+  'recipientPhone',
+  'recipientEmail',
+  'recipientAddressLine1',
+  'recipientAddressLine2',
+  'recipientCity',
+  'recipientState',
+  'recipientCountry',
+  'recipientPostalCode',
+] as const;
+const NARROW_SHIPMENT_FIELDS = ['description', 'declaredValue', 'currency'] as const;
+const MINIMAL_SHIPMENT_FIELDS = ['description'] as const;
+/** Fields whose change is visible on a printed label — see ItemLabel.tsx. */
+const LABEL_AFFECTING_SHIPMENT_FIELDS = ['recipientName', 'recipientPhone', 'destinationCountry', 'destinationLocation'] as const;
+
+const BROAD_ITEM_FIELDS = [
+  'itemType',
+  'description',
+  'quantity',
+  'length',
+  'width',
+  'height',
+  'dimensionUnit',
+  'weight',
+  'weightUnit',
+  'declaredValue',
+  'condition',
+  'externalTrackingCarrier',
+  'externalTrackingNumber',
+] as const;
+const MINIMAL_ITEM_FIELDS = ['description'] as const;
+/** Fields whose change is visible on a printed label — see ItemLabel.tsx. */
+const LABEL_AFFECTING_ITEM_FIELDS = ['itemType', 'description'] as const;
+
+const BROAD_SHIPMENT_FIELD_SET = new Set<string>(BROAD_SHIPMENT_FIELDS);
+const NARROW_SHIPMENT_FIELD_SET = new Set<string>(NARROW_SHIPMENT_FIELDS);
+const MINIMAL_SHIPMENT_FIELD_SET = new Set<string>(MINIMAL_SHIPMENT_FIELDS);
+const BROAD_ITEM_FIELD_SET = new Set<string>(BROAD_ITEM_FIELDS);
+const MINIMAL_ITEM_FIELD_SET = new Set<string>(MINIMAL_ITEM_FIELDS);
+const EMPTY_FIELD_SET = new Set<string>();
+
+interface ShipmentEditTier {
+  allowedShipmentFields: ReadonlySet<string>;
+  allowedItemFields: ReadonlySet<string>;
+  /** LOADED and every stage beyond it — "elevated permission" per this feature's own spec requirement. */
+  requiresOwner: boolean;
+  /** DELIVERED/COMPLETED — a documented correction, per this feature's own spec requirement. */
+  requiresReason: boolean;
+  /** BOOKED only — a label has already been printed from this data. */
+  isLabelLockedTier: boolean;
+}
 
 @Injectable()
 export class ShipmentsService {
@@ -450,12 +522,171 @@ export class ShipmentsService {
     return this.findById(tenantId, shipmentId);
   }
 
-  async update(tenantId: string, id: string, dto: UpdateShipmentDto) {
+  /**
+   * Shipment Editing Phase 4: which fields a PATCH may touch, and under
+   * what extra conditions, depends on the shipment's current lifecycle
+   * status:
+   *   - DRAFT/AWAITING_ITEMS and every stage through CONSOLIDATED: broad
+   *     edit, no extra confirmation (WAREHOUSE_RECEIVED onward is still a
+   *     "correction" in spirit — the audit log records it the same way
+   *     regardless, see `lifecycleTier` in its metadata).
+   *   - BOOKED: same broad field set, but a label has already been
+   *     printed from this data — a change to any LABEL_AFFECTING field
+   *     requires the caller to resubmit with `confirmLabelRegeneration:
+   *     true`, which is the "clear confirmation before changes that
+   *     affect labels" this feature's own spec requires.
+   *   - LOADED: narrows to description/declaredValue/currency only, and
+   *     requires the actor's role to be OWNER specifically — "elevated
+   *     permission" per spec, enforced here rather than via a second
+   *     static @RequirePermission (which can't vary by a resource's own
+   *     current state, only by route).
+   *   - DEPARTED through OUT_FOR_DELIVERY: OWNER only, description only —
+   *     weight/dims/qty/declaredValue are locked because a Manifest
+   *     snapshot has already been taken from this shipment's data.
+   *   - DELIVERED/COMPLETED: OWNER only, description only, and a non-empty
+   *     `reason` is required — "documented corrections" per spec.
+   *   - CANCELLED (and any future status not enumerated here): no edits
+   *     at all, by omission from the switch below.
+   */
+  private resolveEditTier(status: ShipmentStatus): ShipmentEditTier {
+    switch (status) {
+      case ShipmentStatus.DRAFT:
+      case ShipmentStatus.QUOTE_REQUESTED:
+      case ShipmentStatus.AWAITING_ITEMS:
+      case ShipmentStatus.WAREHOUSE_RECEIVED:
+      case ShipmentStatus.PROCESSING:
+      case ShipmentStatus.READY_FOR_CONSOLIDATION:
+      case ShipmentStatus.CONSOLIDATED:
+        return {
+          allowedShipmentFields: BROAD_SHIPMENT_FIELD_SET,
+          allowedItemFields: BROAD_ITEM_FIELD_SET,
+          requiresOwner: false,
+          requiresReason: false,
+          isLabelLockedTier: false,
+        };
+      case ShipmentStatus.BOOKED:
+        return {
+          allowedShipmentFields: BROAD_SHIPMENT_FIELD_SET,
+          allowedItemFields: BROAD_ITEM_FIELD_SET,
+          requiresOwner: false,
+          requiresReason: false,
+          isLabelLockedTier: true,
+        };
+      case ShipmentStatus.LOADED:
+        return {
+          allowedShipmentFields: NARROW_SHIPMENT_FIELD_SET,
+          allowedItemFields: MINIMAL_ITEM_FIELD_SET,
+          requiresOwner: true,
+          requiresReason: false,
+          isLabelLockedTier: false,
+        };
+      case ShipmentStatus.DEPARTED:
+      case ShipmentStatus.IN_TRANSIT:
+      case ShipmentStatus.ARRIVED_DESTINATION:
+      case ShipmentStatus.CUSTOMS_PROCESSING:
+      case ShipmentStatus.CUSTOMS_CLEARED:
+      case ShipmentStatus.READY_FOR_PICKUP:
+      case ShipmentStatus.OUT_FOR_DELIVERY:
+        return {
+          allowedShipmentFields: MINIMAL_SHIPMENT_FIELD_SET,
+          allowedItemFields: MINIMAL_ITEM_FIELD_SET,
+          requiresOwner: true,
+          requiresReason: false,
+          isLabelLockedTier: false,
+        };
+      case ShipmentStatus.DELIVERED:
+      case ShipmentStatus.COMPLETED:
+        return {
+          allowedShipmentFields: MINIMAL_SHIPMENT_FIELD_SET,
+          allowedItemFields: MINIMAL_ITEM_FIELD_SET,
+          requiresOwner: true,
+          requiresReason: true,
+          isLabelLockedTier: false,
+        };
+      default:
+        return {
+          allowedShipmentFields: EMPTY_FIELD_SET,
+          allowedItemFields: EMPTY_FIELD_SET,
+          requiresOwner: true,
+          requiresReason: false,
+          isLabelLockedTier: false,
+        };
+    }
+  }
+
+  /** Blocks a declaredValue change once this shipment has a non-DRAFT invoice — never silently desyncs an amount already billed. */
+  private async assertDeclaredValueEditable(tenantId: string, shipmentId: string): Promise<void> {
+    const billedCount = await this.prisma.invoice.count({
+      where: { tenantId, shipmentId, status: { not: InvoiceStatus.DRAFT } },
+    });
+    if (billedCount > 0) {
+      throw new ConflictException('declaredValue cannot be changed once a non-draft invoice exists for this shipment.');
+    }
+  }
+
+  async update(tenantId: string, actorUserId: string, actorRole: UserRole, id: string, dto: UpdateShipmentDto) {
     const shipment = await this.prisma.shipment.findFirst({ where: { id, tenantId } });
     if (!shipment) {
       throw new NotFoundException('Shipment not found');
     }
-    await this.prisma.shipment.update({ where: { id }, data: dto });
+
+    const { confirmLabelRegeneration, reason, ...patch } = dto;
+    const fields = Object.keys(patch) as (keyof typeof patch)[];
+    if (fields.length === 0) {
+      return this.findById(tenantId, id);
+    }
+
+    const tier = this.resolveEditTier(shipment.status);
+    if (tier.requiresOwner && actorRole !== UserRole.OWNER) {
+      throw new ForbiddenException(`Only an OWNER may edit a shipment in ${shipment.status} status.`);
+    }
+    const disallowed = fields.filter((field) => !tier.allowedShipmentFields.has(field));
+    if (disallowed.length > 0) {
+      throw new BadRequestException(
+        `These fields cannot be edited while this shipment is ${shipment.status}: ${disallowed.join(', ')}`,
+      );
+    }
+    if (tier.requiresReason && !reason?.trim()) {
+      throw new BadRequestException('A reason is required to edit a shipment in this status.');
+    }
+    if (patch.declaredValue !== undefined) {
+      await this.assertDeclaredValueEditable(tenantId, id);
+    }
+    if (tier.isLabelLockedTier && !confirmLabelRegeneration) {
+      const shipmentRecord = shipment as unknown as Record<string, unknown>;
+      const labelFieldsChanged = LABEL_AFFECTING_SHIPMENT_FIELDS.some(
+        (field) => (patch as Record<string, unknown>)[field] !== undefined && (patch as Record<string, unknown>)[field] !== shipmentRecord[field],
+      );
+      if (labelFieldsChanged) {
+        throw new ConflictException(
+          'This change affects the printed label. Re-submit with confirmLabelRegeneration: true to proceed.',
+        );
+      }
+    }
+
+    const shipmentRecord = shipment as unknown as Record<string, unknown>;
+    const before = Object.fromEntries(fields.map((field) => [field, shipmentRecord[field]]));
+
+    await this.prisma.$transaction(async (tx) => {
+      const result = await tx.shipment.update({ where: { id }, data: patch });
+      const resultRecord = result as unknown as Record<string, unknown>;
+      await writeTenantAuditLog(tx, {
+        tenantId,
+        actorUserId,
+        targetUserId: null,
+        action: 'SHIPMENT_UPDATED',
+        metadata: {
+          shipmentId: id,
+          before,
+          after: Object.fromEntries(fields.map((field) => [field, resultRecord[field]])),
+          fields,
+          lifecycleTier: shipment.status,
+          reason: reason ?? null,
+        } as Prisma.InputJsonValue,
+      });
+      return result;
+    });
+
     return this.findById(tenantId, id);
   }
 
@@ -483,14 +714,84 @@ export class ShipmentsService {
     return this.findById(tenantId, shipmentId);
   }
 
-  async updateItem(tenantId: string, shipmentId: string, itemId: string, dto: UpdateShipmentItemDto) {
+  /** Item-level counterpart of update() — gated by the PARENT shipment's lifecycle tier (an item has no status tier of its own for editing purposes). See resolveEditTier's own doc comment. */
+  async updateItem(
+    tenantId: string,
+    actorUserId: string,
+    actorRole: UserRole,
+    shipmentId: string,
+    itemId: string,
+    dto: UpdateShipmentItemDto,
+  ) {
     const item = await this.prisma.shipmentItem.findFirst({
       where: { id: itemId, shipmentId, tenantId },
     });
     if (!item) {
       throw new NotFoundException('Shipment item not found');
     }
-    await this.prisma.shipmentItem.update({ where: { id: itemId }, data: dto });
+    const shipment = await this.prisma.shipment.findFirst({ where: { id: shipmentId, tenantId } });
+    if (!shipment) {
+      throw new NotFoundException('Shipment not found');
+    }
+
+    const { confirmLabelRegeneration, reason, ...patch } = dto;
+    const fields = Object.keys(patch) as (keyof typeof patch)[];
+    if (fields.length === 0) {
+      return this.findById(tenantId, shipmentId);
+    }
+
+    const tier = this.resolveEditTier(shipment.status);
+    if (tier.requiresOwner && actorRole !== UserRole.OWNER) {
+      throw new ForbiddenException(`Only an OWNER may edit a shipment item while its shipment is ${shipment.status}.`);
+    }
+    const disallowed = fields.filter((field) => !tier.allowedItemFields.has(field));
+    if (disallowed.length > 0) {
+      throw new BadRequestException(
+        `These fields cannot be edited while this shipment is ${shipment.status}: ${disallowed.join(', ')}`,
+      );
+    }
+    if (tier.requiresReason && !reason?.trim()) {
+      throw new BadRequestException('A reason is required to edit a shipment item in this status.');
+    }
+    if (patch.declaredValue !== undefined) {
+      await this.assertDeclaredValueEditable(tenantId, shipmentId);
+    }
+    if (tier.isLabelLockedTier && !confirmLabelRegeneration) {
+      const itemRecord = item as unknown as Record<string, unknown>;
+      const labelFieldsChanged = LABEL_AFFECTING_ITEM_FIELDS.some(
+        (field) => (patch as Record<string, unknown>)[field] !== undefined && (patch as Record<string, unknown>)[field] !== itemRecord[field],
+      );
+      if (labelFieldsChanged) {
+        throw new ConflictException(
+          'This change affects the printed label. Re-submit with confirmLabelRegeneration: true to proceed.',
+        );
+      }
+    }
+
+    const itemRecord = item as unknown as Record<string, unknown>;
+    const before = Object.fromEntries(fields.map((field) => [field, itemRecord[field]]));
+
+    await this.prisma.$transaction(async (tx) => {
+      const result = await tx.shipmentItem.update({ where: { id: itemId }, data: patch });
+      const resultRecord = result as unknown as Record<string, unknown>;
+      await writeTenantAuditLog(tx, {
+        tenantId,
+        actorUserId,
+        targetUserId: null,
+        action: 'SHIPMENT_UPDATED',
+        metadata: {
+          shipmentId,
+          shipmentItemId: itemId,
+          before,
+          after: Object.fromEntries(fields.map((field) => [field, resultRecord[field]])),
+          fields,
+          lifecycleTier: shipment.status,
+          reason: reason ?? null,
+        } as Prisma.InputJsonValue,
+      });
+      return result;
+    });
+
     return this.findById(tenantId, shipmentId);
   }
 
