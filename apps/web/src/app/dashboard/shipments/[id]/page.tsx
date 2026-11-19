@@ -4,22 +4,29 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 import type { ShipmentSummary, TrackingEventSummary } from '@transatlantic/shared';
+import { hasPermission } from '@transatlantic/shared';
 import { AddItemForm } from '@/components/dashboard/AddItemForm';
 import { AddTrackingEventForm } from '@/components/dashboard/AddTrackingEventForm';
+import { ShipmentEditForm } from '@/components/dashboard/ShipmentEditForm';
 import { StatusBadge } from '@/components/dashboard/StatusBadge';
 import { TrackingTimeline } from '@/components/dashboard/TrackingTimeline';
+import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { ApiError } from '@/lib/api';
+import { getStoredUser } from '@/lib/auth';
 import { humanizeEnumValue } from '@/lib/format';
 import { getShipment, listTrackingEvents } from '@/lib/shipments';
 
 export default function ShipmentDetailPage() {
   const params = useParams<{ id: string }>();
   const shipmentId = params.id;
+  const currentUser = getStoredUser();
+  const canEditShipment = hasPermission(currentUser, 'shipments.edit');
 
   const [shipment, setShipment] = useState<ShipmentSummary | null>(null);
   const [events, setEvents] = useState<TrackingEventSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
 
   const reload = useCallback(async () => {
     try {
@@ -57,50 +64,70 @@ export default function ShipmentDetailPage() {
             {humanizeEnumValue(shipment.shipmentMode)}
           </p>
         </div>
-        <StatusBadge status={shipment.status} />
+        <div className="flex items-center gap-2">
+          <StatusBadge status={shipment.status} />
+          {canEditShipment && !editing && (
+            <Button variant="secondary" size="sm" onClick={() => setEditing(true)}>
+              Edit
+            </Button>
+          )}
+        </div>
       </div>
 
-      <Card>
-        <dl className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-          <Detail
-            label="Origin"
-            value={[shipment.originLocation, shipment.originCountry].filter(Boolean).join(' · ')}
-          />
-          <Detail
-            label="Destination"
-            value={[shipment.destinationLocation, shipment.destinationCountry].filter(Boolean).join(' · ')}
-          />
-          <Detail
-            label="Items"
-            value={`${shipment.itemCounts?.received ?? 0} of ${shipment.itemCounts?.total ?? 0} received`}
-          />
-        </dl>
-        {shipment.description && <p className="mt-4 text-sm text-slate-600">{shipment.description}</p>}
-      </Card>
+      {editing ? (
+        <ShipmentEditForm
+          shipment={shipment}
+          onSaved={(updated) => {
+            setShipment(updated);
+            setEditing(false);
+          }}
+          onCancel={() => setEditing(false)}
+        />
+      ) : (
+        <>
+          <Card>
+            <dl className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+              <Detail
+                label="Origin"
+                value={[shipment.originLocation, shipment.originCountry].filter(Boolean).join(' · ')}
+              />
+              <Detail
+                label="Destination"
+                value={[shipment.destinationLocation, shipment.destinationCountry].filter(Boolean).join(' · ')}
+              />
+              <Detail
+                label="Items"
+                value={`${shipment.itemCounts?.received ?? 0} of ${shipment.itemCounts?.total ?? 0} received`}
+              />
+            </dl>
+            {shipment.description && <p className="mt-4 text-sm text-slate-600">{shipment.description}</p>}
+          </Card>
 
-      {shipment.recipientName && (
-        <Card>
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Recipient at destination</p>
-          <dl className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-3">
-            <Detail label="Name" value={shipment.recipientName} />
-            <Detail label="Phone" value={shipment.recipientPhone ?? '—'} />
-            <Detail label="Email" value={shipment.recipientEmail ?? '—'} />
-          </dl>
-          {(shipment.recipientAddressLine1 || shipment.recipientCity || shipment.recipientCountry) && (
-            <p className="mt-3 text-sm text-slate-600">
-              {[
-                shipment.recipientAddressLine1,
-                shipment.recipientAddressLine2,
-                shipment.recipientCity,
-                shipment.recipientState,
-                shipment.recipientPostalCode,
-                shipment.recipientCountry,
-              ]
-                .filter(Boolean)
-                .join(', ')}
-            </p>
+          {shipment.recipientName && (
+            <Card>
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Recipient at destination</p>
+              <dl className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-3">
+                <Detail label="Name" value={shipment.recipientName} />
+                <Detail label="Phone" value={shipment.recipientPhone ?? '—'} />
+                <Detail label="Email" value={shipment.recipientEmail ?? '—'} />
+              </dl>
+              {(shipment.recipientAddressLine1 || shipment.recipientCity || shipment.recipientCountry) && (
+                <p className="mt-3 text-sm text-slate-600">
+                  {[
+                    shipment.recipientAddressLine1,
+                    shipment.recipientAddressLine2,
+                    shipment.recipientCity,
+                    shipment.recipientState,
+                    shipment.recipientPostalCode,
+                    shipment.recipientCountry,
+                  ]
+                    .filter(Boolean)
+                    .join(', ')}
+                </p>
+              )}
+            </Card>
           )}
-        </Card>
+        </>
       )}
 
       <section>
