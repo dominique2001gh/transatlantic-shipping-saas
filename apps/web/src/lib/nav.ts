@@ -37,6 +37,7 @@ export const dashboardNavItems: NavItem[] = [
   { label: 'Customers', href: '/dashboard/customers', permission: 'customers.view' },
   { label: 'Shipments', href: '/dashboard/shipments', permission: 'shipments.view' },
   { label: 'Quick Receive', href: '/dashboard/quick-receive', roles: OPERATIONS_ROLES, permission: 'quickreceive.use' },
+  { label: 'Receiving', href: '/dashboard/receiving', roles: OPERATIONS_ROLES, permission: 'receiving.view' },
   { label: 'Warehouse', href: '/dashboard/warehouse', permission: 'warehouse.view' },
   { label: 'Containers', href: '/dashboard/containers', permission: 'containers.view' },
   { label: 'Manifests', href: '/dashboard/manifests', permission: 'manifests.view' },
