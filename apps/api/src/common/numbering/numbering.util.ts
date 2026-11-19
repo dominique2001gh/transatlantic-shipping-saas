@@ -94,3 +94,20 @@ export async function generatePreRegistrationNumber(prisma: PrismaClient, tenant
     settings.preRegistrationNumberSequence,
   );
 }
+
+/**
+ * Warehouse Receiving Phase 1: same prefix+year+sequence shape and atomic-
+ * increment safety as every generator above, but its own dedicated
+ * TenantSettings prefix/sequence pair (default prefix "RCV") — a receiving
+ * reference (e.g. "RCV-2026-000001") must never collide with, or be
+ * mistaken for, an official shipment tracking number or a pre-registration
+ * reference — separate namespaces, separate counters.
+ */
+export async function generateReceivingReference(prisma: PrismaClient, tenantId: string): Promise<string> {
+  const settings = await prisma.tenantSettings.update({
+    where: { tenantId },
+    data: { receivingRefSequence: { increment: 1 } },
+    select: { receivingRefPrefix: true, receivingRefSequence: true },
+  });
+  return formatTrackingNumber(settings.receivingRefPrefix, new Date().getFullYear(), settings.receivingRefSequence);
+}

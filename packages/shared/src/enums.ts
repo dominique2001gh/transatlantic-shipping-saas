@@ -187,6 +187,26 @@ export enum WeightUnit {
   KG = 'KG',
 }
 
+/// Warehouse Receiving Phase 1 — mirrors Prisma's ReceivingCarrier 1:1.
+/// OTHER requires ReceivingRecord.carrierOther to be set (DTO-level).
+export enum ReceivingCarrier {
+  UPS = 'UPS',
+  USPS = 'USPS',
+  FEDEX = 'FEDEX',
+  DHL = 'DHL',
+  OTHER = 'OTHER',
+}
+
+/// Warehouse Receiving / Package Consolidation — mirrors Prisma's
+/// ReceivingRecordStatus 1:1. Denormalized from allocatedQuantity vs
+/// quantity; see ReceivingRecord's own doc comment in schema.prisma.
+export enum ReceivingRecordStatus {
+  AWAITING_CONSOLIDATION = 'AWAITING_CONSOLIDATION',
+  PARTIALLY_CONSOLIDATED = 'PARTIALLY_CONSOLIDATED',
+  FULLY_CONSOLIDATED = 'FULLY_CONSOLIDATED',
+  CANCELLED = 'CANCELLED',
+}
+
 export enum ContainerType {
   TWENTY_FT = 'TWENTY_FT',
   FORTY_FT = 'FORTY_FT',
